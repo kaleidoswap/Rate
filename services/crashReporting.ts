@@ -2,15 +2,12 @@
  * Crash reporting (Sentry), opt-in.
  *
  * Off until the user turns on "Send crash reports" in Settings, and only in
- * builds that carry a DSN (EXPO_PUBLIC_SENTRY_DSN). Reports never carry wallet
- * data: no user, no request bodies, no console or network breadcrumbs, only
- * device and runtime contexts, and every string is scrubbed of keys, seeds,
- * addresses, invoices and identifiers before it leaves the phone. Native
- * crashes are not reported (they bypass the scrubber).
+ * builds that carry a DSN (EXPO_PUBLIC_SENTRY_DSN). JS reports contain fixed
+ * error labels, bundle locations and a few build and OS fields. Native crash
+ * reporting is disabled because its events bypass the JS allowlist.
  */
 import * as Sentry from '@sentry/react-native';
-import type { Breadcrumb, ErrorEvent } from '@sentry/react-native';
-import { wordlist } from '@scure/bip39/wordlists/english.js';
+import type { Breadcrumb, ErrorEvent, StackFrame } from '@sentry/react-native';
 import { CHANNEL } from './features';
 
 // Direct member access: Expo inlines EXPO_PUBLIC_* only in this form.
@@ -19,91 +16,71 @@ const DSN = process.env.EXPO_PUBLIC_SENTRY_DSN;
 /** Whether this build can send crash reports at all. */
 export const CRASH_REPORTING_AVAILABLE = !!DSN;
 
-const REDACTED = '[redacted]';
-const BIP39 = new Set(wordlist);
-const PATTERNS: RegExp[] = [
-  /nostr\+walletconnect:\/\/\S+/gi,
-  /\brgb:[^\s"'<>]+/gi,
-  // Any bech32/bech32m string (addresses, invoices, Nostr keys, LNURL, offers, Spark/Ark/Liquid).
-  /\b[a-z][a-z0-9]{0,30}1[02-9ac-hj-np-z]{20,}\b/gi,
-  // Any long base58 string: legacy addresses, WIF and extended keys.
-  /\b[1-9A-HJ-NP-Za-km-z]{25,}\b/g,
-  /\b(?:0x)?[0-9a-f]{32,}\b/gi,
-  /[\w.+-]+@[\w-]+\.[\w.-]+/g,
-];
-
-/**
- * Words this close together count as one phrase: only separators, brackets and an
- * optional list number ("2.", "#2=", "2:") between them. A bare '.' still ends a run,
- * so sentences of common words are not joined.
- */
-const PHRASE_GAP = /^[\s"'`,;:|()[\]{}#_\/=-]*(?:\d+\.?[\s"'`,;:|()[\]{}#_\/=-]*)?$/;
-/** A run of this many BIP39 words is treated as (part of) a recovery phrase. */
-const PHRASE_MIN_WORDS = 5;
-
-function redactPhrases(text: string): string {
-  const parts: string[] = [];
-  let cursor = 0;
-  let run: { start: number; end: number; words: number } | null = null;
-  const close = () => {
-    if (run && run.words >= PHRASE_MIN_WORDS) {
-      parts.push(text.slice(cursor, run.start), REDACTED);
-      cursor = run.end;
-    }
-    run = null;
-  };
-  for (const match of text.matchAll(/[A-Za-z]+/g)) {
-    const start = match.index ?? 0;
-    const end = start + match[0].length;
-    const isWord = BIP39.has(match[0].toLowerCase());
-    if (run && isWord && PHRASE_GAP.test(text.slice(run.end, start))) {
-      run.end = end;
-      run.words += 1;
-      continue;
-    }
-    close();
-    if (isWord) run = { start, end, words: 1 };
-  }
-  close();
-  parts.push(text.slice(cursor));
-  return parts.join('');
-}
-
-/** Replaces recovery phrases (runs of BIP39 words), then every pattern above. */
-export function scrub(text: string): string {
-  return PATTERNS.reduce((out, pattern) => out.replace(pattern, REDACTED), redactPhrases(text));
-}
-
+const BUNDLE_FILES = new Set(['app:///index.android.bundle', 'app:///main.jsbundle']);
+const JS_ERROR_TYPES = new Set([
+  'Error', 'AggregateError', 'EvalError', 'RangeError', 'ReferenceError', 'SyntaxError', 'TypeError', 'URIError',
+]);
 const KEPT_BREADCRUMBS = new Set(['navigation', 'app.lifecycle', 'device.orientation', 'app.memory']);
+const OS_NAMES = new Set(['Android', 'iOS']);
+const RELEASE = /^com\.kaleidoswap\.wallet@\d{1,4}\.\d{1,4}\.\d{1,4}\+\d{1,12}$/;
+const BUILD = /^\d{1,12}$/;
+const OS_VERSION = /^\d{1,3}(?:\.\d{1,3}){0,3}$/;
+const EVENT_ID = /^[0-9a-f]{32}$/;
+const DEBUG_ID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 
 export function filterBreadcrumb(breadcrumb: Breadcrumb): Breadcrumb | null {
-  if (!breadcrumb.category || !KEPT_BREADCRUMBS.has(breadcrumb.category)) return null;
-  return { ...breadcrumb, message: breadcrumb.message ? scrub(breadcrumb.message) : undefined, data: undefined };
+  const { category, timestamp } = breadcrumb;
+  if (!category || !KEPT_BREADCRUMBS.has(category)) return null;
+  return { category, timestamp: Number.isFinite(timestamp) ? timestamp : undefined };
 }
 
-/** Device and runtime facts only; any other context can carry app data. */
-const KEPT_CONTEXTS = new Set(['app', 'device', 'os', 'runtime', 'culture']);
+function bundleFrame({ filename, lineno, colno }: StackFrame): StackFrame | null {
+  if (!filename || !BUNDLE_FILES.has(filename) ||
+      typeof lineno !== 'number' || !Number.isSafeInteger(lineno) || lineno < 1) return null;
+  return {
+    filename,
+    lineno,
+    colno: typeof colno === 'number' && Number.isSafeInteger(colno) && colno >= 0 ? colno : undefined,
+  };
+}
 
+/** Rebuild the event from a fixed schema. Error prose can contain payment amounts or names. */
 export function scrubEvent(event: ErrorEvent): ErrorEvent {
-  delete event.user;
-  delete event.request;
-  delete event.extra;
-  delete event.server_name;
-  if (event.contexts) {
-    for (const key of Object.keys(event.contexts)) if (!KEPT_CONTEXTS.has(key)) delete event.contexts[key];
-  }
-  if (event.tags) {
-    for (const [key, value] of Object.entries(event.tags)) event.tags[key] = typeof value === 'string' ? scrub(value) : value;
-  }
-  if (event.message) event.message = scrub(event.message);
-  for (const exception of event.exception?.values ?? []) {
-    if (exception.value) exception.value = scrub(exception.value);
-    for (const frame of exception.stacktrace?.frames ?? []) delete frame.vars;
-  }
-  event.breadcrumbs = event.breadcrumbs
-    ?.map(filterBreadcrumb)
-    .filter((b): b is Breadcrumb => b !== null);
-  return event;
+  const values = event.exception?.values?.map(exception => {
+    const frames = exception.stacktrace?.frames?.map(bundleFrame).filter((frame): frame is StackFrame => frame !== null);
+    return {
+      type: exception.type && JS_ERROR_TYPES.has(exception.type) ? exception.type : 'Error',
+      value: 'JavaScript exception',
+      stacktrace: frames?.length ? { frames } : undefined,
+      mechanism: typeof exception.mechanism?.handled === 'boolean'
+        ? { type: 'generic', handled: exception.mechanism.handled }
+        : undefined,
+    };
+  });
+  const images = event.debug_meta?.images?.flatMap(image =>
+    image.type === 'sourcemap' && BUNDLE_FILES.has(image.code_file) && DEBUG_ID.test(image.debug_id)
+      ? [{ type: image.type, code_file: image.code_file, debug_id: image.debug_id }]
+      : [],
+  );
+  const os = event.contexts?.os;
+  return {
+    type: undefined,
+    event_id: EVENT_ID.test(event.event_id ?? '') ? event.event_id : undefined,
+    timestamp: Number.isFinite(event.timestamp) ? event.timestamp : undefined,
+    platform: 'javascript',
+    level: 'error',
+    environment: CHANNEL,
+    release: RELEASE.test(event.release ?? '') ? event.release : undefined,
+    dist: BUILD.test(event.dist ?? '') ? event.dist : undefined,
+    message: values?.length ? undefined : 'JavaScript exception',
+    exception: values?.length ? { values } : undefined,
+    debug_meta: images?.length ? { images } : undefined,
+    tags: event.tags?.where === 'error-boundary' ? { where: 'error-boundary' } : undefined,
+    contexts: os?.name && OS_NAMES.has(os.name) ? {
+      os: { name: os.name, version: OS_VERSION.test(os.version ?? '') ? os.version : undefined },
+    } : undefined,
+    breadcrumbs: event.breadcrumbs?.map(filterBreadcrumb).filter((breadcrumb): breadcrumb is Breadcrumb => breadcrumb !== null),
+  };
 }
 
 let started = false;
@@ -120,15 +97,19 @@ export function setCrashReporting(enabled: boolean): void {
       attachViewHierarchy: false,
       tracesSampleRate: 0,
       enableAutoPerformanceTracing: false,
-      // Native crashes are sent by the native SDK and never pass through
-      // beforeSend, so they could carry unscrubbed messages (e.g. a native
-      // error naming an address). Off until native-side scrubbing exists.
+      // Native errors bypass beforeSend, including iOS watchdog and hang reports.
       enableNativeCrashHandling: false,
+      enableWatchdogTerminationTracking: false,
+      enableAppHangTracking: false,
       maxBreadcrumbs: 30,
       // Crash-free session rates are the beta exit metric.
       enableAutoSessionTracking: true,
       beforeBreadcrumb: filterBreadcrumb,
-      beforeSend: scrubEvent,
+      beforeSend: (event, hint) => {
+        if (!started) return null;
+        hint.attachments = [];
+        return scrubEvent(event);
+      },
     });
     started = true;
   } else if (!enabled && started) {
