@@ -60,6 +60,10 @@
         "USE_BIOMETRIC",
         "USE_FINGERPRINT",
         "FOREGROUND_SERVICE"
+      ],
+      "blockedPermissions": [
+        "android.permission.FOREGROUND_SERVICE_SPECIAL_USE",
+        "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"
       ]
     },
     "plugins": [
@@ -78,7 +82,8 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Allow KaleidoSwap to use your location to show Bitcoin-accepting venues near you.",
+          "locationAlwaysAndWhenInUsePermission": false,
+          "locationAlwaysPermission": false,
           "locationWhenInUsePermission": "Allow KaleidoSwap to use your location to show Bitcoin-accepting venues near you.",
           "isAndroidForegroundServiceEnabled": false
         }
