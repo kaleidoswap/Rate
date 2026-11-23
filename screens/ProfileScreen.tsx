@@ -11,7 +11,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { nip19 } from 'nostr-tools';
 import { leading } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
-import { Badge, Card, CopyButton, Divider, EmptyState, SectionHeader } from '../components';
+import { Badge, Card, CopyButton, EmptyState } from '../components';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { ProfileAvatar } from '../components/ProfileAvatar';
 import { ReceiveQr } from '../components/receive/ReceiveQr';
@@ -112,14 +112,17 @@ export default function ProfileScreen({ navigation }: Props) {
 
         {/* One card: the QR that makes you findable, the npub, copy and share. */}
         <Card style={styles.qrCard}>
+          <Text accessibilityRole="header" style={styles.cardTitle}>Share your profile</Text>
+          <Text style={styles.qrHint}>Scan to add me on Nostr</Text>
           <View style={styles.qrFrame}>
             <ReceiveQr value={code} size={QR} label="Nostr code" />
           </View>
           <Text style={styles.npub} numberOfLines={1} selectable>{shortNpub(npub)}</Text>
           <View style={styles.qrActions}>
             <CopyButton value={npub} label="Copy npub" size={16} color={theme.colors.primary[500]} />
-            <TouchableOpacity style={{ minHeight: 32, alignItems: 'center', justifyContent: 'center' }} onPress={share} accessibilityRole="button" accessibilityLabel="Share">
+            <TouchableOpacity style={styles.shareAction} onPress={share} accessibilityRole="button" accessibilityLabel="Share">
               <Ionicons name="share-outline" size={16} color={theme.colors.primary[500]} />
+              <Text style={styles.editText}>Share</Text>
             </TouchableOpacity>
           </View>
         </Card>
@@ -195,7 +198,10 @@ const makeStyles = (theme: ReturnType<typeof useAppTheme>) => {
     },
 
 
-    qrCard: { alignItems: 'center', paddingBottom: 0 },
+    qrCard: { alignItems: 'center', gap: theme.spacing[2] },
+    cardTitle: { color: theme.colors.text.primary, fontSize: fs.lg, fontWeight: '600' },
+    qrHint: { color: theme.colors.text.secondary, fontSize: fs.sm, textAlign: 'center' },
+    shareAction: { flexDirection: 'row', alignItems: 'center', minHeight: MIN_TOUCH, gap: theme.spacing[1.5], paddingHorizontal: theme.spacing[2] },
     qrFrame: {
       padding: theme.spacing[3],
       borderRadius: theme.borderRadius.xl,
@@ -208,6 +214,6 @@ const makeStyles = (theme: ReturnType<typeof useAppTheme>) => {
       fontFamily: theme.typography.fontFamily.mono,
       color: theme.colors.text.tertiary,
     },
-    qrActions: { flexDirection: 'row', alignSelf: 'stretch', alignItems: 'center', gap: theme.spacing[2] },
+    qrActions: { justifyContent: 'space-evenly', flexWrap: 'wrap', flexDirection: 'row', alignSelf: 'stretch', alignItems: 'center', gap: theme.spacing[2] },
   });
 };

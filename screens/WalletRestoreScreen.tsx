@@ -13,9 +13,9 @@ import {
   Platform,
   KeyboardAvoidingView,
   TextInput,
+  Switch,
 } from 'react-native';
-import { useDispatch, useSelector } from 'react-redux';
-import { selectDisclosureLevel } from '../store/slices/settingsSlice';
+import { useDispatch } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { createNewWallet, setInitialized, setUnlocked } from '../store/slices/walletSlice';
@@ -23,7 +23,7 @@ import { theme } from '../theme';
 import { NetworkConfig } from '../services/DatabaseService';
 import { Button, Card, Input, ScreenHeader } from '../components';
 import { AlertBanner } from '@kaleidorg/kaleido-ui/native';
-import { ADVANCED_ACCOUNTS, LITE_ACCOUNTS, saveAccountPreferences, walletNetworksFor } from '../services/protocols/accountChoices';
+import { SETUP_ACCOUNTS, DEFAULT_ACCOUNTS, hasAnyAccount, saveAccountPreferences, walletNetworksFor } from '../services/protocols/accountChoices';
 import { useScreenCaptureProtection } from '../hooks/useScreenCaptureProtection';
 
 interface Props {
@@ -37,7 +37,7 @@ export default function WalletRestoreScreen({ navigation }: Props) {
   // The recovery phrase is typed on this screen: keep it out of screenshots.
   useScreenCaptureProtection(true);
   const dispatch = useDispatch();
-  const disclosure = useSelector(selectDisclosureLevel);
+  const [choice, setChoice] = useState(DEFAULT_ACCOUNTS);
   const [step, setStep] = useState<RestoreStep>('input');
   const [name, setName] = useState('');
   const [mnemonic, setMnemonic] = useState('');
@@ -130,12 +130,13 @@ export default function WalletRestoreScreen({ navigation }: Props) {
   };
 
   const handleRestore = async (phrase: string) => {
+    if (!hasAnyAccount(choice)) {
+      Alert.alert('Choose an account', 'Turn on at least one account to continue.');
+      return;
+    }
     animateTransition('restoring');
 
     try {
-      // The accounts a new wallet gets in the current mode (Lite: Spark and RGB on
-      // this phone). Others, and a Lightning wallet over NWC, are turned on in Settings.
-      const choice = disclosure === 'advanced' ? ADVANCED_ACCOUNTS : LITE_ACCOUNTS;
       const selectedNetworks: Omit<NetworkConfig, 'id' | 'wallet_id'>[] = walletNetworksFor(choice);
       await saveAccountPreferences(phrase, choice);
 
@@ -305,6 +306,16 @@ export default function WalletRestoreScreen({ navigation }: Props) {
         </View>
       )}
 
+      <Card>
+        <Text accessibilityRole="header" style={styles.inputLabel}>Choose accounts</Text>
+        {SETUP_ACCOUNTS.map(item => (
+          <View key={item.key} style={{ flexDirection: 'row', alignItems: 'center', minHeight: 48 }}>
+            <Text style={[styles.inputLabel, { flex: 1 }]}>{item.name}</Text>
+            <Switch accessibilityLabel={item.name} value={choice[item.key]}
+              onValueChange={enabled => setChoice(current => ({ ...current, [item.key]: enabled }))} />
+          </View>
+        ))}
+      </Card>
       <AlertBanner variant="info" style={styles.warningBox}>
         <Ionicons name="shield-checkmark" size={20} color={theme.colors.info[600]} />
         <Text style={styles.warningText}>

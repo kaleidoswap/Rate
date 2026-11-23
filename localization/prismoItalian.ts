@@ -278,7 +278,7 @@ export const prismoItalian: Record<string, string> = {
   "Check your backup": "Verifica il tuo backup",
   "I've Backed It Up": "L'ho salvata",
   "Create Wallet": "Crea wallet",
-  "Advanced setup · choose accounts": "Configurazione avanzata · scegli gli account",
+  "Connect a Lightning node": "Collega un nodo Lightning",
   "I already have a wallet · Restore": "Ho già un wallet · Ripristina",
   "Protect your wallet": "Proteggi il tuo wallet",
   "Choose how to unlock it.": "Scegli come sbloccarlo.",
