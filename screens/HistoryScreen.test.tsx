@@ -19,7 +19,10 @@ jest.mock('../services/kaleidoPay/activity', () => ({
 }));
 jest.mock('../services/contactHistory', () => ({ walletContactEvents: async () => [{ direction: 'sent', contactName: 'Alice', reference: 'hash-one' }] }));
 jest.mock('../services/agentWallet/store', () => ({ AgentWalletStore: class { entries = async () => []; } }));
-jest.mock('../components/ActivityDetailSheet', () => ({ ActivityDetailSheet: ({ item }: any) => item ? <>{require('react').createElement(require('react-native').Text, {}, `Details ${item.id}`)}</> : null }));
+jest.mock('../components/ActivityDetailSheet', () => ({ ActivityDetailSheet: ({ item }: { item: ActivityItem | null }) => {
+  const { Text } = require('react-native');
+  return item && <><Text>Details {item.id}</Text>{item.rgbTransfer && <Text>Status {item.rgbTransfer.status}</Text>}</>;
+} }));
 jest.mock('../components/Sheet', () => ({ Sheet: ({ visible, children, footer }: any) => visible ? <>{children}{footer}</> : null }));
 beforeAll(() => { (require('react-native') as any).SectionList = ({ sections, renderItem, renderSectionHeader, ListEmptyComponent }: any) => sections.length ? sections.map((section: any) => <React.Fragment key={section.title}>{renderSectionHeader({ section })}{section.data.map((item: any) => <React.Fragment key={item.id}>{renderItem({ item })}</React.Fragment>)}</React.Fragment>) : ListEmptyComponent; });
 test('search opens from the header, filters the rows, and rows open their detail', async () => {
@@ -82,6 +85,12 @@ test('pending RGB rows show what they are waiting for and open status details', 
   expect(ui.getByText('Waiting for confirmations')).toBeTruthy();
   fireEvent.press(ui.getByLabelText(/Waiting for confirmations.*View status/));
   expect(ui.getByText('Details broadcast')).toBeTruthy();
+  expect(ui.getByText('Status waiting-confirmations')).toBeTruthy();
+  ui.rerender(<HistoryScreen previewItems={[items[0], {
+    ...items[1], txid: 'new-txid', status: 'confirmed', rgbTransfer: { direction: 'outgoing', status: 'settled' },
+  }]} />);
+  expect(ui.getByText('Details broadcast')).toBeTruthy();
+  expect(ui.getByText('Status settled')).toBeTruthy();
 });
 
 test('a payment needing a check is removed from Activity by a long press, only after confirming', async () => {
