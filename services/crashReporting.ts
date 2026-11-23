@@ -28,7 +28,7 @@ const PATTERNS: RegExp[] = [
   /\b[a-z][a-z0-9]{0,30}1[02-9ac-hj-np-z]{20,}\b/gi,
   // Any long base58 string: legacy addresses, WIF and extended keys.
   /\b[1-9A-HJ-NP-Za-km-z]{25,}\b/g,
-  /\b[0-9a-f]{32,}\b/gi,
+  /\b(?:0x)?[0-9a-f]{32,}\b/gi,
   /[\w.+-]+@[\w-]+\.[\w.-]+/g,
 ];
 

@@ -11,10 +11,12 @@
     },
     "preview": {
       "distribution": "internal",
+      "env": { "EXPO_PUBLIC_CHANNEL": "beta" },
       "ios": { "simulator": false }
     },
     "production": {
       "autoIncrement": true,
+      "env": { "EXPO_PUBLIC_CHANNEL": "store" },
       "ios": {
         "resourceClass": "m-medium"
       }

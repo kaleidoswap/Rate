@@ -88,6 +88,8 @@ test('scrubs WIF keys and addresses of any bech32 prefix', () => {
     '5HueCGU8rMjxEXxiPuD5BDku4MkFqeZyd4dZ1jvhTVqvbTLvyTJ',
     'KwdMAjGmerYanjeui5SHS7JkmpZvVipYvB2LJGU1ZxJwYvP98617',
     'tex1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq',
+    '0x' + 'ab'.repeat(32),
+    '0X' + 'CD'.repeat(16),
   ]) expect(scrub(`key ${secret} bad`)).toBe('key [redacted] bad');
 });
 
