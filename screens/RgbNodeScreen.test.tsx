@@ -1,6 +1,6 @@
 import React from 'react';
 import { act, fireEvent, render } from '@testing-library/react-native';
-import RgbNodeScreen, { NODE_BACKUP } from './RgbNodeScreen';
+import RgbNodeScreen from './RgbNodeScreen';
 
 let mockNode = false;
 let mockWallet = false;
@@ -43,7 +43,7 @@ test('a plain Lightning wallet is not taken for an RGB node', async () => {
   expect(screen.getByText(/Alby is connected over NWC, but it isn’t an RGB node/)).toBeTruthy();
   expect(screen.getByText('How to connect')).toBeTruthy();
   expect(screen.queryByText('Backup')).toBeNull();
-  expect(screen.queryByText(NODE_BACKUP.title)).toBeNull();
+  expect(screen.queryByText('Last backup unverified')).toBeNull();
 });
 
 test('a connected node shows its name and network and is managed from the connection screen', async () => {
@@ -57,7 +57,11 @@ test('a connected node shows its name and network and is managed from the connec
   expect(screen.getByText('Connected')).toBeTruthy();
   expect(screen.queryByText('How to connect')).toBeNull();
   expect(screen.getByText('Backup')).toBeTruthy();
-  for (const line of Object.values(NODE_BACKUP)) expect(screen.getByText(line)).toBeTruthy();
+  expect(screen.getByText('Last backup unverified')).toBeTruthy();
+  expect(screen.getByText(/node operator manages recovery for its bitcoin, RGB assets and Lightning channels/)).toBeTruthy();
+  expect(screen.getByText(/keep a copy off the host/)).toBeTruthy();
+  expect(screen.getByText(/ask when its last backup succeeded.*how to request a restore/)).toBeTruthy();
+  expect(screen.getByText(/encrypted cloud backups cover RGB on this phone/)).toBeTruthy();
   fireEvent.press(screen.getByText('Manage connection'));
   expect(navigation.navigate).toHaveBeenCalledWith('NWCConnect');
 });
