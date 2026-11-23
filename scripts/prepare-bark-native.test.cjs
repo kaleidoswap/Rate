@@ -10,7 +10,7 @@ function fixture(t) {
   const bark = path.join(root, 'node_modules/@secondts/bark-react-native');
   const runtime = path.join(bark, 'node_modules/uniffi-bindgen-react-native');
   const put = (file, text) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, text); };
-  put(path.join(bark, 'package.json'), JSON.stringify({ version: '0.25.0' }));
+  put(path.join(bark, 'package.json'), JSON.stringify({ version: '0.27.0' }));
   put(path.join(runtime, 'package.json'), JSON.stringify({ version: '0.31.0-5' }));
   put(path.join(runtime, 'cpp/includes/UniffiJsiTypes.h'), '#include "UniffiString.h"\nnamespace uniffi_jsi { struct RustBuffer {}; }');
   put(path.join(runtime, 'cpp/includes/UniffiString.h'), '/* MPL notice */\nnamespace uniffi_runtime {}');
