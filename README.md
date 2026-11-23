@@ -9,8 +9,10 @@ payments. Your keys, your assets, and your AI all stay on your phone.
 
 > ⚠️ **Alpha software.** KaleidoSwap is under active development and **not production-ready**.
 > Expect bugs, breaking changes, and incomplete features. The KaleidoMind AI assistant is
-> **experimental** and can make mistakes — always review actions before confirming. Use
-> test networks and small amounts only; **do not store funds you can't afford to lose.**
+> **experimental** and can make mistakes — always review actions before confirming.
+> New wallets use **Bitcoin mainnet, so real funds**: keep to small amounts and
+> **do not store funds you can't afford to lose.** Experimental features are off by
+> default in beta builds and can be turned on in Settings → Labs.
 
 ---
 

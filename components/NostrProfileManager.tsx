@@ -39,6 +39,7 @@ import { NostrIcon, RgbNodeIcon } from './ProtocolIcons';
 import { WALLET_SERVICE_NWC_URI_KEY } from '../services/nwc/connectionStore';
 import ToastService from '../services/ToastService';
 import { copySensitive } from '../utils/sensitiveClipboard';
+import { useFeature } from '../hooks/useFeature';
 
 const toast = () => ToastService.getInstance();
 
@@ -47,6 +48,7 @@ interface Props {
 }
 
 export default function NostrProfileManager({ navigation }: Props) {
+  const nwcFeature = useFeature('nwc'); const rgbNodeFeature = useFeature('rgbNode'); const walletConnectionsOn = nwcFeature || rgbNodeFeature;
   const theme = useAppTheme();
   const styles = makeStyles(theme);
   const dispatch = useDispatch();
@@ -473,13 +475,13 @@ export default function NostrProfileManager({ navigation }: Props) {
 
       {!!publicKey && renderRelays()}
 
-      <Text style={styles.sectionLabel}>Wallet</Text>
+      {(walletConnectionsOn || !!connectedWallet) && <><Text style={styles.sectionLabel}>Wallet</Text>
       <View style={styles.card}>
         <Row icon="flash" tint={theme.colors.warning[500]} label="Connect a Lightning wallet"
           iconNode={connectedWallet && nwcWalletType === 'rln' ? <RgbNodeIcon size={18} /> : undefined}
           detail={walletLabel ? `Connected · ${walletLabel}` : 'Pay and check balances via NWC'}
           onPress={() => navigation?.navigate('NWCConnect')} last />
-      </View>
+      </View></>}
 
       {!!publicKey && (
         <>

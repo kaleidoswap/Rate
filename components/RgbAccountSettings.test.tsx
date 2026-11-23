@@ -58,3 +58,19 @@ test('with an RGB node in use, it shows its name and network; this phone steps a
   fireEvent.press(screen.getByLabelText('This phone'));
   expect(screen.getByText('panel: node active')).toBeTruthy();
 });
+
+test('a build holding phone setup still shows a previously configured phone account', async () => {
+  const props = { walletId: 7, node: { connected: false }, allowNewPhoneSetup: false, onOpenNode: jest.fn() };
+  const screen = render(<RgbAccountSettings {...props} />);
+  await act(async () => {});
+  expect(screen.queryByLabelText('This phone')).toBeNull();
+  expect(screen.queryByText('panel: set up')).toBeNull();
+  expect(screen.getByText('Connect an RGB node')).toBeTruthy();
+
+  screen.unmount();
+  mockNetwork = 'mainnet';
+  const configured = render(<RgbAccountSettings {...props} />);
+  await act(async () => {});
+  expect(configured.getByLabelText('This phone')).toBeTruthy();
+  expect(configured.getByText('panel: set up')).toBeTruthy();
+});

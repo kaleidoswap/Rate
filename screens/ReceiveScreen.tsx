@@ -91,6 +91,7 @@ import {
   ANY_RGB_ASSET_ID, DEFAULT_RGB_RECEIVE_OPTIONS, listRgbUtxos, rgbInvoiceParams, rgbReceiveErrorMessage, rgbReceiveSupport,
   type RgbReceiveOptions,
 } from '../utils/rgb-receive';
+import { useFeature } from '../hooks/useFeature';
 
 const NEW_RGB_ASSET_ID = ANY_RGB_ASSET_ID;
 // Verbose receive logging is opt-in even in dev. In an Expo dev client every
@@ -185,6 +186,7 @@ function formatDepositLayer(layer?: DepositLayer): string {
 }
 
 export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
+  const merchantOfferOn = useFeature('merchantOffer');
   const dispatch = useAppDispatch();
   const theme = useAppTheme();
   const styles = useMemo(() => createReceiveStyles(theme), [theme]);
@@ -1730,7 +1732,7 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
             walletId={walletId}
             qrSize={qrSize}
             showLightningAddress={lightningAddressAvailable}
-            showOffer={hasReceivingNode}
+            showOffer={merchantOfferOn && hasReceivingNode}
             onManageAddress={() => { cancelReceiveWork(); navigation.navigate('LightningAddress'); }}
             onOpenOffer={() => { cancelReceiveWork(); navigation.navigate('MerchantOffer'); }}
           />

@@ -6,13 +6,14 @@
  * and RGB on this phone are per-wallet preferences, and the RGB node is a
  * separate NWC connection.
  *
- * Setup and restore both start with Spark and on-device RGB selected.
+ * Setup and restore start with Spark and on-device RGB where available.
  */
 import type { NetworkConfig } from '../DatabaseService';
 import { buildDefaultNetworkConfig } from './networkConfig';
 import { BARK_ENABLED } from './bark';
-import { saveBarkNetwork, setBarkOff } from './barkPreferences';
+import { hasBarkPreference, saveBarkNetwork, setBarkOff } from './barkPreferences';
 import { RGB_L1_DEFAULT_NETWORK, RGB_L1_ENABLED, pinnedRgbL1Network, saveRgbL1Network } from './rgbL1';
+import { isAvailable, isFeatureOn } from '../features';
 
 export interface AccountChoice {
   spark: boolean;
@@ -22,14 +23,22 @@ export interface AccountChoice {
   rgbOnDevice: boolean;
 }
 
+const allowNewBark = isAvailable('bark');
+const allowNewRgbOnDevice = isAvailable('rgbOnDevice');
+
 export const SETUP_ACCOUNTS: { key: keyof AccountChoice; name: string; desc: string; icon: string }[] = [
   { key: 'spark', name: 'Spark', desc: 'Instant bitcoin, Lightning and tokens', icon: 'spark' },
-  ...(RGB_L1_ENABLED ? [{ key: 'rgbOnDevice' as const, name: 'RGB on-chain', desc: 'RGB assets on-chain, no node needed · beta', icon: 'rgb' }] : []),
-  { key: 'arkade', name: 'Arkade', desc: 'Low-fee bitcoin payments off-chain', icon: 'arkade' },
-  ...(BARK_ENABLED ? [{ key: 'bark' as const, name: 'Bark', desc: 'Bitcoin on Second’s Ark network', icon: 'bark' }] : []),
+  ...(RGB_L1_ENABLED && allowNewRgbOnDevice ? [{ key: 'rgbOnDevice' as const, name: 'RGB on-chain', desc: 'RGB assets on-chain, no node needed · beta', icon: 'rgb' }] : []),
+  ...(isFeatureOn('arkade', undefined) ? [{ key: 'arkade' as const, name: 'Arkade', desc: 'Low-fee bitcoin payments off-chain', icon: 'arkade' }] : []),
+  ...(BARK_ENABLED && allowNewBark ? [{ key: 'bark' as const, name: 'Bark', desc: 'Bitcoin on Second’s Ark network', icon: 'bark' }] : []),
 ];
 
-export const DEFAULT_ACCOUNTS: AccountChoice = { spark: true, arkade: false, bark: false, rgbOnDevice: RGB_L1_ENABLED };
+export const DEFAULT_ACCOUNTS: AccountChoice = {
+  spark: true,
+  arkade: false,
+  bark: false,
+  rgbOnDevice: RGB_L1_ENABLED && allowNewRgbOnDevice,
+};
 
 /** The wallet networks to store with a new wallet. */
 export function walletNetworksFor(choice: AccountChoice): Omit<NetworkConfig, 'id' | 'wallet_id'>[] {
@@ -44,11 +53,14 @@ export function walletNetworksFor(choice: AccountChoice): Omit<NetworkConfig, 'i
  * account the user left out never starts (Bark defaults to on otherwise).
  */
 export async function saveAccountPreferences(mnemonic: string, choice: AccountChoice): Promise<void> {
-  if (BARK_ENABLED) {
-    if (choice.bark) await saveBarkNetwork(mnemonic, 'mainnet');
+  // A held feature has no switch during setup. Preserve any explicit Bark choice
+  // for a seed already used on this phone, and disable the legacy default for new seeds.
+  if (BARK_ENABLED && (allowNewBark || !(await hasBarkPreference(mnemonic)))) {
+    if (allowNewBark && choice.bark) await saveBarkNetwork(mnemonic, 'mainnet');
     else await setBarkOff(mnemonic);
   }
-  if (RGB_L1_ENABLED) {
+  // RGB starts off when no preference exists. Keep any saved setting in held builds.
+  if (RGB_L1_ENABLED && allowNewRgbOnDevice) {
     // Mainnet like the other accounts, unless this phone already holds this seed's RGB data on another network.
     const network = choice.rgbOnDevice ? (await pinnedRgbL1Network(mnemonic)) ?? RGB_L1_DEFAULT_NETWORK : null;
     await saveRgbL1Network(mnemonic, network);

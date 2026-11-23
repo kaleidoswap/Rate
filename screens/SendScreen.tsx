@@ -58,6 +58,7 @@ import { SegmentedTabs } from '../components/SegmentedTabs';
 import { loadPaymentAttempt, beginPaymentAttempt, savePaymentAttempt, updatePaymentAttempt, unresolvedAttempt, dismissPaymentAttempt } from '../services/kaleidoPay/attempts';
 import type { PaymentAttempt } from '../services/kaleidoPay/attempts';
 import { ActionableError } from '../components/ActionableError';
+import { useFeature } from '../hooks/useFeature';
 
 interface Props { navigation: any; route: any }
 
@@ -86,6 +87,7 @@ function sendRecovery(message: string) {
 }
 
 export default function SendScreen({ navigation, route }: Props) {
+  const socialOn = useFeature('social');
   const t = useAppTheme();
   const dispatch = useAppDispatch();
   const bitcoinUnit = useAppSelector(s => s.settings.bitcoinUnit);
@@ -773,9 +775,9 @@ export default function SendScreen({ navigation, route }: Props) {
       </View> : !input.trim() && <>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
           <Text style={caption}>{recentContacts.length ? 'Recent' : 'Contacts'}</Text>
-          <TouchableOpacity accessibilityRole="button" onPress={() => setShowContacts(true)} hitSlop={8}>
+          {socialOn && <TouchableOpacity accessibilityRole="button" onPress={() => setShowContacts(true)} hitSlop={8}>
             <Text style={{ ...small, color: t.colors.primary[500], fontWeight: '600' }}>All contacts</Text>
-          </TouchableOpacity>
+          </TouchableOpacity>}
         </View>
         {recentContacts.length ? <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: t.spacing[3] }}>
           {recentContacts.map((c, i) => (

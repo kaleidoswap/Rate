@@ -48,6 +48,7 @@ import {
   saveAndSelectNwcCredential,
 } from '../services/nwc/connectionStore';
 import { upsertNwcConnection } from '../store/slices/nostrSlice';
+import { useFeature } from '../hooks/useFeature';
 
 interface Props {
   navigation: any;
@@ -56,6 +57,8 @@ interface Props {
 type SetupStep = 'welcome' | 'rln' | 'networks' | 'creating' | 'backup' | 'confirmBackup' ;;
 
 export default function WalletSetupScreen({ navigation }: Props) {
+  // The RGB node step (NWC) only where the build ships it and Labs has it on.
+  const rgbNodeStep = useFeature('rgbNode');
   const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();
   const dispatch = useAppDispatch();
@@ -265,7 +268,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
   const handleBack = () => {
     Keyboard.dismiss();
     if (step === 'networks') {
-      animateTransition(mode === 'advanced' ? 'rln' : 'welcome');
+      animateTransition(mode === 'advanced' && rgbNodeStep ? 'rln' : 'welcome');
     } else if (step === 'rln') {
       animateTransition('welcome');
     } else if (step === 'backup') {
@@ -355,7 +358,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
   };
 
   const renderStepIndicator = () => {
-    const steps: SetupStep[] = mode === 'advanced'
+    const steps: SetupStep[] = mode === 'advanced' && rgbNodeStep
       ? ['welcome', 'rln', 'networks', 'backup', 'confirmBackup']
       : ['welcome', 'networks', 'backup', 'confirmBackup'];
     const labels: Record<SetupStep, string> = {
@@ -432,10 +435,11 @@ export default function WalletSetupScreen({ navigation }: Props) {
       </View>
 
       <Text style={styles.tipText}>
-        Your wallet can send and receive bitcoin as soon as it’s created. You can connect a Lightning wallet later in Settings.
+        Your wallet can send and receive bitcoin as soon as it’s created.
+        {rgbNodeStep && ' You can connect a Lightning wallet later in Settings.'}
         {TEST_BUILD ? '\n\nThis version uses test networks: anything you receive is test bitcoin with no real value.' : ''}
       </Text>
-      <TouchableOpacity
+      {rgbNodeStep && <TouchableOpacity
         style={styles.skipButton}
         accessibilityRole="button"
         onPress={() => {
@@ -450,7 +454,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
         }}
       >
         <Text style={styles.skipButtonText}>{prismoText('Connect a Lightning node')}</Text>
-      </TouchableOpacity>
+      </TouchableOpacity>}
       <TouchableOpacity
         style={styles.skipButton}
         accessibilityRole="button"

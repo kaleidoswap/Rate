@@ -33,9 +33,10 @@ export const RGB_STATUS = { connected: 'Connected', notConnected: 'Not connected
 
 type Place = 'phone' | 'node';
 
-export function RgbAccountSettings({ walletId, node, onOpenNode, onChanged }: {
+export function RgbAccountSettings({ walletId, node, allowNewPhoneSetup = true, onOpenNode, onChanged }: {
   walletId: number;
   node: RgbNodeSummary;
+  allowNewPhoneSetup?: boolean;
   /** Opens the RGB Lightning Node screen (how to connect, connect, manage). */
   onOpenNode: () => void;
   onChanged?: () => void;
@@ -58,14 +59,15 @@ export function RgbAccountSettings({ walletId, node, onOpenNode, onChanged }: {
 
   const nodeNetwork = rgbNetworkLabel(node.network);
   const nodeName = [node.alias || 'Your node', nodeNetwork].filter(Boolean).join(' · ');
-  const inUse: Place | null = node.connected ? 'node' : phoneConnected && RGB_L1_ENABLED ? 'phone' : null;
+  const showPhone = RGB_L1_ENABLED && (allowNewPhoneSetup || !!phoneNetwork || phoneConnected);
+  const inUse: Place | null = node.connected ? 'node' : phoneConnected && showPhone ? 'phone' : null;
   const success = theme.colors.success[500];
 
   const statusTitle = inUse === 'node' ? 'On your RGB node' : inUse === 'phone' ? 'On this phone' : 'RGB assets';
   const statusMeta = inUse === 'node' ? nodeName
     : inUse === 'phone' && phoneNetwork ? `${RGB_L1_NETWORK_LABEL[phoneNetwork]} · beta`
     : phoneNetwork ? `This phone is set up for ${RGB_L1_NETWORK_LABEL[phoneNetwork]} but isn’t connected.`
-    : 'Pick where your RGB assets live below.';
+    : showPhone ? 'Pick where your RGB assets live below.' : 'Connect your RGB Lightning node to use RGB here.';
 
   return (
     <View style={styles.wrap}>
@@ -83,7 +85,7 @@ export function RgbAccountSettings({ walletId, node, onOpenNode, onChanged }: {
       </View>
 
       <Text accessibilityRole="header" style={styles.sectionLabel}>Where your RGB assets live</Text>
-      {RGB_L1_ENABLED && (
+      {showPhone && (
         <>
           {inUse && (
             <View style={{ marginBottom: theme.spacing[2] }}>
@@ -105,7 +107,7 @@ export function RgbAccountSettings({ walletId, node, onOpenNode, onChanged }: {
         </>
       )}
 
-      {place === 'phone' && RGB_L1_ENABLED ? (
+      {place === 'phone' && showPhone ? (
         <View style={styles.card}>
           <RgbOnDeviceSettings walletId={walletId} nodeActive={node.connected} onOpenNode={onOpenNode}
             onChanged={() => { void refresh(); onChanged?.(); }} />

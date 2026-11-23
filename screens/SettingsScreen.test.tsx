@@ -5,12 +5,18 @@ import { act, fireEvent, render } from '@testing-library/react-native';
 import SettingsScreen from './SettingsScreen';
 const mockDispatch = jest.fn();
 const mockState = { settings: { currency: 'USD', bitcoinUnit: 'sats', disclosureLevel: 'lite', soundEnabled: true }, nostr: { nwcConnections: [] }, wallet: { activeWallet: { id: 1, name: 'Daily wallet' }, isUnlocked: false } };
+let mockNetworks: { type: 'spark' | 'arkade'; enabled: boolean }[] = [];
 jest.mock('../store/hooks', () => ({ useAppSelector: (f: any) => f(mockState), useAppDispatch: () => mockDispatch }));
 jest.mock('@react-navigation/native', () => ({ useFocusEffect: (f: any) => require('react').useEffect(f, [f]) }));
 jest.mock('../services/protocols/bark', () => ({ BARK_ENABLED: true }));
-jest.mock('../services/protocols/barkPreferences', () => ({ currentBarkHost: () => ({ network: 'signet' }), loadBarkHost: async () => ({ network: 'signet' }), saveBarkNetwork: jest.fn() }));
+jest.mock('../services/protocols/barkPreferences', () => ({ currentBarkHost: () => ({ network: 'signet' }), isBarkOff: async () => false, loadBarkHost: async () => ({ network: 'signet' }), saveBarkNetwork: jest.fn() }));
+let mockPhoneNetwork: string | null = null;
+jest.mock('../services/protocols/rgbL1', () => ({
+  ...jest.requireActual('../services/protocols/rgbL1'),
+  loadRgbL1Network: async () => mockPhoneNetwork,
+}));
 jest.mock('../services/protocols', () => ({ protocolManager: { getAdapterIfAvailable: () => null, disconnect: jest.fn() }, rgbAccountAdapter: () => null, rgbNodeConnected: () => false, reconcileRgbOnDevice: jest.fn(), initializeProtocols: jest.fn(async () => new Map([['BARK', { success: true }]])) }));
-jest.mock('../services/DatabaseService', () => ({ __esModule: true, default: { getInstance: () => ({ getWalletNetworks: async () => [], getActiveWallet: async () => ({ id: 1, encrypted_mnemonic: 'public test fixture' }) }) } }));
+jest.mock('../services/DatabaseService', () => ({ __esModule: true, default: { getInstance: () => ({ getWalletNetworks: async () => mockNetworks, getActiveWallet: async () => ({ id: 1, encrypted_mnemonic: 'public test fixture' }) }) } }));
 jest.mock('../services/SecurityService', () => ({ __esModule: true, default: { getInstance: jest.fn() } }));
 jest.mock('../services/nwc/connectionStore', () => ({ removeNwcCredential: jest.fn() }));
 jest.mock('../store/slices/walletSlice', () => ({ loadBtcBalance: jest.fn(), setActiveWallet: jest.fn() }));
@@ -34,7 +40,7 @@ const lockState = (over: Partial<{ pinEnabled: boolean; biometricEnabled: boolea
   };
   require('../services/SecurityService').default.getInstance.mockReturnValue(mockSecurity);
 };
-beforeEach(() => { jest.clearAllMocks(); lockState({}); (require('react-native') as any).BackHandler = { addEventListener: () => ({ remove: jest.fn() }) }; (require('react-native') as any).Keyboard = { dismiss: jest.fn() }; });
+beforeEach(() => { jest.clearAllMocks(); mockNetworks = []; lockState({}); (require('react-native') as any).BackHandler = { addEventListener: () => ({ remove: jest.fn() }) }; (require('react-native') as any).Keyboard = { dismiss: jest.fn() }; });
 test('home shows categories and keeps sensitive and technical actions in their sections', async () => {
   const screen = render(<SettingsScreen navigation={navigation} />);
   await act(async () => {});
@@ -102,6 +108,7 @@ test('selecting Bark mainnet saves the preference and reconnects through protoco
 });
 
 test('account pages expose supported controls and back returns to the account list', async () => {
+  mockNetworks = [{ type: 'spark', enabled: true }, { type: 'arkade', enabled: true }];
   const screen = render(<SettingsScreen navigation={navigation} />);
   await act(async () => {});
   fireEvent.press(screen.getByLabelText('Advanced'));
@@ -249,4 +256,48 @@ test('advanced tools and the map remain accessible without crowding everyday con
   expect(screen.getByLabelText('Spark account settings')).toBeTruthy();
   fireEvent.press(screen.getByLabelText('Open a Lightning channel'));
   expect(navigation.navigate).toHaveBeenCalledWith('LSP');
+});
+
+test('Labs lists each experimental feature with a switch that records the choice', async () => {
+  const screen = render(<SettingsScreen navigation={navigation} />);
+  await act(async () => {});
+  fireEvent.press(screen.getByLabelText('Labs'));
+  expect(screen.getByText('Arkade account')).toBeTruthy();
+  fireEvent(screen.getByLabelText('Prismo'), 'valueChange', false);
+  expect(mockDispatch).toHaveBeenCalledWith({ type: 'settings/setLabsFeature', payload: { feature: 'prismo', enabled: false } });
+});
+
+test('a Labs feature turned off loses its entry points', async () => {
+  const settings = mockState.settings as typeof mockState.settings & { labs?: Record<string, boolean> };
+  settings.labs = { map: false, lsp: false, arkade: false };
+  try {
+    const screen = render(<SettingsScreen navigation={navigation} />);
+    await act(async () => {});
+    expect(screen.queryByLabelText('Places to pay')).toBeNull();
+    fireEvent.press(screen.getByLabelText('Advanced'));
+    expect(screen.queryByLabelText('Open a Lightning channel')).toBeNull();
+    // Arkade is off and this wallet never set it up, so its account row is gone; Spark stays.
+    expect(screen.queryByLabelText('Arkade account settings')).toBeNull();
+    expect(screen.getByLabelText('Spark account settings')).toBeTruthy();
+  } finally {
+    delete settings.labs;
+  }
+});
+
+test.each([null, 'mainnet'])('held builds only offer phone RGB backups for a configured wallet (%s)', async (network) => {
+  mockPhoneNetwork = network;
+  const features = require('../services/features') as typeof import('../services/features');
+  const isFeatureOn = features.isFeatureOn;
+  const channel = jest.spyOn(features, 'isFeatureOn').mockImplementation(
+    (feature, labs) => isFeatureOn(feature, labs, 'beta')
+  );
+  try {
+    const screen = render(<SettingsScreen navigation={navigation} />);
+    await act(async () => {});
+    fireEvent.press(screen.getByLabelText('Security & backup'));
+    expect(!!screen.queryByLabelText('RGB data backup')).toBe(network !== null);
+  } finally {
+    mockPhoneNetwork = null;
+    channel.mockRestore();
+  }
 });

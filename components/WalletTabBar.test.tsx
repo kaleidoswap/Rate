@@ -7,8 +7,8 @@ import React from 'react';
 import { render, fireEvent, act } from '@testing-library/react-native';
 import { WalletTabBar } from './WalletTabBar';
 
-function props() {
-  const routes = ['DashboardTab', 'Activity', 'Contacts', 'Mind'].map(name => ({ key: name, name }));
+function props(tabNames = ['DashboardTab', 'Activity', 'Contacts', 'Mind']) {
+  const routes = tabNames.map(name => ({ key: name, name }));
   return {
     state: { index: 0, routes },
     descriptors: Object.fromEntries(routes.map(route => [route.key, { options: { tabBarLabel: route.name === 'DashboardTab' ? 'Wallet' : route.name } }])),
@@ -22,6 +22,12 @@ describe('wallet navigation', () => {
     const screen = render(<WalletTabBar {...p} />);
     fireEvent.press(screen.getByLabelText('Scan a payment QR code'));
     expect(p.navigation.navigate).toHaveBeenCalledWith('QRScanner');
+  });
+  it('keeps Scan between Wallet and Activity when Labs tabs are off', () => {
+    const screen = render(<WalletTabBar {...props(['DashboardTab', 'Activity'])} />);
+    expect(screen.getAllByText(/^(Wallet|Scan|Activity)$/).map(node => node.props.children)).toEqual([
+      'Wallet', 'Scan', 'Activity',
+    ]);
   });
   it('makes activity a direct destination and preserves tab event cancellation', () => {
     const p = props();

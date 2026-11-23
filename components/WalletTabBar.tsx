@@ -14,6 +14,7 @@ export function WalletTabBar({ state, descriptors, navigation }: BottomTabBarPro
   const theme = useAppTheme();
   const tabStyles = makeStyles(theme);
   const pending = usePendingPaymentsCount();
+  const scanIndex = Math.ceil(state.routes.length / 2);
   const renderItem = (route: typeof state.routes[number], index: number) => {
     const { options } = descriptors[route.key];
     const focused = state.index === index;
@@ -58,7 +59,7 @@ export function WalletTabBar({ state, descriptors, navigation }: BottomTabBarPro
       paddingLeft: insets.left + theme.spacing[2],
       paddingRight: insets.right + theme.spacing[2],
     }]}>
-      {state.routes.slice(0, 2).map((r, i) => renderItem(r, i))}
+      {state.routes.slice(0, scanIndex).map((r, i) => renderItem(r, i))}
       <TouchableOpacity
         accessible
         accessibilityRole="button"
@@ -71,7 +72,7 @@ export function WalletTabBar({ state, descriptors, navigation }: BottomTabBarPro
         </View>
         <Text style={[tabStyles.label, { color: theme.colors.text.primary }]}>{t('Scan')}</Text>
       </TouchableOpacity>
-      {state.routes.slice(2).map((r, i) => renderItem(r, i + 2))}
+      {state.routes.slice(scanIndex).map((r, i) => renderItem(r, i + scanIndex))}
     </View>
   );
 }

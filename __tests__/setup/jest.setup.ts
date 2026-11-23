@@ -322,3 +322,11 @@ global.console = {
   warn: jest.fn(),
   error: jest.fn(),
 };
+
+// Sentry's native SDK doesn't load under Jest; crash reporting is tested in
+// services/crashReporting.test.ts with its own mock.
+jest.mock('@sentry/react-native', () => ({
+  init: jest.fn(),
+  close: jest.fn(async () => true),
+  captureException: jest.fn(),
+}));
