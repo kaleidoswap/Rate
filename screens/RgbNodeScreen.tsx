@@ -2,8 +2,8 @@
 //
 // Settings › RGB › RGB Lightning Node: what a node adds, how to connect one over
 // Nostr Wallet Connect, and its status (shown first). The connection itself (paste or scan,
-// saved connections, remove) lives in NWCConnect. NWC has no backup call, so a connected
-// node gets a Backup section saying where its RGB and channel state is protected.
+// saved connections, remove) lives in NWCConnect. A connected node's Backup
+// section explains how to verify its operator-managed recovery.
 import React, { useCallback, useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useAppSelector } from '../store/hooks';
@@ -22,13 +22,6 @@ const STEPS = [
   'Scan its QR code or paste its nostr+walletconnect:// link.',
   'Review what the node allows and confirm.',
 ];
-
-export const NODE_BACKUP = {
-  title: 'Not restored by your recovery phrase',
-  message: 'Your recovery phrase doesn’t bring back anything on this node: not its bitcoin, RGB assets or Lightning channels. The node has its own keys, and only the node’s own backups protect them.',
-  action: 'If you run the node, back it up where it runs. If someone else runs it, ask them how it’s backed up.',
-  contrast: 'RGB on this phone is different: it tries to back up to the cloud after every change. Check its status under RGB on this phone.',
-} as const;
 
 const RgbNodeScreen: React.FC<Props> = ({ navigation }) => {
   const connections = useAppSelector((s: any) => s.nostr?.nwcConnections ?? []);
@@ -79,9 +72,11 @@ const RgbNodeScreen: React.FC<Props> = ({ navigation }) => {
           <>
             <Text accessibilityRole="header" style={styles.sectionLabel}>Backup</Text>
             <View style={styles.card}>
-              <Callout tone="warning" icon="cloud-offline-outline" title={NODE_BACKUP.title} message={NODE_BACKUP.message} />
-              <Text style={styles.text}>{NODE_BACKUP.action}</Text>
-              <Text style={styles.meta}>{NODE_BACKUP.contrast}</Text>
+              <Callout tone="warning" icon="cloud-offline-outline" title="Last backup unverified"
+                message="This connection does not report the last successful backup. The node operator manages recovery for its bitcoin, RGB assets and Lightning channels." />
+              <Text style={styles.text}>If you run the node, create an encrypted backup on its host and keep a copy off the host. Keep the backup password separately for a restore to a fresh node.</Text>
+              <Text style={styles.text}>If someone else runs the node, ask when its last backup succeeded, whether it contains RGB and channel state, and how to request a restore.</Text>
+              <Text style={styles.meta}>The node has its own recovery credentials. Rate’s automatic encrypted cloud backups cover RGB on this phone.</Text>
             </View>
           </>
         )}
