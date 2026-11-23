@@ -1,6 +1,7 @@
 import React from 'react';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import HistoryScreen from './HistoryScreen';
+import type { ActivityItem } from '../services/ActivityService';
 const mockItems = [
   { id: 'one', type: 'send', source: 'payment', asset: 'BTC', assetTicker: 'sats', assetPrecision: 0, amount: '5,000', rawSats: 5000, txid: 'hash-one', status: 'confirmed', layer: 'LN', timestamp: Date.now() - 86400000 },
   { id: 'two', type: 'receive', source: 'payment', asset: 'BTC', assetTicker: 'sats', assetPrecision: 0, amount: '100', txid: 'hash-two', status: 'confirmed', layer: 'LN', timestamp: Date.now() - 40 * 86400000 },
@@ -64,6 +65,23 @@ test('removing an active chip clears that filter', async () => {
   fireEvent.press(ui.getByLabelText('Remove filter Sent'));
   expect(ui.getByLabelText(/100 sats.*Open details/)).toBeTruthy();
   expect(ui.getByLabelText('Filters')).toBeTruthy();
+});
+
+test('pending RGB rows show what they are waiting for and open status details', async () => {
+  const common = {
+    source: 'transfer', asset: 'rgb:qa', assetTicker: 'RATEQA', assetPrecision: 0, amount: '5',
+    status: 'pending', txid: '', layer: 'RGB-L1',
+  } as const;
+  const items: ActivityItem[] = [
+    { ...common, id: 'invoice', type: 'receive', rgbTransfer: { direction: 'incoming', status: 'waiting-counterparty' } },
+    { ...common, id: 'broadcast', type: 'send', rgbTransfer: { direction: 'outgoing', status: 'waiting-confirmations' } },
+  ];
+  const ui = render(<HistoryScreen previewItems={items} />);
+  await act(async () => {});
+  expect(ui.getByText('Waiting for sender')).toBeTruthy();
+  expect(ui.getByText('Waiting for confirmations')).toBeTruthy();
+  fireEvent.press(ui.getByLabelText(/Waiting for confirmations.*View status/));
+  expect(ui.getByText('Details broadcast')).toBeTruthy();
 });
 
 test('a payment needing a check is removed from Activity by a long press, only after confirming', async () => {

@@ -21,11 +21,11 @@ import {
     Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { theme } from '../theme';
 import { LAYER_LABEL, layerNetworkIcon } from '../utils/activity-layers';
 import { NetworkIcon } from './NetworkIcon';
+import { Button } from './Button';
 import { CopyButton } from './CopyButton';
-import type { ActivityItem, ActivityItemType, ActivityLayer } from '../services/ActivityService';
+import type { ActivityItem } from '../services/ActivityService';
 import { ACTIVITY_STATUS_VISUAL } from '../utils/paymentStatus';
 import { AccelerationPanel } from './AccelerationPanel';
 import { accelerationTarget } from '../services/TxAccelerationService';
@@ -34,8 +34,8 @@ import { preimageMatches } from '../utils/payment-proofs';
 import { chainLabel } from '../utils/orchestra-ui';
 import { formatRecordAmount } from '../utils/crosschain-history';
 import { activityExplorerUrl } from '../utils/explorer';
-import { RGB_TRANSFER_STATUS_LABEL, canCancelRgbTransfer, rgbOnchainKindLabel, canDeleteRgbTransfer, rgbTransferStatusDetail, rgbWalletErrorMessage, rgbWalletSupport } from '../utils/rgb-wallet';
-import { cancelRgbTransfer, deleteRgbTransfer } from '../services/rgbWallet';
+import { canCancelRgbTransfer, canDeleteRgbTransfer, rgbTransferProgressLabel, rgbTransferStatusDetail, rgbWalletErrorMessage, rgbWalletSupport } from '../utils/rgb-wallet';
+import { cancelRgbTransfer, deleteRgbTransfer, refreshRgbTransfers } from '../services/rgbWallet';
 import { rgbAccountAdapter } from '../services/protocols';
 import { middleEllipsis } from './receive/ReceiveRequestDetails';
 
@@ -64,6 +64,8 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
     const [cancelling, setCancelling] = useState(false);
     const [cancelMessage, setCancelMessage] = useState('');
     useEffect(() => { setCancelling(false); setCancelMessage(''); }, [item?.id]);
+    const [statusCheck, setStatusCheck] = useState<{ checking: boolean; message: string } | null>(null);
+    useEffect(() => { setStatusCheck(null); }, [item?.id]);
     // The preimage: from the account's history, else the proof kept when this phone paid.
     const [proof, setProof] = useState<{ preimage: string; paymentHash?: string } | null>(null);
     useEffect(() => {
@@ -100,6 +102,8 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
     const cancellable = !!rgb && canCancelRgbTransfer(rgb, rgbSupport);
     const removable = !!rgb && canDeleteRgbTransfer(rgb, rgbSupport);
     const rgbSettled = rgb?.status === 'settled';
+    const pendingRgb = rgb && item.status === 'pending' && !cancelled;
+    const canCheckStatus = pendingRgb && onRefresh && rgbSupport.listTransfers;
     const statusDetail = rgb ? (rgbSettled ? '' : rgbTransferStatusDetail(rgb.status, rgb.direction))
         : item.status === 'unknown' ? 'The provider has not confirmed the outcome. Check the status before paying again.'
         : item.status === 'pending' ? 'Submitted and waiting for confirmation. You can leave this screen and check again later.'
@@ -134,6 +138,26 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
             <Ionicons name="open-outline" size={16} color={theme.colors.primary[500]} />
         </TouchableOpacity>}
     </View> });
+    const checkStatus = async () => {
+        if (!onRefresh || statusCheck?.checking) return;
+        const check = { checking: true, message: '' };
+        setStatusCheck(check);
+        let message = '';
+        try {
+            const connection = await rgbAdapter?.getConnectionInfo?.();
+            if (item.network && connection?.network && item.network !== connection.network) {
+                message = `Switch RGB to ${chainLabel(item.network)} to check this transfer.`;
+                return;
+            }
+            if (rgbSupport.refreshTransfers) await refreshRgbTransfers(rgbAdapter);
+            const refreshed = await onRefresh();
+            if (refreshed === false) message = 'Could not refresh all accounts. Try checking again.';
+        } catch {
+            message = 'Could not check this transfer. Check your connection and try again.';
+        } finally {
+            setStatusCheck(current => current === check ? { checking: false, message } : current);
+        }
+    };
     const removeTransfer = () => {
         if (!rgb || rgb.batchTransferIdx == null) return;
         Alert.alert(
@@ -225,12 +249,16 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
                     <View style={styles.headerStatus}>
                         <View style={[styles.statusPill, { backgroundColor: st.color + '1A' }]}>
                             <View style={[styles.statusDot, { backgroundColor: st.color }]} />
-                            <Text style={[styles.statusText, { color: st.color }]}>{cancelled ? 'Cancelled' : rgb && rgb.status !== 'settled' ? RGB_TRANSFER_STATUS_LABEL[rgb.status] : statusLabel}</Text>
+                            <Text style={[styles.statusText, { color: st.color }]}>{cancelled ? 'Cancelled' : rgb && !rgbSettled ? rgbTransferProgressLabel(rgb) : statusLabel}</Text>
                         </View>
                     </View>
                     {!!statusDetail && <Text style={styles.statusDetail}>{statusDetail}</Text>}
                 </View>
 
+                    {canCheckStatus && <Button title="Check status" variant="secondary" onPress={checkStatus}
+                        loading={statusCheck?.checking} disabled={cancelling} />}
+                    {pendingRgb && onRefresh && !rgbSupport.kind && <Text style={styles.rowLabel}>Connect your RGB account to check for updates.</Text>}
+                    {!!statusCheck?.message && <Text accessibilityLiveRegion="polite" style={styles.rowLabel}>{statusCheck.message}</Text>}
                     <TouchableOpacity accessibilityRole="button" accessibilityState={{ expanded: detailsExpanded }} style={styles.closeButton} onPress={() => setDetailsExpanded(!detailsExpanded)}>
                         <Text style={styles.closeButtonText}>{detailsExpanded ? 'Hide details' : 'Payment details'}</Text>
                     </TouchableOpacity>
@@ -307,10 +335,8 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
                             <Text style={[styles.closeButtonText, { color: theme.colors.error[500] }]}>{cancelling ? 'Cancelling…' : rgb?.direction === 'incoming' ? 'Cancel invoice' : 'Cancel transfer'}</Text>
                         </TouchableOpacity>
                     )}
-                    {rgb && item.status === 'pending' && !cancelled && !cancellable && <Text style={styles.rowLabel}>
-                        {rgb.status === 'waiting-counterparty'
-                            ? 'Cancellation is unavailable for this account. Check the transfer in the connected RGB wallet.'
-                            : 'This transfer cannot be cancelled at this stage. Check its status for updates.'}
+                    {rgb?.status === 'waiting-counterparty' && rgbSupport.kind && !cancelled && !cancellable && <Text style={styles.rowLabel}>
+                        Manage cancellation in the connected RGB wallet.
                     </Text>}
                     {removable && (
                         <TouchableOpacity accessibilityRole="button" style={styles.closeButton} disabled={cancelling} onPress={removeTransfer} activeOpacity={0.8}>

@@ -19,12 +19,23 @@ import {
   mergeActivity,
   onchainBtcItems,
   streamActivity,
+  transferItems,
   type ActivityProgress,
 } from '../services/ActivityService';
 
 describe('ActivityService', () => {
   beforeEach(() => {
     for (const key of Object.keys(adapters)) delete adapters[key];
+  });
+
+  it('keeps the activity row identifier as a local RGB transfer gains a txid', () => {
+    const asset = { asset_id: 'rgb:asset', ticker: 'RATEQA', name: 'Rate QA', precision: 0 };
+    const transfer = { idx: 7, kind: 'ReceiveWitness', requested_assignment: { value: 5 } };
+    const [waiting] = transferItems([{ ...transfer, status: 'WaitingCounterparty' }], asset, 'mutinynet', 0);
+    const [confirmed] = transferItems([{ ...transfer, status: 'Settled', txid: 'broadcast' }], asset, 'mutinynet', 9);
+    expect(confirmed.id).toBe(waiting.id);
+    expect(confirmed.status).toBe('confirmed');
+    expect(confirmed.txid).toBe('broadcast');
   });
 
   it('keeps confirmed Spark and Arkade transactions confirmed in activity', async () => {

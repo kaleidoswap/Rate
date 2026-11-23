@@ -26,3 +26,14 @@ test('dollar formatting keeps cents and small values readable', () => {
   expect(formatUsd(1234.5)).toBe('$1,234.50');
   expect(formatUsd(0.0042)).toBe('$0.0042');
 });
+
+test('masks asset balances and fiat values visually and in accessibility labels', () => {
+  const onAssetPress = jest.fn();
+  const screen = render(<AssetList hideAmounts onViewAll={jest.fn()} onAssetPress={onAssetPress}
+    assets={[asset('USDT', { protocol: 'RGB', balance: { spendable: 42 }, fiatValue: 42 })]} />);
+  const row = screen.getByLabelText('USDT on RGB, balance hidden');
+  expect(screen.getByText('••••')).toBeTruthy();
+  expect(screen.queryByText(/42/)).toBeNull();
+  fireEvent.press(row);
+  expect(onAssetPress).toHaveBeenCalledWith(expect.objectContaining({ asset_id: 'USDT' }));
+});

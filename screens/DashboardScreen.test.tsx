@@ -40,7 +40,9 @@ jest.mock('../components', () => ({
     return h(Fragment, {}, h(Text, {}, loading ? 'Loading balance' : 'Balance ready'), updating ? h(Text, {}, 'Updating') : null,
       h(Text, {}, `Accounts: ${accounts || 'none'}`), h(Text, {}, `Waiting: ${(pendingAccounts ?? []).join(', ')}`));
   },
-  ActionButtons: () => null, AssetList: () => null, ChannelList: () => null, MainHeader: ({ leftNode }: any) => leftNode ?? null,
+  ActionButtons: () => null,
+  AssetList: () => require('react').createElement(require('react-native').Text, {}, 'Assets'),
+  ChannelList: () => null, MainHeader: ({ leftNode }: any) => leftNode ?? null,
 }));
 
 describe('dashboard connection recovery', () => {
@@ -79,6 +81,7 @@ describe('dashboard connection recovery', () => {
     const screen = render(<DashboardScreen navigation={{ navigate: jest.fn() }} />);
     await waitFor(() => expect(screen.getByText('Balance unavailable')).toBeTruthy());
     expect(screen.queryByText('Loading balance')).toBeNull();
+    expect(screen.queryByText('Assets')).toBeNull();
     const adapter = {
       isConnected: () => true, getNodeInfo: jest.fn().mockResolvedValue({}),
       getBtcBalance: jest.fn().mockResolvedValue({ confirmed: 0, unconfirmed: 0, total: 0 }),
@@ -86,10 +89,11 @@ describe('dashboard connection recovery', () => {
     };
     (protocolManager.getAdapterIfAvailable as jest.Mock).mockImplementation(p => p === 'SPARK' ? adapter : undefined);
     (initializeProtocolServices as jest.Mock).mockResolvedValue({ results: new Map([['SPARK', { success: true }]]) });
-    fireEvent.press(screen.getByText('Wallet connection unavailable. Tap to retry.'));
+    fireEvent.press(screen.getByLabelText('Retry wallet connection'));
     await waitFor(() => expect(screen.getByText('Balance ready')).toBeTruthy());
     expect(initializeProtocolServices).toHaveBeenCalledTimes(2);
     expect(adapter.getBtcBalance).toHaveBeenCalled();
+    expect(screen.getByText('Assets')).toBeTruthy();
     expect(screen.queryByText('Balance unavailable')).toBeNull();
   });
   it('drops RGB on this phone from the offline banner once it connects after startup', async () => {

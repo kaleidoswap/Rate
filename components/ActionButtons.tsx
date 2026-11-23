@@ -1,7 +1,7 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { theme } from '../theme';
+import { useAppTheme } from '../theme/ThemeProvider';
 import { feedback } from '../utils/feedback';
 import { PressableScale } from './PressableScale';
 
@@ -11,59 +11,40 @@ interface ActionButtonsProps {
     onSwap: () => void;
 }
 
-type Tone = 'receive' | 'swap' | 'send';
-
 const ACTION_ITEMS: Array<{
-    key: string;
+    action: keyof ActionButtonsProps;
     label: string;
     icon: keyof typeof Ionicons.glyphMap;
-    tone: Tone;
-    action: keyof ActionButtonsProps;
 }> = [
-    { key: 'receive', label: 'Receive', icon: 'arrow-down', tone: 'receive', action: 'onReceive' },
-    { key: 'swap', label: 'Swap', icon: 'swap-horizontal', tone: 'swap', action: 'onSwap' },
-    { key: 'send', label: 'Send', icon: 'arrow-up', tone: 'send', action: 'onSend' },
+    { action: 'onReceive', label: 'Receive', icon: 'arrow-down' },
+    { action: 'onSend', label: 'Send', icon: 'arrow-up' },
+    { action: 'onSwap', label: 'Swap', icon: 'swap-horizontal' },
 ];
 
-// Keep the primary receive action prominent; secondary actions stay quiet.
-function tileStyle(tone: Tone): { backgroundColor: string; glyph: string; border?: string } {
-    switch (tone) {
-        case 'receive':
-            return { backgroundColor: theme.colors.primary[500], glyph: theme.colors.text.inverse };
-        case 'send':
-            return { backgroundColor: theme.colors.primary[50]!, glyph: theme.colors.primary[500], border: theme.colors.primary[100]! };
-        case 'swap':
-        default:
-            return { backgroundColor: theme.colors.surface.tertiary, glyph: theme.colors.text.primary };
-    }
-}
-
 export const ActionButtons: React.FC<ActionButtonsProps> = (props) => {
+    const theme = useAppTheme();
+    const styles = makeStyles(theme);
+    const { fontScale } = useWindowDimensions();
+    const stacked = fontScale >= 1.4;
+
     return (
-        <View style={styles.actionButtons}>
-            {ACTION_ITEMS.map(item => {
-                const t = tileStyle(item.tone);
+        <View style={[styles.actions, stacked && styles.stacked]}>
+            {ACTION_ITEMS.map(({ action, label, icon }) => {
+                const primary = action === 'onReceive';
+                const color = primary ? theme.colors.text.inverse : theme.colors.text.primary;
                 return (
                     <PressableScale
-                        key={item.key}
-                        style={styles.actionButton}
+                        key={action}
+                        style={[styles.action, stacked && styles.wideAction, primary && styles.primaryAction]}
                         onPress={() => {
                             feedback.tap();
-                            props[item.action]?.();
+                            props[action]();
                         }}
                         accessibilityRole="button"
-                        accessibilityLabel={item.label}
+                        accessibilityLabel={label}
                     >
-                        <View
-                            style={[
-                                styles.actionButtonTile,
-                                { backgroundColor: t.backgroundColor },
-                                t.border ? { borderWidth: 1, borderColor: t.border } : null,
-                            ]}
-                        >
-                            <Ionicons name={item.icon} size={22} color={t.glyph} />
-                        </View>
-                        <Text style={styles.actionButtonText}>{item.label}</Text>
+                        <Ionicons name={icon} size={22} color={color} />
+                        <Text style={[styles.label, { color }]}>{label}</Text>
                     </PressableScale>
                 );
             })}
@@ -71,28 +52,36 @@ export const ActionButtons: React.FC<ActionButtonsProps> = (props) => {
     );
 };
 
-const styles = StyleSheet.create({
-    // Footer inside the BalanceCard — no own card chrome (the card provides it).
-    actionButtons: {
+const makeStyles = (theme: ReturnType<typeof useAppTheme>) => StyleSheet.create({
+    actions: {
         flexDirection: 'row',
-        justifyContent: 'space-around',
+        gap: theme.spacing[2],
     },
-    actionButton: {
-        alignItems: 'center',
+    stacked: {
+        flexDirection: 'column',
+    },
+    action: {
         flex: 1,
-        gap: theme.spacing[1.5],
-    },
-    actionButtonTile: {
-        width: 48,
-        height: 48,
-        borderRadius: 24,
+        minHeight: 64,
+        minWidth: 0,
         justifyContent: 'center',
         alignItems: 'center',
+        gap: theme.spacing[1],
+        padding: theme.spacing[2],
+        borderRadius: theme.borderRadius.lg,
+        backgroundColor: theme.colors.surface.secondary,
     },
-    actionButtonText: {
-        fontSize: theme.typography.fontSize.xs,
+    wideAction: {
+        flex: 0,
+        flexDirection: 'row',
+        gap: theme.spacing[2],
+    },
+    primaryAction: {
+        backgroundColor: theme.colors.primary[500],
+    },
+    label: {
+        fontSize: theme.typography.fontSize.sm,
         fontWeight: theme.typography.fontWeight.semibold,
-        color: theme.colors.text.primary,
-        letterSpacing: 0.2,
+        textAlign: 'center',
     },
 });

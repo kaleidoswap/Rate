@@ -23,7 +23,7 @@ import { MainHeader } from '../components/MainHeader';
 import { Sheet } from '../components/Sheet';
 import { Button } from '../components/Button';
 import { EmptyState } from '../components/EmptyState';
-import { theme } from '../theme';
+import { useAppTheme } from '../theme/ThemeProvider';
 import {
     ACTIVITY_NETWORK_LABEL,
     LAYER_LABEL,
@@ -36,21 +36,20 @@ import {
 import { NetworkIcon } from '../components/NetworkIcon';
 import {
     type ActivityItem,
-    type ActivityItemType,
     type ActivityLayer,
-    type ActivityStatus,
     type AssetMeta,
 } from '../services/ActivityService';
 import { dismissPendingPayment, loadPendingPaymentActivity, loadSwapAttemptActivity, PAYMENT_ATTEMPT_KIND, paymentAttemptIdOf } from '../services/kaleidoPay/activity';
 import { confirmRemovePayment } from '../components/payments/confirmRemovePayment';
 import { ACTIVITY_STATUS_VISUAL } from '../utils/paymentStatus';
 import { activityAmountIsIncoming, activityAmountPrefix, activityIcon, activityShortTime, activityTypeLabel, activityToneColor } from '../utils/activity-presentation';
+import { rgbTransferProgressLabel } from '../utils/rgb-wallet';
 import { SearchField } from '../components/SearchField';
 import { useFiatRates } from '../hooks/useFiatRates';
 import { formatSatoshisToUSD } from '../utils/bitcoinUnits';
 import { ActivityDetailSheet } from '../components/ActivityDetailSheet';
 import { AgentWalletStore, type AgentLedgerEntry } from '../services/agentWallet/store';
-import { AGENT_ACTIVITY_KIND, agentActivityItems } from '../services/agentWallet/activity';
+import { agentActivityItems } from '../services/agentWallet/activity';
 
 const FILTERS: { key: ActivityTab; label: string }[] = [
     { key: 'all', label: 'All' },
@@ -77,7 +76,7 @@ const typeLabel = activityTypeLabel;
 // sourced from the shared kaleido-ui tokens, so the chips stay contrast-safe
 // and match the web. Layers without a network token fall back to the neutral
 // surface chip.
-function layerChipColors(layer: ActivityLayer): { bg: string; text: string } {
+function layerChipColors(layer: ActivityLayer, theme: ReturnType<typeof useAppTheme>): { bg: string; text: string } {
     switch (layer) {
         case 'L1':
             return { bg: theme.colors.networkChip.bitcoin, text: theme.colors.networkText.bitcoin };
@@ -112,6 +111,8 @@ function sectionTitle(ts?: number): string {
 }
 
 export default function HistoryScreen({ previewItems, previewPeriod }: { previewItems?: ActivityItem[]; previewPeriod?: ActivityPeriod } = {}) {
+    const theme = useAppTheme();
+    const styles = useMemo(() => createStyles(theme), [theme]);
     const demo = __DEV__ ? previewItems : undefined;
     const [period, setPeriod] = useState<ActivityPeriod>('all');
     useEffect(() => { if (demo) setPeriod(previewPeriod ?? 'all'); }, [demo, previewPeriod]);
@@ -157,7 +158,7 @@ export default function HistoryScreen({ previewItems, previewPeriod }: { preview
         walletId,
     }), [rgbAssets, swapHistory, walletId]);
     const feed = useActivityFeed(feedOptions, 15000);
-    const { result } = feed;
+    const { result, refresh } = feed;
 
     // A payment still being checked sits in the history like any other pending item.
     useEffect(() => {
@@ -201,8 +202,8 @@ export default function HistoryScreen({ previewItems, previewPeriod }: { preview
 
     const onRefresh = useCallback(async () => {
         setRefreshing(true);
-        try { if (!demo) await feed.refresh(); } finally { setRefreshing(false); }
-    }, [feed.refresh, demo]);
+        try { if (!demo) await refresh(); } finally { setRefreshing(false); }
+    }, [refresh, demo]);
 
     // Which network a payment used is Advanced detail: Lite has no network filter.
     const networks = useMemo(() => (policy.showNetworks ? activityNetworks(items) : []), [items, policy.showNetworks]);
@@ -256,11 +257,13 @@ export default function HistoryScreen({ previewItems, previewPeriod }: { preview
         const v = activityIcon(item.type);
         const vColor = activityToneColor(v.tone, theme);
         const st = statusVisual[item.status];
-        const chip = layerChipColors(item.layer);
+        const pendingRgb = item.status === 'pending' ? item.rgbTransfer : undefined;
+        const progressLabel = pendingRgb ? rgbTransferProgressLabel(pendingRgb) : st.label;
+        const chip = layerChipColors(item.layer, theme);
         const hasAmount = item.amount !== '';
         const fiat = hasAmount && item.rawSats != null && usdRate ? `≈ $${formatSatoshisToUSD(item.rawSats, usdRate)}` : '';
         return (
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel={`${typeLabel(item)}${item.contactName ? ` · ${item.contactName}` : ''}, ${item.amount} ${item.assetTicker}${fiat ? `, ${fiat}` : ''}, ${st.label}. Open details`} activeOpacity={0.7} style={styles.row} onPress={() => item.kind === PAYMENT_ATTEMPT_KIND ? navigation.navigate('Send', { resumePayment: true, paymentAttemptId: item.id.replace('payment-attempt-', '') }) : setSelectedItem(item)}
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel={`${typeLabel(item)}${item.contactName ? ` · ${item.contactName}` : ''}, ${item.amount} ${item.assetTicker}${fiat ? `, ${fiat}` : ''}, ${progressLabel}. ${pendingRgb ? 'View status' : 'Open details'}`} activeOpacity={0.7} style={styles.row} onPress={() => item.kind === PAYMENT_ATTEMPT_KIND ? navigation.navigate('Send', { resumePayment: true, paymentAttemptId: item.id.replace('payment-attempt-', '') }) : setSelectedItem(item)}
                 onLongPress={paymentAttemptIdOf(item) ? () => removePayment(item) : undefined}
                 accessibilityActions={paymentAttemptIdOf(item) ? [{ name: 'longpress', label: 'Remove from Activity' }] : undefined}
                 onAccessibilityAction={(e) => { if (e.nativeEvent.actionName === 'longpress') removePayment(item); }}>
@@ -301,11 +304,22 @@ export default function HistoryScreen({ previewItems, previewPeriod }: { preview
                                 </Text>
                             )}
                         </View>
-                        <View style={styles.statusRow}>
-                            <View style={[styles.statusDot, { backgroundColor: st.color }]} />
-                            <Text style={[styles.statusText, { color: st.color }]}>{st.label}</Text>
-                        </View>
+                        {pendingRgb ? (
+                            <View style={styles.statusRow}>
+                                <Text style={styles.statusAction}>View status</Text>
+                                <Ionicons name="chevron-forward" size={12} color={theme.colors.primary[500]} />
+                            </View>
+                        ) : (
+                            <View style={styles.statusRow}>
+                                <View style={[styles.statusDot, { backgroundColor: st.color }]} />
+                                <Text style={[styles.statusText, { color: st.color }]}>{progressLabel}</Text>
+                            </View>
+                        )}
                     </View>
+                    {pendingRgb && <View style={styles.statusRow}>
+                        <View style={[styles.statusDot, { backgroundColor: st.color }]} />
+                        <Text style={[styles.statusText, styles.progressText, { color: st.color }]}>{progressLabel}</Text>
+                    </View>}
                 </View>
             </TouchableOpacity>
         );
@@ -393,12 +407,12 @@ export default function HistoryScreen({ previewItems, previewPeriod }: { preview
                     )}
                 />
 
-            <ActivityDetailSheet onRefresh={demo ? undefined : feed.refresh} item={items.find(item => item.id === selectedItem?.id) ?? selectedItem} onClose={() => setSelectedItem(null)} />
+            <ActivityDetailSheet onRefresh={demo ? undefined : refresh} item={items.find(item => item.id === selectedItem?.id) ?? selectedItem} onClose={() => setSelectedItem(null)} />
         </View>
     );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: ReturnType<typeof useAppTheme>) => StyleSheet.create({
     container: {
         flex: 1,
         backgroundColor: theme.colors.background.secondary,
@@ -514,6 +528,8 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        columnGap: theme.spacing[2],
     },
     metaRow: {
         flexDirection: 'row',
@@ -551,6 +567,15 @@ const styles = StyleSheet.create({
     statusText: {
         fontSize: theme.typography.fontSize.xs,
         fontWeight: '600',
+    },
+    progressText: {
+        flexShrink: 1,
+        fontSize: theme.typography.fontSize.sm,
+    },
+    statusAction: {
+        fontSize: theme.typography.fontSize.xs,
+        fontWeight: '600',
+        color: theme.colors.primary[500],
     },
     amountColumn: {
         alignItems: 'flex-end',
