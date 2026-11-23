@@ -32,6 +32,23 @@ describe('wallet seed persistence', () => {
     await service.getActiveWallet();
     expect(db.runAsync).toHaveBeenCalledWith('UPDATE wallets SET encrypted_mnemonic = NULL WHERE id = ?', [4]);
   });
+  it('retries scrubbing when an earlier migration already saved the seed', async () => {
+    secure.storeMnemonic.mockResolvedValue(true);
+    db.runAsync.mockRejectedValueOnce(new Error('SQLite update was interrupted'));
+    await expect(service.getActiveWallet()).rejects.toThrow('SQLite update was interrupted');
+
+    secure.getMnemonic.mockResolvedValue(legacyWallet.encrypted_mnemonic);
+    await expect(service.getActiveWallet()).resolves.toMatchObject({ encrypted_mnemonic: legacyWallet.encrypted_mnemonic });
+    expect(secure.storeMnemonic).toHaveBeenCalledTimes(1);
+    expect(db.runAsync).toHaveBeenCalledTimes(2);
+    expect(db.runAsync).toHaveBeenLastCalledWith('UPDATE wallets SET encrypted_mnemonic = NULL WHERE id = ?', [4]);
+  });
+  it('keeps the legacy seed when secure storage returns a different value', async () => {
+    secure.getMnemonic.mockResolvedValue('different-test-seed');
+    await expect(service.getActiveWallet()).resolves.toMatchObject({ encrypted_mnemonic: 'different-test-seed' });
+    expect(secure.storeMnemonic).not.toHaveBeenCalled();
+    expect(db.runAsync).not.toHaveBeenCalled();
+  });
   it('rejects creation inside a transaction when the seed cannot be saved', async () => {
     secure.storeMnemonic.mockResolvedValue(false);
     await expect(service.createWallet(legacyWallet, [])).rejects.toThrow('Could not securely save your wallet');
