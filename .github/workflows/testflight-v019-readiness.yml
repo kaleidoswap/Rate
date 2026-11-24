@@ -79,22 +79,27 @@ jobs:
             throw new Error('The release key does not resolve the expected production app uniquely');
           }
           const app = apps[0].id;
-          const groupFields = 'isInternalGroup,publicLinkEnabled,publicLinkId,publicLink';
-          const publicGroups = get('/v1/betaGroups', {
+          const groupFields = 'isInternalGroup,hasAccessToAllBuilds,publicLinkEnabled,publicLinkId,publicLink';
+          const appGroups = get('/v1/betaGroups', {
             'filter[app]': app,
-            'filter[isInternalGroup]': 'false',
             'fields[betaGroups]': groupFields,
             limit: '200',
           }).data;
-          const invite = publicGroups.map(group => group.attributes).find(isPublishedInvite);
+          const appGroupAttributes = appGroups.map(group => group.attributes);
+          const invite = appGroupAttributes.find(isPublishedInvite);
+          const appInternal = appGroupAttributes.filter(group => group.isInternalGroup);
+          const automaticInternal = appInternal.filter(group => group.hasAccessToAllBuilds);
           const inviteStatus = invite ? (invite.publicLinkEnabled ? 'enabled' : 'disabled') : 'not found';
           const summary = [
             '## Production TestFlight build status',
             '',
-            'Published invite ' + publishedInvite + ' is ' + inviteStatus + '.',
+            'Published invite ' + publishedInvite + ' is ' + inviteStatus +
+              (invite?.publicLink === publishedInvite ? ' (exact URL verified).' : '.'),
+            'Automatic internal distribution is enabled for ' + automaticInternal.length +
+              ' of ' + appInternal.length + ' internal groups.',
             '',
-            '| Version | Build | Processing | Internal | External | Internal groups | External groups | Enabled public groups | Published invite |',
-            '| --- | --- | --- | --- | --- | ---: | ---: | ---: | --- |',
+            '| Version | Build | Processing | Internal | External | Internal groups | Automatic internal | External groups | Enabled public groups | Published invite |',
+            '| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | --- |',
           ];
 
           for (const version of ['0.18.0', '0.19.0']) {
@@ -116,11 +121,12 @@ jobs:
               attributesOf(build.relationships.preReleaseVersion?.data)?.platform === 'IOS'
             );
             if (builds.length === 0) {
-              summary.push('| ' + version + ' | — | No iOS build visible | — | — | — | — | — | — |');
+              summary.push('| ' + version + ' | — | No iOS build visible | — | — | — | — | — | — | — |');
               continue;
             }
             for (const build of builds) {
               const groups = (build.relationships.betaGroups?.data ?? []).map(attributesOf).filter(Boolean);
+              const internal = groups.filter(group => group.isInternalGroup);
               const external = groups.filter(group => group.isInternalGroup === false);
               const enabledLinks = external.filter(group => group.publicLinkEnabled);
               const details = attributesOf(build.relationships.buildBetaDetail?.data);
@@ -131,7 +137,8 @@ jobs:
                 processing,
                 details?.internalBuildState ?? '—',
                 details?.externalBuildState ?? '—',
-                groups.length - external.length,
+                internal.length,
+                internal.filter(group => group.hasAccessToAllBuilds).length,
                 external.length,
                 enabledLinks.length,
                 enabledLinks.some(isPublishedInvite) ? 'assigned' : '—',
