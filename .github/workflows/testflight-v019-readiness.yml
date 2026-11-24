@@ -105,7 +105,7 @@ jobs:
               'fields[preReleaseVersions]': 'version,platform',
               'fields[buildBetaDetails]': 'internalBuildState,externalBuildState',
               'fields[betaGroups]': groupFields,
-              'limit[betaGroups]': '200',
+              'limit[betaGroups]': '50',
               include: 'preReleaseVersion,buildBetaDetail,betaGroups',
               sort: '-uploadedDate',
               limit: '5',
