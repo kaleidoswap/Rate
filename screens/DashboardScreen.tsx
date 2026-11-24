@@ -29,6 +29,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { RootState } from '../store';
 import { initializeProtocolServices } from '../services/initializeServices';
+import { BFA_TEST_BUILD } from '../services/buildVariant';
 import { protocolManager, rgbAccountAdapter } from '../services/protocols';
 import { setBtcBalance } from '../store/slices/walletSlice';
 import { setProtocolAssets, setRgbAssets } from '../store/slices/assetsSlice';
@@ -900,7 +901,12 @@ export default function DashboardScreen({ navigation }: Props) {
       {/* Sticky header: lives outside the ScrollView so it stays fixed while
           content scrolls beneath it. `elevated` gives it a downward shadow. */}
       <MainHeader
-        leftNode={
+        leftNode={BFA_TEST_BUILD ? (
+          <View>
+            <Text style={styles.testTitle}>Rate BFA Test</Text>
+            <Text style={styles.testSubtitle}>Mutinynet</Text>
+          </View>
+        ) : (
           <ProfileChip
             profile={nostrProfile}
             hasIdentity={hasNostrIdentity}
@@ -908,7 +914,7 @@ export default function DashboardScreen({ navigation }: Props) {
             subtitle={payableLine}
             onPress={openProfile}
           />
-        }
+        )}
         showLogo={false}
         showSettings
         elevated
@@ -1004,7 +1010,7 @@ export default function DashboardScreen({ navigation }: Props) {
               <ActionButtons
                 onSend={() => navigation.getParent()?.navigate('Send')}
                 onReceive={() => navigation.getParent()?.navigate('Receive')}
-                onSwap={() => navigation.getParent()?.navigate('Swap')}
+                onSwap={BFA_TEST_BUILD ? undefined : () => navigation.getParent()?.navigate('Swap')}
               />
             }
           />}
@@ -1087,6 +1093,8 @@ export default function DashboardScreen({ navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
+  testTitle: { color: theme.colors.text.primary, fontSize: theme.typography.fontSize.base, fontWeight: '600' },
+  testSubtitle: { color: theme.colors.text.secondary, fontSize: theme.typography.fontSize.xs },
   container: {
     flex: 1,
     backgroundColor: theme.colors.background.primary,

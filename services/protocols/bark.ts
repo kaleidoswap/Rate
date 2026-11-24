@@ -22,6 +22,7 @@ import { Directory, Paths } from 'expo-file-system'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js'
 import type { BarkConfig } from '@kaleidorg/wallet-engine'
+import { BFA_TEST_BUILD } from '../buildVariant'
 
 /** OTA/JS updates may run on a dev client built before Bark was added. */
 export function isBarkNativeAvailable(): boolean {
@@ -32,7 +33,7 @@ export type BarkNetwork = NonNullable<BarkConfig['network']>
 
 // EXPO_PUBLIC_* vars are inlined at build time only on direct member access, so
 // read each one explicitly — `process.env` as an object is empty at runtime.
-export const BARK_ENABLED = process.env.EXPO_PUBLIC_BARK !== '0'
+export const BARK_ENABLED = !BFA_TEST_BUILD && process.env.EXPO_PUBLIC_BARK !== '0'
 const BARK_ENV: Record<string, string | undefined> = {
   EXPO_PUBLIC_BARK_NETWORK: process.env.EXPO_PUBLIC_BARK_NETWORK,
   EXPO_PUBLIC_BARK_SERVER_URL: process.env.EXPO_PUBLIC_BARK_SERVER_URL,

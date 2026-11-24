@@ -7,6 +7,8 @@
  *   off until the user turns them on in Settings → Labs.
  */
 
+import { BFA_TEST_BUILD } from './buildVariant';
+
 export type Channel = 'dev' | 'beta' | 'store';
 
 /** Off by default outside `dev`; the user can turn them on. */
@@ -32,6 +34,7 @@ export function isLabsFeature(feature: Feature): feature is LabsFeature {
 
 /** Whether the build ships the feature at all. */
 export function isAvailable(feature: Feature, channel: Channel = CHANNEL): boolean {
+  if (BFA_TEST_BUILD) return feature === 'rgbOnDevice';
   return channel === 'dev' || isLabsFeature(feature);
 }
 

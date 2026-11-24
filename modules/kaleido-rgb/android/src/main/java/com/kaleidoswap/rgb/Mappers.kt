@@ -1,38 +1,43 @@
 package com.kaleidoswap.rgb
 
-import org.rgbtools.AssetCfa
-import org.rgbtools.AssetIfa
-import org.rgbtools.AssetNia
-import org.rgbtools.AssetSchema
-import org.rgbtools.AssetUda
-import org.rgbtools.Assets
-import org.rgbtools.Assignment
-import org.rgbtools.Balance
-import org.rgbtools.BitcoinNetwork
-import org.rgbtools.BlockTime
-import org.rgbtools.BtcBalance
-import org.rgbtools.InvoiceData
-import org.rgbtools.Keys
-import org.rgbtools.Media
-import org.rgbtools.Metadata
-import org.rgbtools.OperationResult
-import org.rgbtools.Outpoint
-import org.rgbtools.ReceiveData
-import org.rgbtools.Recipient
-import org.rgbtools.RefreshFilter
-import org.rgbtools.RefreshTransferStatus
-import org.rgbtools.RefreshedTransfer
-import org.rgbtools.RgbLibException
-import org.rgbtools.SyncKeychain
-import org.rgbtools.SyncOptions
-import org.rgbtools.SyncStrategy
-import org.rgbtools.Token
-import org.rgbtools.TokenLight
-import org.rgbtools.Transaction
-import org.rgbtools.Transfer
-import org.rgbtools.Unspent
-import org.rgbtools.WitnessData
-import org.rgbtools.WitnessVersion
+import com.utexo.AssetBfa
+import com.utexo.AssetCfa
+import com.utexo.AssetIfa
+import com.utexo.AssetNia
+import com.utexo.AssetSchema
+import com.utexo.AssetUda
+import com.utexo.Assets
+import com.utexo.Assignment
+import com.utexo.Balance
+import com.utexo.BitcoinNetwork
+import com.utexo.BlockTime
+import com.utexo.BtcBalance
+import com.utexo.Encryption
+import com.utexo.EvmChain
+import com.utexo.IndexerConfig
+import com.utexo.InvoiceData
+import com.utexo.Keys
+import com.utexo.Media
+import com.utexo.Metadata
+import com.utexo.OnlineOptions
+import com.utexo.OperationResult
+import com.utexo.Outpoint
+import com.utexo.ReceiveData
+import com.utexo.Recipient
+import com.utexo.RefreshFilter
+import com.utexo.RefreshTransferStatus
+import com.utexo.RefreshedTransfer
+import com.utexo.RgbLibException
+import com.utexo.SyncKeychain
+import com.utexo.SyncOptions
+import com.utexo.SyncStrategy
+import com.utexo.Token
+import com.utexo.TokenLight
+import com.utexo.Transaction
+import com.utexo.Transfer
+import com.utexo.Unspent
+import com.utexo.WitnessData
+import com.utexo.WitnessVersion
 
 class InvalidArgument(message: String) : IllegalArgumentException(message)
 
@@ -53,6 +58,10 @@ class Args(private val map: Map<String, Any?>) {
   }
   fun intOrNull(key: String): Int? = numberOrNull(key)?.toInt()
   fun strings(key: String): List<String> = (map[key] as? List<*>)?.map { it as? String ?: throw InvalidArgument("$key must hold strings") } ?: emptyList()
+  fun stringMap(key: String): Map<String, String> {
+    if (!has(key)) return emptyMap()
+    return raw(key).mapValues { (_, value) -> value as? String ?: throw InvalidArgument("$key must hold strings") }
+  }
   fun uLongs(key: String): List<ULong> = (map[key] as? List<*>)?.map {
     val n = (it as? Number)?.toDouble() ?: throw InvalidArgument("$key must hold numbers")
     nonNegative(key, n).toULong()
@@ -67,12 +76,15 @@ class Args(private val map: Map<String, Any?>) {
   fun raw(key: String): Map<String, Any?> = map[key] as? Map<String, Any?> ?: throw InvalidArgument("$key must be an object")
 
   private fun nonNegative(key: String, n: Double): Double {
-    if (n < 0 || n.isNaN() || n != Math.floor(n)) throw InvalidArgument("$key must be a whole number >= 0")
+    if (n < 0 || !n.isFinite() || n != Math.floor(n)) throw InvalidArgument("$key must be a whole number >= 0")
     return n
   }
 }
 
 object Mappers {
+  // The native library's tests keep failed witness-receive scripts syncing for one week.
+  private const val FAILED_WITNESS_RECEIVE_GRACE_SECS = 604800u
+
   fun network(value: String): BitcoinNetwork =
     BitcoinNetwork.entries.firstOrNull { it.name == value } ?: throw InvalidArgument("Unknown bitcoin network: $value")
 
@@ -85,10 +97,43 @@ object Mappers {
     else -> throw InvalidArgument("Unknown witness version: $value")
   }
 
+  fun encryption(value: String?): Encryption? = value?.let { name ->
+    Encryption.entries.firstOrNull { it.name == name } ?: throw InvalidArgument("Unknown encryption mode: $name")
+  }
+
+  fun onlineOptions(a: Args): OnlineOptions {
+    val url = a.string("indexerUrl")
+    val indexer = if (url.startsWith("https://", ignoreCase = true) || url.startsWith("http://", ignoreCase = true)) {
+      IndexerConfig.Esplora(url)
+    } else {
+      IndexerConfig.Electrum(url)
+    }
+    val evmChains = if (a.has("evmChains")) {
+      val chains = a.obj("evmChains")
+      a.raw("evmChains").keys.associate { key ->
+        val chainId = key.toULongOrNull() ?: throw InvalidArgument("Invalid EVM chain ID: $key")
+        val chain = chains.obj(key)
+        chainId to EvmChain(chain.string("rpcUrl"), chain.uLong("minMintLockBlocks"), chain.uLong("maxMintLockBlocks"))
+      }
+    } else {
+      emptyMap()
+    }
+    return OnlineOptions(
+      indexerConfig = indexer,
+      skipConsistencyCheck = a.bool("skipConsistencyCheck", false),
+      vanillaSyncLookback = a.uInt("vanillaSyncLookback"),
+      failedWitnessReceiveGraceSecs = if (a.has("failedWitnessReceiveGraceSecs")) a.uInt("failedWitnessReceiveGraceSecs") else FAILED_WITNESS_RECEIVE_GRACE_SECS,
+      proxyAuthKeys = a.stringMap("proxyAuthKeys"),
+      evmChains = evmChains,
+    )
+  }
+
   fun assignment(a: Args): Assignment = when (val type = a.string("type")) {
     "FUNGIBLE" -> Assignment.Fungible(a.uLong("amount"))
     "NON_FUNGIBLE" -> Assignment.NonFungible
     "INFLATION_RIGHT" -> Assignment.InflationRight(a.uLong("amount"))
+    "LINK_RIGHT" -> Assignment.LinkRight
+    "MINT_RIGHT" -> Assignment.MintRight
     "ANY" -> Assignment.Any
     else -> throw InvalidArgument("Unknown assignment type: $type")
   }
@@ -98,6 +143,9 @@ object Mappers {
     witnessData = r.objOrNull("witnessData")?.let { WitnessData(it.uLong("amountSat"), it.uLongOrNull("blinding")) },
     assignment = assignment(r.obj("assignment")),
     transportEndpoints = r.strings("transportEndpoints"),
+    publicKey = r.stringOrNull("publicKey"),
+    encryption = encryption(r.stringOrNull("encryption")) ?: Encryption.UNSUPPORTED,
+    expirationTimestamp = r.uLongOrNull("expirationTimestamp"),
   )
 
   fun refreshFilter(f: Args): RefreshFilter {
@@ -120,6 +168,8 @@ object Mappers {
     is Assignment.Fungible -> mapOf("type" to "FUNGIBLE", "amount" to a.amount.toDouble())
     is Assignment.NonFungible -> mapOf("type" to "NON_FUNGIBLE")
     is Assignment.InflationRight -> mapOf("type" to "INFLATION_RIGHT", "amount" to a.amount.toDouble())
+    is Assignment.LinkRight -> mapOf("type" to "LINK_RIGHT")
+    is Assignment.MintRight -> mapOf("type" to "MINT_RIGHT")
     is Assignment.Any -> mapOf("type" to "ANY")
   }
 
@@ -184,22 +234,32 @@ object Mappers {
     "addedAt" to a.addedAt.toDouble(), "balance" to toJs(a.balance), "media" to toJs(a.media), "rejectListUrl" to a.rejectListUrl,
   )
 
+  fun toJs(a: AssetBfa): Map<String, Any?> = mapOf(
+    "assetId" to a.assetId, "ticker" to a.ticker, "name" to a.name, "details" to a.details,
+    "precision" to a.precision.toInt(), "knownCirculatingSupply" to a.knownCirculatingSupply.toDouble(),
+    "timestamp" to a.timestamp.toDouble(), "addedAt" to a.addedAt.toDouble(), "balance" to toJs(a.balance),
+    "media" to toJs(a.media), "rejectListUrl" to a.rejectListUrl,
+  )
+
   fun toJs(a: Assets): Map<String, Any?> = mapOf(
     "nia" to a.nia?.map { toJs(it) },
     "uda" to a.uda?.map { toJs(it) },
     "cfa" to a.cfa?.map { toJs(it) },
     "ifa" to a.ifa?.map { toJs(it) },
+    "bfa" to a.bfa?.map { toJs(it) },
   )
 
   fun toJs(m: Metadata): Map<String, Any?> = mapOf(
     "assetSchema" to m.assetSchema.name, "initialSupply" to m.initialSupply.toDouble(), "maxSupply" to m.maxSupply.toDouble(),
     "knownCirculatingSupply" to m.knownCirculatingSupply.toDouble(), "timestamp" to m.timestamp.toDouble(), "name" to m.name,
     "precision" to m.precision.toInt(), "ticker" to m.ticker, "details" to m.details, "token" to toJs(m.token), "rejectListUrl" to m.rejectListUrl,
+    "linkedFromContract" to m.linkedFromContract, "linkedToContract" to m.linkedToContract,
   )
 
   fun toJs(r: ReceiveData): Map<String, Any?> = mapOf(
     "invoice" to r.invoice, "recipientId" to r.recipientId,
     "expirationTimestamp" to r.expirationTimestamp.toDouble(), "batchTransferIdx" to r.batchTransferIdx,
+    "publicKey" to r.publicKey,
   )
 
   fun toJs(r: OperationResult): Map<String, Any?> = mapOf(
@@ -210,6 +270,7 @@ object Mappers {
     "recipientId" to i.recipientId, "assetSchema" to i.assetSchema?.name, "assetId" to i.assetId,
     "assignment" to toJs(i.assignment), "assignmentName" to i.assignmentName, "network" to i.network.name,
     "expirationTimestamp" to i.expirationTimestamp?.toDouble(), "transportEndpoints" to i.transportEndpoints,
+    "publicKey" to i.publicKey, "encryption" to i.encryption.name,
     "unknownQueryParams" to i.unknownQueryParams,
   )
 
@@ -225,8 +286,10 @@ object Mappers {
     "idx" to t.idx, "batchTransferIdx" to t.batchTransferIdx, "createdAt" to t.createdAt.toDouble(), "updatedAt" to t.updatedAt.toDouble(),
     "status" to t.status.name, "requestedAssignment" to t.requestedAssignment?.let { toJs(it) },
     "assignments" to t.assignments.map { toJs(it) }, "kind" to t.kind.name, "txid" to t.txid, "recipientId" to t.recipientId,
-    "receiveUtxo" to toJs(t.receiveUtxo), "changeUtxo" to toJs(t.changeUtxo), "expirationTimestamp" to t.expirationTimestamp?.toDouble(),
+    "receiveUtxo" to toJs(t.receiveUtxo), "changeUtxo" to toJs(t.changeUtxos.firstOrNull()),
+    "changeUtxos" to t.changeUtxos.map { toJs(it) }, "expirationTimestamp" to t.expirationTimestamp?.toDouble(),
     "transportEndpoints" to t.transportEndpoints.map { mapOf("endpoint" to it.endpoint, "transportType" to it.transportType.name, "used" to it.used) },
+    "senderTransportEndpoint" to t.senderTransportEndpoint,
     "invoiceString" to t.invoiceString, "consignmentPath" to t.consignmentPath, "psbtPath" to t.psbtPath,
   )
 

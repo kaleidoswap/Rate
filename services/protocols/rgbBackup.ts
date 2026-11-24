@@ -16,6 +16,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
  * first opens.
  */
 import { File, Paths } from 'expo-file-system';
+import { BFA_TEST_BUILD } from '../buildVariant';
 import { rgbBackupPassword, rgbL1DataId, rgbL1WalletKey, type RgbL1Network } from './rgbL1';
 import { toFilesystemPath } from './bark';
 import { createVssClient, downloadBackupFile, readBackupManifest, uploadBackupFile, vssSigningKey, type BackupManifest } from './rgbVss';
@@ -54,7 +55,8 @@ export function onRgbBackupStatus(listener: (s: RgbBackupStatus) => void): () =>
 }
 
 /** Per seed and wallet (`rgbL1DataId`), apart from the other wallets' VSS data under the same key. */
-export const rgbBackupStoreId = (mnemonic: string, network: string) => `rgb-l1-file-${rgbL1WalletKey(mnemonic)}-${network}`;
+export const rgbBackupStoreId = (mnemonic: string, network: string) =>
+  `${BFA_TEST_BUILD ? 'bfa-test-' : ''}rgb-l1-file-${rgbL1WalletKey(mnemonic)}-${network}`;
 
 const lastBackupKey = (ctx: Pick<BackupContext, 'mnemonic' | 'network'>) => `rgb-last-backup-${rgbBackupStoreId(ctx.mnemonic, rgbL1DataId(ctx.network))}`;
 

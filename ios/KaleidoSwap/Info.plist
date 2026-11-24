@@ -11,7 +11,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>KaleidoSwap</string>
+	<string>Rate BFA Test</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -31,13 +31,13 @@
 		<dict>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>com.kaleidoswap.wallet</string>
+				<string>com.kaleidoswap.wallet.bfatest</string>
 			</array>
 		</dict>
 		<dict>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>exp+kaleidoswap-wallet</string>
+				<string>exp+rate-bfa-test</string>
 			</array>
 		</dict>
 	</array>

@@ -11,6 +11,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../theme';
 import { Callout } from './Callout';
 import DatabaseService from '../services/DatabaseService';
+import { BFA_TEST_BUILD } from '../services/buildVariant';
 import { protocolManager } from '../services/protocols';
 import { RGB_L1_ENABLED, RGB_L1_NETWORK_LABEL, loadRgbL1Network, type RgbL1Network } from '../services/protocols/rgbL1';
 import { rgbNetworkLabel } from '../services/protocols/rgbAccount';
@@ -67,6 +68,7 @@ export function RgbAccountSettings({ walletId, node, allowNewPhoneSetup = true, 
   const statusMeta = inUse === 'node' ? nodeName
     : inUse === 'phone' && phoneNetwork ? `${RGB_L1_NETWORK_LABEL[phoneNetwork]} · beta`
     : phoneNetwork ? `This phone is set up for ${RGB_L1_NETWORK_LABEL[phoneNetwork]} but isn’t connected.`
+    : BFA_TEST_BUILD ? 'Mutinynet test funds on this phone.'
     : showPhone ? 'Pick where your RGB assets live below.' : 'Connect your RGB Lightning node to use RGB here.';
 
   return (
@@ -84,8 +86,8 @@ export function RgbAccountSettings({ walletId, node, allowNewPhoneSetup = true, 
           icon={inUse ? 'checkmark-circle' : undefined} size="sm" />
       </View>
 
-      <Text accessibilityRole="header" style={styles.sectionLabel}>Where your RGB assets live</Text>
-      {showPhone && (
+      <Text accessibilityRole="header" style={styles.sectionLabel}>{BFA_TEST_BUILD ? 'RGB on this phone' : 'Where your RGB assets live'}</Text>
+      {showPhone && !BFA_TEST_BUILD && (
         <>
           {inUse && (
             <View style={{ marginBottom: theme.spacing[2] }}>

@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * Fetches rgb-lib's iOS binary (rgb_libFFI.xcframework) from RGB-Tools'
+ * Fetches rgb-lib's iOS binary (rgb_libFFI.xcframework) from UTEXO's
  * rgb-lib-swift release and checks it against the pinned SHA-256 (the checksum
  * rgb-lib-swift's Package.swift pins for the same tag). Also checks that the
  * vendored ios/RgbLib.swift is the generated binding from that tag. Run on
  * install; macOS only (Android takes rgb-lib from Maven Central).
  *
- * Set KALEIDO_RGB_SKIP_IOS_DOWNLOAD=1 to skip the ~1.1 GB download when not
+ * Set KALEIDO_RGB_SKIP_IOS_DOWNLOAD=1 to skip the binary download when not
  * building for iOS.
  */
 const crypto = require('node:crypto');
@@ -15,11 +15,11 @@ const https = require('node:https');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
-const RGB_LIB_VERSION = '0.3.0-beta.7';
-const XCFRAMEWORK_URL = `https://github.com/RGB-Tools/rgb-lib-swift/releases/download/${RGB_LIB_VERSION}/rgb_libFFI.xcframework.zip`;
-const XCFRAMEWORK_SHA256 = 'd3da4d3e24cd3ea2c88ba15a092d6e29b13f96fd116bf7b5a50cb3595eaa8f0e';
-// Sources/RgbLib/RgbLib.swift at rgb-lib-swift tag 0.3.0-beta.7.
-const BINDING_SHA256 = '50a9c605b6ae44cefce9c73ba4c6d273fb9ddd7036939795d0fe1f3c51508c57';
+const RGB_LIB_VERSION = '0.3.0-beta.7-upstream-dev-bfa.8-bfa';
+const XCFRAMEWORK_URL = `https://github.com/UTEXO-Protocol/rgb-lib-swift/releases/download/${RGB_LIB_VERSION}/rgb_libFFI.xcframework.zip`;
+const XCFRAMEWORK_SHA256 = '56edde5c9207548fabbe5944fa8ff81c2b3740c9d85d60f4f63027be969d234a';
+// Sources/RgbLib/RgbLib.swift from the same release tag as the xcframework.
+const BINDING_SHA256 = 'fa88ead0065dc3414c61a257aea3e8369e71776e3e519b089648566169727f52';
 
 const IOS_DIR = path.join(__dirname, '..', 'ios');
 const FRAMEWORK = 'rgb_libFFI.xcframework';
@@ -80,7 +80,7 @@ function trimSlices(target) {
       continue;
     }
     if (lib.SupportedPlatformVariant === 'simulator' && lib.SupportedArchitectures.length > 1) {
-      const binary = path.join(slice, lib.LibraryPath, 'rgb_libFFI');
+      const binary = path.join(slice, lib.LibraryPath);
       execFileSync('lipo', [binary, '-thin', 'arm64', '-output', `${binary}.arm64`], { stdio: 'inherit' });
       fs.renameSync(`${binary}.arm64`, binary);
       lib.SupportedArchitectures = ['arm64'];
@@ -100,7 +100,7 @@ async function install(iosDir = IOS_DIR) {
   const zip = path.join(iosDir, `${FRAMEWORK}.zip`);
   const target = path.join(iosDir, FRAMEWORK);
   try {
-    console.log(`[kaleido-rgb] Downloading rgb-lib ${RGB_LIB_VERSION} for iOS (~1.1 GB)…`);
+    console.log(`[kaleido-rgb] Downloading rgb-lib ${RGB_LIB_VERSION} for iOS…`);
     const digest = await download(XCFRAMEWORK_URL, zip);
     if (digest !== XCFRAMEWORK_SHA256) throw new Error(`Checksum mismatch for ${FRAMEWORK}.zip: ${digest}`);
     fs.rmSync(target, { recursive: true, force: true });

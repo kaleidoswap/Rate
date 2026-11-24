@@ -1,17 +1,19 @@
 Pod::Spec.new do |s|
   s.name           = 'KaleidoRgb'
   s.version        = '0.1.0'
-  s.summary        = 'RGB-Tools rgb-lib for the KaleidoSwap app'
+  s.summary        = 'UTEXO rgb-lib BFA for the KaleidoSwap app'
   s.description    = 'Expo module over the official rgb-lib Swift bindings (rgb-lib-swift).'
   s.license        = 'MIT'
   s.author         = 'KaleidoSwap'
   s.homepage       = 'https://github.com/kaleidoswap/Rate'
-  s.platforms      = { :ios => '15.1' }
+  s.platforms      = { :ios => '16.0' }
   s.swift_version  = '5.9'
   s.source         = { git: 'https://github.com/kaleidoswap/Rate.git' }
   s.static_framework = true
 
   s.dependency 'ExpoModulesCore'
+  s.libraries = 'c++', 'sqlite3'
+  s.frameworks = 'Security', 'SystemConfiguration'
 
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',

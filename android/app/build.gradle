@@ -94,7 +94,7 @@ android {
 
     namespace 'com.kaleidoswap.wallet'
     defaultConfig {
-        applicationId 'com.kaleidoswap.wallet'
+        applicationId 'com.kaleidoswap.wallet.bfatest'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         // Overridable from CI via -PVERSION_CODE / -PVERSION_NAME (or the
@@ -142,6 +142,11 @@ android {
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
             def enablePngCrunchInRelease = findProperty('android.enablePngCrunchInReleaseBuilds') ?: 'true'
             crunchPngs enablePngCrunchInRelease.toBoolean()
+        }
+        bfaTest {
+            initWith release
+            signingConfig signingConfigs.debug
+            matchingFallbacks = ['release']
         }
     }
     packagingOptions {

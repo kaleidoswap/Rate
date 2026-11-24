@@ -19,6 +19,7 @@ import { theme } from '../theme';
 import { prismoText } from '../localization/prismo';
 import { Button, ScreenHeader } from '../components';
 import SecurityService from '../services/SecurityService';
+import { BFA_TEST_BUILD } from '../services/buildVariant';
 
 interface Props {
   navigation: any;
@@ -38,6 +39,7 @@ type SecurityStep = 'loading' | 'currentPin' | 'options' | 'pin' | 'confirmPin' 
 export default function SecuritySetupScreen({ navigation, route }: Props) {
   const { isInitialSetup = false, mode = 'setup' } = route.params || {};
   const fromSettings = mode !== 'setup';
+  const finishInitialSetup = () => navigation.replace(BFA_TEST_BUILD ? 'Dashboard' : 'OnboardingProfile');
 
   const [step, setStep] = useState<SecurityStep>(fromSettings ? 'loading' : 'options');
   const [pin, setPin] = useState('');
@@ -258,7 +260,7 @@ export default function SecuritySetupScreen({ navigation, route }: Props) {
         navigation.goBack();
         return;
       }
-      if (isInitialSetup) { navigation.replace('OnboardingProfile'); return; }
+      if (isInitialSetup) { finishInitialSetup(); return; }
       
       animateComplete();
     } catch (error) {
@@ -281,7 +283,7 @@ export default function SecuritySetupScreen({ navigation, route }: Props) {
       handleSaveAndComplete(); // Skip biometric
     } else if (step === 'options') {
       if (isInitialSetup) {
-        navigation.replace('OnboardingProfile');
+        finishInitialSetup();
       } else {
         navigation.goBack();
       }
@@ -382,7 +384,7 @@ export default function SecuritySetupScreen({ navigation, route }: Props) {
       </View>
       {biometricAvailable && <Button title={`Enable ${getBiometricLabel()}`} loading={securityBusy} disabled={securityBusy} onPress={handleEnableBiometric} />}
       <Button title="Use a PIN" variant={biometricAvailable ? 'secondary' : 'primary'} disabled={securityBusy} onPress={() => { setEnablePin(true); animateTransition('pin'); }} />
-      <Button title="Not now" variant="ghost" disabled={securityBusy} onPress={() => navigation.replace('OnboardingProfile')} />
+      <Button title="Not now" variant="ghost" disabled={securityBusy} onPress={finishInitialSetup} />
     </View>
   );
 

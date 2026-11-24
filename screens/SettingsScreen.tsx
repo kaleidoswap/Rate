@@ -34,6 +34,7 @@ import {
   type DisplayDenomination,
 } from '../store/slices/settingsSlice';
 import { CHANNEL, LABS_COPY, LABS_FEATURES, isFeatureOn } from '../services/features';
+import { BFA_TEST_BUILD } from '../services/buildVariant';
 import { useFeature } from '../hooks/useFeature';
 import { CRASH_REPORTING_AVAILABLE } from '../services/crashReporting';
 import { feedback } from '../utils/feedback';
@@ -70,7 +71,7 @@ interface Props {
 
 type WalletProtocol = 'RGB' | 'SPARK' | 'ARKADE';
 type SettingsAccount = WalletProtocol | 'BARK';
-const WALLET_PROTOCOLS: readonly WalletProtocol[] = ['RGB', 'SPARK', 'ARKADE'];
+const WALLET_PROTOCOLS: readonly WalletProtocol[] = BFA_TEST_BUILD ? ['RGB'] : ['RGB', 'SPARK', 'ARKADE'];
 const RGB_VIA_NWC = process.env.EXPO_PUBLIC_RGB_VIA_NWC !== '0';
 const LABS_TERMS = 'labs experimental features beta arkade prismo assistant contacts chat places map nwc wallet connections rgb node lightning channels';
 const APP_LOCK_TERMS = 'app lock biometric face id touch fingerprint pin passcode auto-lock autolock timeout';
@@ -645,9 +646,9 @@ export default function SettingsScreen({ navigation }: Props) {
 
         {atHome && <>
           <Group>
-            <Row first icon="flash-outline" iconColor={theme.colors.networks.lightning} label="Lightning address"
+            {!BFA_TEST_BUILD && <Row first icon="flash-outline" iconColor={theme.colors.networks.lightning} label="Lightning address"
               description={lightningAddress ?? undefined} value={lightningAddress ? undefined : 'Get one'}
-              onPress={() => navigation.navigate('LightningAddress')} />
+              onPress={() => navigation.navigate('LightningAddress')} />}
             <Row icon="options-outline" label="Preferences" onPress={() => openPage('preferences')} />
             <Row icon="shield-checkmark-outline" label="Security & backup" onPress={() => openPage('security')} />
             <Row icon="link-outline" label="Connections" onPress={() => openPage('connections')} />
@@ -655,7 +656,7 @@ export default function SettingsScreen({ navigation }: Props) {
           <SectionLabel>More</SectionLabel>
           <Group>
             {feature.map && <Row icon="map-outline" label="Places to pay" description="Nearby businesses accepting bitcoin" onPress={() => navigation.navigate('Map')} />}
-            <Row icon="flask-outline" label="Labs" description="Experimental features you can turn on" onPress={() => openPage('labs')} />
+            {!BFA_TEST_BUILD && <Row icon="flask-outline" label="Labs" description="Experimental features you can turn on" onPress={() => openPage('labs')} />}
             <Row icon="construct-outline" label="Advanced" description="Accounts, networks and wallet tools" onPress={() => openPage('advanced')} />
             <Row icon="information-circle-outline" label="About" value={`v${expoVersion ?? '—'}`} onPress={() => Alert.alert('KaleidoSwap Wallet', `Version ${expoVersion ?? '—'}\nBuild ${expoBuildVersion ?? '—'}\n\nA non-custodial Bitcoin & RGB wallet.`)} />
 
@@ -1001,7 +1002,7 @@ export default function SettingsScreen({ navigation }: Props) {
           </Group>
         </>}
 
-        {showSection(LABS_TERMS) && <>
+        {!BFA_TEST_BUILD && showSection(LABS_TERMS) && <>
         <SectionLabel>Labs</SectionLabel>
         <Group>
           {LABS_FEATURES.map((feature, idx) => (

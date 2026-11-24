@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "KaleidoSwap",
+    "name": "Rate BFA Test",
     "slug": "rate",
     "version": "0.17.0",
     "orientation": "portrait",
@@ -16,7 +16,7 @@
     ],
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.kaleidoswap.wallet",
+      "bundleIdentifier": "com.kaleidoswap.wallet.bfatest",
       "buildNumber": "655",
       "infoPlist": {
         "NSCameraUsageDescription": "This app uses the camera to scan QR codes for Bitcoin addresses and Lightning invoices.",
@@ -47,7 +47,7 @@
       }
     },
     "android": {
-      "package": "com.kaleidoswap.wallet",
+      "package": "com.kaleidoswap.wallet.bfatest",
       "versionCode": 2,
       "allowBackup": false,
       "adaptiveIcon": {

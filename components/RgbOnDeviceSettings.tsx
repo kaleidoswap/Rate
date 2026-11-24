@@ -215,7 +215,7 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
   };
 
   /** Switch to the selected network's own RGB wallet; this one's data stays on the phone. */
-  const canSwitch = isRgbL1NetworkSwitchSupported();
+  const canSwitch = RGB_L1_NETWORKS.length > 1 && isRgbL1NetworkSwitchSupported();
   const switchNetwork = (otherNetwork: RgbL1Network) => {
     if (busy || !canSwitch) return;
     const to = RGB_L1_NETWORK_LABEL[otherNetwork];
@@ -435,7 +435,8 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
           <View style={styles.text}>
             <Text style={styles.label}>Connected · {label}</Text>
             <Text style={styles.description} numberOfLines={1}>
-              {canSwitch ? 'Separate balances and backups for each network' : RGB_L1_UPDATE_TO_SWITCH}
+              {RGB_L1_NETWORKS.length === 1 ? 'Test funds' :
+                canSwitch ? 'Separate balances and backups for each network' : RGB_L1_UPDATE_TO_SWITCH}
             </Text>
           </View>
           {busy ? <ActivityIndicator color={accent} /> : canSwitch && (

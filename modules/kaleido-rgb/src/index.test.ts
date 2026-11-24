@@ -3,8 +3,8 @@ let mockAvailable = true;
 jest.mock('./native', () => ({ getNativeModule: () => (mockAvailable ? mockNative : null) }));
 
 import {
-  DEFAULT_RECEIVE_SECONDS, DEFAULT_SEND_SECONDS, RgbLibError, Wallet, decodeInvoice, expiresAt, isAvailable, isRgbLibError,
-  legacyBdkCacheAction, restoreBackup, restoreKeys, rgbErrorCode, toRgbLibError,
+  DEFAULT_RECEIVE_SECONDS, DEFAULT_SEND_SECONDS, RGB_LIB_VERSION, RgbLibError, Wallet, decodeInvoice, expiresAt, isAvailable, isRgbLibError,
+  legacyBdkCacheAction, restoreBackup, restoreKeys, rgbErrorCode, supportsBfa, toRgbLibError,
 } from './index';
 import type { Keys } from './types';
 
@@ -100,6 +100,30 @@ describe('wallets from rgb-lib before 0.3.0-beta.7 (the old BDK cache)', () => {
 });
 
 describe('calls', () => {
+  test('preserves BFA signing preferences and both deadlines in native calls', async () => {
+    expect(supportsBfa()).toBe(false);
+    mockNative.rgbLibVersion.mockReturnValue(RGB_LIB_VERSION);
+    expect(supportsBfa()).toBe(true);
+    const wallet = new Wallet(keys, { network: 'SIGNET_CUSTOM', supportedSchemas: ['BFA'] });
+    const evmChains = { '11155111': { rpcUrl: 'https://sepolia.example', minMintLockBlocks: 12, maxMintLockBlocks: 120 } };
+    await wallet.goOnline('https://esplora.example', false, undefined, { evmChains });
+    expect(mockNative.goOnline).toHaveBeenCalledWith(7, expect.objectContaining({ evmChains }));
+    await wallet.witnessReceive('rgb:bfa', { type: 'ANY' }, null, ['rpcs://proxy/1.0/json-rpc'], 1, 'REQUIRED');
+    expect(mockNative.witnessReceive).toHaveBeenCalledWith(7, expect.objectContaining({ encryption: 'REQUIRED' }));
+    const recipient = {
+      recipientId: 'sbc:utxob:example',
+      assignment: { type: 'FUNGIBLE' as const, amount: 10 },
+      transportEndpoints: ['rpcs://proxy/1.0/json-rpc'],
+      expirationTimestamp: 2_000,
+      publicKey: 'ab'.repeat(32),
+      encryption: 'OPTIONAL' as const,
+    };
+    await wallet.send({ 'rgb:bfa': [recipient] }, false, 2, 1, 1_400, 'rpcs://sender/1.0/json-rpc');
+    expect(mockNative.send).toHaveBeenCalledWith(7, expect.objectContaining({
+      recipientMap: { 'rgb:bfa': [recipient] }, expirationTimestamp: 1_400, senderTransportEndpoint: 'rpcs://sender/1.0/json-rpc',
+    }));
+  });
+
   test('receive invoices expire a day out by default (rgb-lib now requires an expiry)', async () => {
     const now = Date.now();
     const wallet = new Wallet(keys, { network: 'MAINNET' });

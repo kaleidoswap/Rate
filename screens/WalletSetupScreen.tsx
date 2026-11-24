@@ -28,11 +28,12 @@ import type { DisclosureLevel } from '@kaleidorg/wallet-engine';
 import { prismoText } from '../localization/prismo';
 import { theme } from '../theme';
 import { NetworkConfig } from '../services/DatabaseService';
+import { BFA_TEST_BUILD } from '../services/buildVariant';
 import { PROTOCOL_DEFAULT_NETWORK } from '../services/protocols/networkConfig';
 import { SETUP_ACCOUNTS, DEFAULT_ACCOUNTS, hasAnyAccount, saveAccountPreferences, walletNetworksFor, type AccountChoice } from '../services/protocols/accountChoices';
 
 // New wallets start on the default networks; on a test build those hold test bitcoin.
-const TEST_BUILD = PROTOCOL_DEFAULT_NETWORK.spark !== 'mainnet' || PROTOCOL_DEFAULT_NETWORK.arkade !== 'mainnet';
+const TEST_BUILD = BFA_TEST_BUILD || PROTOCOL_DEFAULT_NETWORK.spark !== 'mainnet' || PROTOCOL_DEFAULT_NETWORK.arkade !== 'mainnet';
 import { Button, Card, Input, ScreenHeader } from '../components';
 import { NetworkIcon } from '../components/NetworkIcon';
 import { AlertBanner } from '@kaleidorg/kaleido-ui/native';
@@ -437,7 +438,8 @@ export default function WalletSetupScreen({ navigation }: Props) {
       <Text style={styles.tipText}>
         Your wallet can send and receive bitcoin as soon as it’s created.
         {rgbNodeStep && ' You can connect a Lightning wallet later in Settings.'}
-        {TEST_BUILD ? '\n\nThis version uses test networks: anything you receive is test bitcoin with no real value.' : ''}
+        {BFA_TEST_BUILD ? '\n\nRate BFA Test uses Mutinynet test funds. Create a new test wallet.' :
+          TEST_BUILD ? '\n\nThis version uses test networks: anything you receive is test bitcoin with no real value.' : ''}
       </Text>
       {rgbNodeStep && <TouchableOpacity
         style={styles.skipButton}

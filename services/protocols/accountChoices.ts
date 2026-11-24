@@ -9,6 +9,7 @@
  * Setup and restore start with Spark and on-device RGB where available.
  */
 import type { NetworkConfig } from '../DatabaseService';
+import { BFA_TEST_BUILD } from '../buildVariant';
 import { buildDefaultNetworkConfig } from './networkConfig';
 import { BARK_ENABLED } from './bark';
 import { hasBarkPreference, saveBarkNetwork, setBarkOff } from './barkPreferences';
@@ -27,14 +28,14 @@ const allowNewBark = isAvailable('bark');
 const allowNewRgbOnDevice = isAvailable('rgbOnDevice');
 
 export const SETUP_ACCOUNTS: { key: keyof AccountChoice; name: string; desc: string; icon: string }[] = [
-  { key: 'spark', name: 'Spark', desc: 'Instant bitcoin, Lightning and tokens', icon: 'spark' },
+  ...(!BFA_TEST_BUILD ? [{ key: 'spark' as const, name: 'Spark', desc: 'Instant bitcoin, Lightning and tokens', icon: 'spark' }] : []),
   ...(RGB_L1_ENABLED && allowNewRgbOnDevice ? [{ key: 'rgbOnDevice' as const, name: 'RGB on-chain', desc: 'RGB assets on-chain, no node needed · beta', icon: 'rgb' }] : []),
   ...(isFeatureOn('arkade', undefined) ? [{ key: 'arkade' as const, name: 'Arkade', desc: 'Low-fee bitcoin payments off-chain', icon: 'arkade' }] : []),
   ...(BARK_ENABLED && allowNewBark ? [{ key: 'bark' as const, name: 'Bark', desc: 'Bitcoin on Second’s Ark network', icon: 'bark' }] : []),
 ];
 
 export const DEFAULT_ACCOUNTS: AccountChoice = {
-  spark: true,
+  spark: !BFA_TEST_BUILD,
   arkade: false,
   bark: false,
   rgbOnDevice: RGB_L1_ENABLED && allowNewRgbOnDevice,
@@ -42,6 +43,7 @@ export const DEFAULT_ACCOUNTS: AccountChoice = {
 
 /** The wallet networks to store with a new wallet. */
 export function walletNetworksFor(choice: AccountChoice): Omit<NetworkConfig, 'id' | 'wallet_id'>[] {
+  if (BFA_TEST_BUILD) return [];
   return [
     ...(choice.spark ? [{ type: 'spark' as const, enabled: true, config: buildDefaultNetworkConfig('spark') }] : []),
     ...(choice.arkade ? [{ type: 'arkade' as const, enabled: true, config: buildDefaultNetworkConfig('arkade') }] : []),
@@ -68,5 +70,6 @@ export async function saveAccountPreferences(mnemonic: string, choice: AccountCh
 }
 
 export function hasAnyAccount(choice: AccountChoice, rgbNodeConnected = false): boolean {
+  if (BFA_TEST_BUILD) return choice.rgbOnDevice;
   return choice.spark || choice.arkade || choice.bark || choice.rgbOnDevice || rgbNodeConnected;
 }

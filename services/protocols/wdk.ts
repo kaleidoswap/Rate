@@ -51,6 +51,7 @@ import { findRgbCloudBackup, restoreRgbFromCloud, runRgbBackup, scheduleRgbBacku
 import { isRgbNode, rgbOnDeviceStep } from './rgbAccount'
 import { clearRgbConnectionError, describeRgbError, recordRgbConnectionError, recordRgbDiagnostic } from './rgbDiagnostics'
 import { clearStaleRgbRuntimeLock } from './rgbRuntimeLock'
+import { BFA_TEST_BUILD } from '../buildVariant'
 
 /** The maker URL from the RGB config and Arkade's server URL, for Send's payment accounts. */
 export function payOptionsFrom(networkConfigs: Array<{ type: string; enabled: boolean; config?: string }>): PayOptions {
@@ -81,7 +82,7 @@ export function payOptionsFrom(networkConfigs: Array<{ type: string; enabled: bo
  *   wallet (./rgbL1.ts). Connects only when no RGB node is connected: the node is the
  *   RGB account when paired (a plain Lightning wallet over NWC is not an RGB node). Disable with EXPO_PUBLIC_RGB_L1=0.
  */
-const ARKADE_ENABLED = process.env.EXPO_PUBLIC_WDK_ARKADE !== '0'
+const ARKADE_ENABLED = !BFA_TEST_BUILD && process.env.EXPO_PUBLIC_WDK_ARKADE !== '0'
 // On mobile, RLN/RGB is reached over Nostr Wallet Connect by default (the app
 // drives a remote node via an NWC connection string instead of a direct HTTP
 // nodeUrl). Set EXPO_PUBLIC_RGB_VIA_NWC=0 to use the HTTP WDK RLN adapter.
@@ -125,13 +126,15 @@ export function getWdkProtocolManager(): ProtocolManager {
     // Every Lightning payment's preimage is kept for Activity, whichever screen paid.
     const register = (adapter: any) => manager.registerAdapter(withPaymentProofs(adapter))
     // Spark + RLN: no WASM, SDKs already shipped — always on.
-    register(new MobileSparkAdapter())
-    // RGB: NWC-backed (remote node over relays) by default on mobile; HTTP WDK
-    // adapter when EXPO_PUBLIC_RGB_VIA_NWC=0.
-    if (RGB_VIA_NWC) {
-      register(new NwcRgbAdapter())
-    } else {
-      register(new RlnWdkAdapter())
+    if (!BFA_TEST_BUILD) {
+      register(new MobileSparkAdapter())
+      // RGB: NWC-backed (remote node over relays) by default on mobile; HTTP WDK
+      // adapter when EXPO_PUBLIC_RGB_VIA_NWC=0.
+      if (RGB_VIA_NWC) {
+        register(new NwcRgbAdapter())
+      } else {
+        register(new RlnWdkAdapter())
+      }
     }
     // Liquid is not part of the app: its native library alone was ~175 MB of the APK.
     // Wallets saved with a Liquid network skip it (no LIQUID case below).
@@ -153,7 +156,7 @@ export async function initializeWdkProtocols(
   const manager = getWdkProtocolManager()
   const results = new Map<ProtocolType, { success: boolean; error?: string }>()
   // Send's ways to pay need the maker (configured with the RGB node) and Arkade's server.
-  setPayOptions(payOptionsFrom(networkConfigs))
+  setPayOptions(BFA_TEST_BUILD ? {} : payOptionsFrom(networkConfigs))
 
   const connectNetwork = async (protocol: ProtocolType, nc: { type: string; enabled: boolean; config?: string }): Promise<void> => {
     const existing = manager.getAdapterIfAvailable(protocol)
@@ -312,7 +315,7 @@ export async function initializeWdkProtocols(
   // not the sum. Configs for the same protocol still try in order.
   const configsByProtocol = new Map<ProtocolType, Array<{ type: string; enabled: boolean; config?: string }>>()
   for (const nc of networkConfigs) {
-    if (!nc.enabled) continue
+    if (BFA_TEST_BUILD || !nc.enabled) continue
     const protocol = networkTypeToProtocol(nc.type as any)
     if (!protocol) continue
     configsByProtocol.set(protocol, [...(configsByProtocol.get(protocol) ?? []), nc])
@@ -397,6 +400,7 @@ export async function switchRgbL1Network(
   network: RgbL1Network,
 ): Promise<{ success: boolean; error?: string } | undefined> {
   if (!RGB_L1_ENABLED) return { success: false, error: 'skipped: RGB on this phone is not part of this build' }
+  if (!RGB_L1_NETWORKS.includes(network)) return { success: false, error: 'Unsupported RGB network.' }
   if (!isRgbL1NetworkSwitchSupported()) return { success: false, error: RGB_L1_UPDATE_TO_SWITCH }
   const manager = getWdkProtocolManager()
   const results = new Map<ProtocolType, { success: boolean; error?: string }>()

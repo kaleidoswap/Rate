@@ -15,6 +15,6 @@ android {
 }
 
 dependencies {
-  // RGB-Tools' official Kotlin bindings; needs compileSdk 36 (aar-metadata minCompileSdk).
-  implementation "org.rgbtools:rgb-lib-android:0.3.0-beta.7"
+  // Paired with the iOS bfa.8 release. See libs/README.md for artifact checksums.
+  implementation "com.utexo:rgb-lib-bfa-android:0.3.0-beta.7-upstream-dev-bfa.8-bfa"
 }

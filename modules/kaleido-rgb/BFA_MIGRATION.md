@@ -1,5 +1,8 @@
 # BFA Migration Plan — modules/kaleido-rgb
 
+These are notes from the first migration attempt. See [BFA_TEST.md](BFA_TEST.md)
+for the paired `bfa.8` artifacts and the current test procedure.
+
 Migrate from RGB-Tools rgb-lib 0.3.0-beta.7 to UTEXO-Protocol's BFA fork
 (0.3.0-beta.7-upstream-dev-bfa.8-bfa).
 

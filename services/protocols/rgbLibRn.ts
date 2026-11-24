@@ -40,11 +40,12 @@ export function libNetwork(network: string): LibNetwork {
 }
 
 /**
- * The schemas a wallet opens with: rgb-lib's usual three, plus IFA where rgb-lib
- * allows it (it refuses IFA on mainnet).
+ * The usual three schemas plus IFA on test networks. The BFA fork adds BFA on
+ * test networks and rejects both IFA and BFA on mainnet.
  */
-export function rgbLibSchemas(network: string): RgbLib.AssetSchema[] {
-  return network === 'mainnet' ? ['NIA', 'CFA', 'UDA'] : ['NIA', 'CFA', 'UDA', 'IFA']
+export function rgbLibSchemas(network: string, supportsBfa = false): RgbLib.AssetSchema[] {
+  if (network === 'mainnet') return ['NIA', 'CFA', 'UDA']
+  return supportsBfa ? ['NIA', 'CFA', 'UDA', 'IFA', 'BFA'] : ['NIA', 'CFA', 'UDA', 'IFA']
 }
 
 /** The folder to open the wallet in, or null for rgb-lib's original folder. */
@@ -56,6 +57,9 @@ export function rgbLibSubdir(dataDir?: string | null): string | null {
 // reads refresh at most this often so balances stay current without hammering the indexer.
 const REFRESH_EVERY_MS = 30_000
 const DEFAULT_FEE_RATE = 2
+// Proxy v1 tolerates up to five minutes of clock skew on each side.
+const PROXY_CLOCK_SKEW_SECONDS = 300
+const INVOICE_EXPIRATION_MARGIN_SECONDS = 2 * PROXY_CLOCK_SKEW_SECONDS
 // The output a sender creates for a witness invoice: rgb-lib's colorable-UTXO size, above dust.
 const WITNESS_OUTPUT_SAT = 1000
 /** Recipient IDs may include a chain prefix, e.g. Mutinynet `sbc:wvout:…`. */
@@ -85,12 +89,17 @@ function pascal(value: string): string {
   return value.toLowerCase().replace(/(^|_)([a-z])/g, (_, __, c: string) => c.toUpperCase())
 }
 
+function invalidInvoice(message: string): Error {
+  return Object.assign(new Error(message), { code: 'RGB_INVOICE_INVALID' })
+}
+
 /** The account the adapter talks to, over one native rgb-lib wallet. */
 export class RgbLibRnAccount {
   private lastRefresh = 0
   private refreshing: Promise<boolean> | null = null
   private queue: Promise<unknown> = Promise.resolve()
   private udaIds = new Set<string>()
+  private readonly supportsBfa: boolean
 
   constructor(
     private readonly lib: RgbModule,
@@ -102,12 +111,18 @@ export class RgbLibRnAccount {
     private readonly network: string = '',
     /** Diagnostics (./rgbDiagnostics.ts): background failures nobody awaits. */
     private readonly onEvent: (stage: string, detail?: string) => void = () => undefined,
-  ) {}
+  ) {
+    this.supportsBfa = lib.supportsBfa?.() === true
+  }
+
+  private schemas(): RgbLib.AssetSchema[] {
+    return rgbLibSchemas(this.network, this.supportsBfa)
+  }
 
   capabilities(): RgbDeviceCapabilities {
     const w = this.wallet as MaybeWallet
     const has = (name: keyof RgbLib.Wallet) => typeof w[name] === 'function'
-    const ifa = rgbLibSchemas(this.network).includes('IFA')
+    const ifa = this.schemas().includes('IFA')
     return {
       metadata: has('getAssetMetadata'),
       issueUda: has('issueAssetUda'),
@@ -186,17 +201,18 @@ export class RgbLibRnAccount {
   }
 
   /**
-   * Every asset under `nia`, the list the adapter reads: NIA and IFA tokens, CFA named
+   * Every asset under `nia`, the list the adapter reads: NIA, IFA and BFA tokens, CFA named
    * by their name, and UDA collectibles (one unit each).
    */
   async listAssets(): Promise<RgbLib.Assets> {
     await this.refresh().catch(() => undefined)
-    const assets = await this.serial(() => this.wallet.listAssets(rgbLibSchemas(this.network)))
+    const assets = await this.serial(() => this.wallet.listAssets(this.schemas()))
     const cfa = (assets.cfa ?? []).map((a) => ({ ...a, ticker: a.name }))
     const ifa = (assets.ifa ?? []).map((a) => ({ ...a, issuedSupply: a.knownCirculatingSupply ?? a.initialSupply }))
+    const bfa = (assets.bfa ?? []).map((a) => ({ ...a, assetSchema: 'BFA' as const, issuedSupply: a.knownCirculatingSupply }))
     const uda = (assets.uda ?? []).map((a) => ({ ...a, issuedSupply: 1 }))
     this.udaIds = new Set(uda.map((a) => a.assetId))
-    return { ...assets, nia: [...(assets.nia ?? []), ...cfa, ...ifa, ...uda] as RgbLib.AssetNia[] }
+    return { ...assets, nia: [...(assets.nia ?? []), ...cfa, ...ifa, ...bfa, ...uda] as RgbLib.AssetNia[] }
   }
 
   /**
@@ -217,12 +233,37 @@ export class RgbLibRnAccount {
       ? { type: 'FUNGIBLE', amount: params.amount }
       : { type: 'ANY' }
     const receive = params.witness === false ? this.wallet.blindReceive.bind(this.wallet) : this.wallet.witnessReceive.bind(this.wallet)
-    const data = await this.serial(() => receive(
+    const transportEndpoints = [this.transportEndpoint]
+    const receiveArgs = [
       assetId, assignment, params.durationSeconds ?? params.duration_seconds ?? null,
-      [this.transportEndpoint], params.minConfirmations ?? params.min_confirmations ?? 1,
-    ))
+      transportEndpoints, params.minConfirmations ?? params.min_confirmations ?? 1,
+    ] as const
+    const data = await this.serial(() => this.supportsBfa ? receive(...receiveArgs, 'REQUIRED') : receive(...receiveArgs))
     this.onChange()
     return { ...data, recipient_id: data.recipientId, expiration_timestamp: data.expirationTimestamp }
+  }
+
+  /** Proxy v1 needs a verifiable recipient and time to collect its acknowledgement. */
+  private proxySendExpiration(invoice: RgbLib.InvoiceData): number {
+    const expiry = invoice.expirationTimestamp
+    if (!invoice.transportEndpoints?.length || !invoice.publicKey || !/^[a-f0-9]{64}$/i.test(invoice.publicKey)
+        || !invoice.encryption || expiry == null || !Number.isSafeInteger(expiry)) {
+      throw invalidInvoice('This RGB request needs a proxy v1 invoice with encryption and an expiry. Ask the recipient for a new invoice.')
+    }
+    const now = Math.floor(Date.now() / 1000)
+    if (expiry <= now) throw invalidInvoice('This RGB invoice has expired. Ask the recipient for a new invoice.')
+    const operationExpiry = Math.min(now + this.lib.DEFAULT_SEND_SECONDS, expiry - INVOICE_EXPIRATION_MARGIN_SECONDS)
+    if (operationExpiry <= now + PROXY_CLOCK_SKEW_SECONDS) {
+      throw invalidInvoice('This RGB invoice needs more than 15 minutes remaining. Ask the recipient for a new invoice.')
+    }
+    return operationExpiry
+  }
+
+  private checkInvoiceAssignment(invoice: RgbLib.InvoiceData): void {
+    const type = invoice.assignment?.type
+    if (type === 'LINK_RIGHT' || type === 'MINT_RIGHT' || type === 'INFLATION_RIGHT') {
+      throw invalidInvoice('This RGB invoice requests an asset right. Ask the recipient for an asset payment invoice.')
+    }
   }
 
   /** Send an RGB asset to an invoice (the adapter's `sendAsset`). */
@@ -236,7 +277,7 @@ export class RgbLibRnAccount {
   }): Promise<RgbLib.OperationResult> {
     const invoice = await this.lib.decodeInvoice(params.recipient)
     if (invoice.expirationTimestamp != null && invoice.expirationTimestamp <= Math.floor(Date.now() / 1000)) {
-      throw Object.assign(new Error('This RGB invoice has expired. Ask the recipient for a new invoice.'), { code: 'RGB_INVOICE_INVALID' })
+      throw invalidInvoice('This RGB invoice has expired. Ask the recipient for a new invoice.')
     }
     if (this.network && invoice.network !== libNetwork(this.network)) {
       throw Object.assign(new Error('This RGB invoice belongs to a different network. Switch to the recipient’s network.'), { code: 'RGB_INVOICE_INVALID' })
@@ -245,6 +286,8 @@ export class RgbLibRnAccount {
     if (invoice.assignment?.type === 'FUNGIBLE' && invoice.assignment.amount !== params.amount) {
       throw Object.assign(new Error('The invoice asks for a different amount.'), { code: 'RGB_INVOICE_INVALID' })
     }
+    this.checkInvoiceAssignment(invoice)
+    if (this.supportsBfa) this.proxySendExpiration(invoice)
     const endpoints = invoice.transportEndpoints?.length ? invoice.transportEndpoints : [this.transportEndpoint]
     // A witness invoice asks the sender to create the receiving output: fund it with
     // rgb-lib's usual colorable-UTXO size unless the caller chose otherwise.
@@ -256,14 +299,21 @@ export class RgbLibRnAccount {
       assignment: nonFungible ? { type: 'NON_FUNGIBLE' } : { type: 'FUNGIBLE', amount: params.amount },
       transportEndpoints: endpoints,
       ...(witnessData ? { witnessData } : {}),
+      ...(this.supportsBfa ? { publicKey: invoice.publicKey, encryption: invoice.encryption, expirationTimestamp: invoice.expirationTimestamp } : {}),
     }
     const result = await this.serial(() => {
       // A queued refresh/backup may have held the wallet beyond the invoice deadline.
       if (invoice.expirationTimestamp != null && invoice.expirationTimestamp <= Math.floor(Date.now() / 1000)) {
-        throw Object.assign(new Error('This RGB invoice has expired. Ask the recipient for a new invoice.'), { code: 'RGB_INVOICE_INVALID' })
+        throw invalidInvoice('This RGB invoice has expired. Ask the recipient for a new invoice.')
+      }
+      const recipients = { [params.token]: [recipient] }
+      const feeRate = params.feeRate ?? DEFAULT_FEE_RATE
+      const minConfirmations = params.minConfirmations ?? 1
+      if (this.supportsBfa) {
+        return this.wallet.send(recipients, false, feeRate, minConfirmations, this.proxySendExpiration(invoice), this.transportEndpoint)
       }
       return this.wallet.send(
-        { [params.token]: [recipient] }, false, params.feeRate ?? DEFAULT_FEE_RATE, params.minConfirmations ?? 1,
+        recipients, false, feeRate, minConfirmations,
         ...(invoice.expirationTimestamp != null ? [invoice.expirationTimestamp] : []),
       )
     })
@@ -275,6 +325,8 @@ export class RgbLibRnAccount {
   /** An RGB invoice decoded on the device, in the RGB node's shape (what Send reads). */
   async decodeRgbInvoice(invoice: string) {
     const d = await this.lib.decodeInvoice(invoice)
+    this.checkInvoiceAssignment(d)
+    if (this.supportsBfa) this.proxySendExpiration(d)
     const fungible = d.assignment?.type === 'FUNGIBLE' && d.assignment.amount
     return {
       ...d,
@@ -282,6 +334,7 @@ export class RgbLibRnAccount {
       recipient_id: d.recipientId,
       transport_endpoints: d.transportEndpoints,
       expiration_timestamp: d.expirationTimestamp,
+      ...(d.publicKey ? { public_key: d.publicKey } : {}),
       assignment: fungible ? { type: 'Fungible', value: fungible } : { type: pascal(d.assignment?.type ?? 'ANY') },
     }
   }
@@ -340,7 +393,7 @@ export class RgbLibRnAccount {
     return deleted
   }
 
-  /** An asset's contract data, plus its media file (CFA, UDA, IFA) when the wallet holds one. */
+  /** An asset's contract data and its media file when the wallet holds one. */
   async getAssetMetadata(assetId: string): Promise<RgbLib.Metadata & { assetId: string; media?: RgbLib.Media }> {
     const metadata = await this.serial(() => this.wallet.getAssetMetadata(assetId))
     const media = await this.assetMedia(assetId).catch(() => undefined)
@@ -348,8 +401,8 @@ export class RgbLibRnAccount {
   }
 
   private async assetMedia(assetId: string): Promise<RgbLib.Media | undefined> {
-    const assets = await this.serial(() => this.wallet.listAssets(rgbLibSchemas(this.network)))
-    const found = [...(assets.cfa ?? []), ...(assets.uda ?? []), ...(assets.ifa ?? [])].find((a) => a.assetId === assetId)
+    const assets = await this.serial(() => this.wallet.listAssets(this.schemas()))
+    const found = [...(assets.cfa ?? []), ...(assets.uda ?? []), ...(assets.ifa ?? []), ...(assets.bfa ?? [])].find((a) => a.assetId === assetId)
     if (!found) return undefined
     return found.media ?? ('token' in found ? found.token?.media ?? undefined : undefined)
   }
@@ -485,6 +538,8 @@ export interface RgbLibRnHooks {
    */
   clearStaleLock?: (subdir: string | null, masterFingerprint: string) => Promise<boolean>
   openTimeoutMs?: number
+  /** Trusted proxy and chain options for the BFA wallet to validate transfers. */
+  onlineOptions?: RgbLib.OnlineOptions
 }
 
 /**
@@ -555,12 +610,17 @@ export function createRgbLibRnModule(load: () => RgbModule, hooks: RgbLibRnHooks
           emit('stale_lock_check_failed', errorText(e))
         }
       }
-      const supportedSchemas = rgbLibSchemas(this.options.network)
+      const supportsBfa = lib.supportsBfa?.() === true
+      const supportedSchemas = rgbLibSchemas(this.options.network, supportsBfa)
       const wallet = new lib.Wallet(keys, subdir ? { network, subdir, supportedSchemas } : { network, supportedSchemas })
       markOpen(key)
       const started = Date.now()
       try {
-        await wallet.goOnline(this.options.indexerUrl)
+        if (supportsBfa && hooks.onlineOptions) {
+          await wallet.goOnline(this.options.indexerUrl, false, undefined, hooks.onlineOptions)
+        } else {
+          await wallet.goOnline(this.options.indexerUrl)
+        }
       } catch (e) {
         emit('go_online_failed', `${errorText(e)} (after ${Date.now() - started} ms)`)
         // Never leave the native wallet open behind a failed connect: the next try opens it again.

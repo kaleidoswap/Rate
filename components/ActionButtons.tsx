@@ -8,7 +8,7 @@ import { PressableScale } from './PressableScale';
 interface ActionButtonsProps {
     onSend: () => void;
     onReceive: () => void;
-    onSwap: () => void;
+    onSwap?: () => void;
 }
 
 const ACTION_ITEMS: Array<{
@@ -30,6 +30,8 @@ export const ActionButtons: React.FC<ActionButtonsProps> = (props) => {
     return (
         <View style={[styles.actions, stacked && styles.stacked]}>
             {ACTION_ITEMS.map(({ action, label, icon }) => {
+                const runAction = props[action];
+                if (!runAction) return null;
                 const primary = action === 'onReceive';
                 const color = primary ? theme.colors.text.inverse : theme.colors.text.primary;
                 return (
@@ -38,7 +40,7 @@ export const ActionButtons: React.FC<ActionButtonsProps> = (props) => {
                         style={[styles.action, stacked && styles.wideAction, primary && styles.primaryAction]}
                         onPress={() => {
                             feedback.tap();
-                            props[action]();
+                            runAction();
                         }}
                         accessibilityRole="button"
                         accessibilityLabel={label}

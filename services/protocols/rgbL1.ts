@@ -23,8 +23,9 @@
 import { sha256 } from '@noble/hashes/sha2.js'
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js'
 import DatabaseService from '../DatabaseService'
+import { BFA_TEST_BUILD } from '../buildVariant'
 
-export const RGB_L1_ENABLED = process.env.EXPO_PUBLIC_RGB_L1 !== '0'
+export const RGB_L1_ENABLED = BFA_TEST_BUILD || process.env.EXPO_PUBLIC_RGB_L1 !== '0'
 
 /** The app's rgb-lib module (modules/kaleido-rgb), loaded on first use. */
 export function rgbLibModule(): typeof import('../../modules/kaleido-rgb') {
@@ -56,9 +57,9 @@ export function isRgbL1NetworkSwitchSupported(): boolean {
 export const RGB_L1_UPDATE_TO_SWITCH = 'Update the app to switch networks.'
 
 export type RgbL1Network = 'mainnet' | 'mutinynet' | 'signet' | 'testnet'
-export const RGB_L1_NETWORKS: readonly RgbL1Network[] = ['mainnet', 'mutinynet', 'signet', 'testnet']
+export const RGB_L1_NETWORKS: readonly RgbL1Network[] = BFA_TEST_BUILD ? ['mutinynet'] : ['mainnet', 'mutinynet', 'signet', 'testnet']
 /** What a new wallet uses, matching its Spark and Arkade accounts. */
-export const RGB_L1_DEFAULT_NETWORK: RgbL1Network = 'mainnet'
+export const RGB_L1_DEFAULT_NETWORK: RgbL1Network = BFA_TEST_BUILD ? 'mutinynet' : 'mainnet'
 export const RGB_L1_NETWORK_LABEL: Record<RgbL1Network, string> = { mainnet: 'Mainnet', mutinynet: 'Mutinynet', signet: 'Signet', testnet: 'Testnet' }
 
 export interface RgbL1Host {
@@ -89,12 +90,15 @@ const DEFAULTS: Record<RgbL1Network, RgbL1Host> = {
   mutinynet: {
     network: 'mutinynet',
     // KaleidoSwap's Esplora for Mutinynet (KaleidoSwap's signet).
-    indexerUrl: process.env.EXPO_PUBLIC_RGB_L1_INDEXER_URL || 'https://esplora.signet.kaleidoswap.com',
-    transportEndpoint: process.env.EXPO_PUBLIC_RGB_L1_PROXY_ENDPOINT || 'rpcs://proxy.iriswallet.com/0.2/json-rpc',
+    indexerUrl: BFA_TEST_BUILD ? 'https://esplora.signet.kaleidoswap.com'
+      : process.env.EXPO_PUBLIC_RGB_L1_INDEXER_URL || 'https://esplora.signet.kaleidoswap.com',
+    transportEndpoint: BFA_TEST_BUILD ? 'rpcs://proxy.iriswallet.com/1.0/json-rpc'
+      : process.env.EXPO_PUBLIC_RGB_L1_PROXY_ENDPOINT || 'rpcs://proxy.iriswallet.com/0.2/json-rpc',
   },
 }
 
 export function rgbL1Host(network: RgbL1Network): RgbL1Host {
+  assertRgbNetwork(network)
   return DEFAULTS[network]
 }
 
@@ -102,6 +106,7 @@ const endpointsKey = (mnemonic: string, network: RgbL1Network) => `rgb-l1-endpoi
 
 /** The wallet's endpoints: its own indexer/proxy when set in Settings, else the network defaults. */
 export async function loadRgbL1Host(mnemonic: string, network: RgbL1Network): Promise<RgbL1Host> {
+  assertRgbNetwork(network)
   const saved = await DatabaseService.getInstance().getSetting(endpointsKey(mnemonic, network))
   let custom: Partial<RgbL1Host> = {}
   try { custom = saved ? JSON.parse(saved) : {} } catch { /* a bad value falls back to the defaults */ }
@@ -124,6 +129,7 @@ export function validateRgbEndpoint(kind: 'indexer' | 'proxy', value: string): s
 
 /** Saves this wallet's endpoints; null clears them back to the network defaults. */
 export async function saveRgbL1Endpoints(mnemonic: string, network: RgbL1Network, endpoints: { indexerUrl: string; transportEndpoint: string } | null): Promise<void> {
+  assertRgbNetwork(network)
   const value = endpoints
     ? JSON.stringify({ indexerUrl: validateRgbEndpoint('indexer', endpoints.indexerUrl), transportEndpoint: validateRgbEndpoint('proxy', endpoints.transportEndpoint) })
     : ''
@@ -140,6 +146,10 @@ const pinnedKey = (mnemonic: string) => `rgb-l1-pinned-network-v1-${rgbL1WalletK
 const homeKey = (mnemonic: string) => `rgb-l1-home-network-v1-${rgbL1WalletKey(mnemonic)}`
 const readyKey = (mnemonic: string, dataId: string) => `rgb-l1-ready-v1-${dataId}-${rgbL1WalletKey(mnemonic)}`
 const isNetwork = (v: string | null | undefined): v is RgbL1Network => !!v && (RGB_L1_NETWORKS as readonly string[]).includes(v)
+
+function assertRgbNetwork(network: RgbL1Network): void {
+  if (!isNetwork(network)) throw new Error('Unsupported RGB network.')
+}
 
 /**
  * The network last chosen for this wallet's RGB on this phone (it stays set
@@ -202,6 +212,7 @@ export const rgbL1Subdir = (network: RgbL1Network) => `rgb-${rgbL1DataId(network
  * a native build that can't open another folder.
  */
 export async function rgbL1DataFolder(mnemonic: string, network: RgbL1Network): Promise<string | null> {
+  assertRgbNetwork(network)
   if (usesOwnFolder(network)) {
     if (!isRgbL1NetworkSwitchSupported()) throw new Error(`RGB on this phone needs an app update for ${RGB_L1_NETWORK_LABEL[network]}.`)
     return rgbL1Subdir(network)
@@ -219,6 +230,7 @@ export async function rgbL1DataFolder(mnemonic: string, network: RgbL1Network): 
  * right before rgb-lib creates the wallet's data (open or restore).
  */
 export async function claimRgbL1DataFolder(mnemonic: string, network: RgbL1Network): Promise<string | null> {
+  assertRgbNetwork(network)
   const db = DatabaseService.getInstance()
   if (!usesOwnFolder(network) && !isNetwork(await db.getSetting(homeKey(mnemonic)))) {
     await db.setSetting(homeKey(mnemonic), (await rgbL1HomeNetwork(mnemonic)) ?? network)
@@ -295,6 +307,7 @@ export const RGB_L1_BASE_FOLDER = '.'
 
 /** The adapter config for `manager.connect('RGB_L1', …)`; `folder` from `claimRgbL1DataFolder`. */
 export function buildRgbL1Config(mnemonic: string, host: RgbL1Host, folder: string | null = null) {
+  assertRgbNetwork(host.network)
   return {
     protocol: 'RGB_L1' as const,
     mnemonic,

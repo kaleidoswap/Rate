@@ -1,0 +1,138 @@
+name: BFA native test builds
+
+on:
+  push:
+    branches: [test/rgb-bfa8-native]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bfa-native-test
+  cancel-in-progress: true
+
+env:
+  EXPO_PUBLIC_CHANNEL: dev
+  EXPO_PUBLIC_BARK: '0'
+  EXPO_PUBLIC_WDK_ARKADE: '0'
+  EXPO_NO_TELEMETRY: '1'
+  NODE_OPTIONS: --max-old-space-size=6144
+
+jobs:
+  android:
+    name: Android test APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Free build disk space
+        run: sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/local/lib/android/sdk/ndk
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Read pinned kaleido-pay commit
+        id: kaleido-pay
+        run: echo "ref=$(tr -d '[:space:]' < kaleido-pay.ref)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          repository: kaleidoswap/kaleido-pay
+          ref: ${{ steps.kaleido-pay.outputs.ref }}
+          path: universal-bolt12
+      - name: Set up sibling package
+        run: mv universal-bolt12 ../universal-bolt12 && (cd ../universal-bolt12 && npm ci --ignore-scripts)
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: pnpm }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - name: Install pinned NDK
+        run: |
+          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "ndk;29.0.14206865" >/dev/null
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build test APK
+        working-directory: android
+        run: ./gradlew :app:assembleBfaTest --no-daemon
+      - name: Check app identity and BFA library
+        run: |
+          apks=(android/app/build/outputs/apk/bfaTest/*.apk)
+          test "${#apks[@]}" = 1
+          apk="${apks[0]}"
+          aapt="$(find "$ANDROID_SDK_ROOT/build-tools" -name aapt -type f | sort -V | tail -n1)"
+          "$aapt" dump badging "$apk" | grep "^package: name='com.kaleidoswap.wallet.bfatest' "
+          python - "$apk" <<'PY'
+          import sys, zipfile
+          with zipfile.ZipFile(sys.argv[1]) as apk:
+              members = set(apk.namelist())
+              assert 'lib/arm64-v8a/librgblibuniffi.so' in members
+              assert 'assets/index.android.bundle' in members
+          PY
+          cp "$apk" "$RUNNER_TEMP/rate-bfa8-test.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rate-bfa8-android
+          path: ${{ runner.temp }}/rate-bfa8-test.apk
+          if-no-files-found: error
+          retention-days: 14
+
+  ios:
+    name: iOS Simulator test app
+    runs-on: macos-15
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Read pinned kaleido-pay commit
+        id: kaleido-pay
+        run: echo "ref=$(tr -d '[:space:]' < kaleido-pay.ref)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          repository: kaleidoswap/kaleido-pay
+          ref: ${{ steps.kaleido-pay.outputs.ref }}
+          path: universal-bolt12
+      - name: Set up sibling package
+        run: mv universal-bolt12 ../universal-bolt12 && (cd ../universal-bolt12 && npm ci --ignore-scripts)
+      - uses: maxim-lobanov/setup-xcode@v1
+        with: { xcode-version: latest-stable }
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: pnpm }
+      - name: Install dependencies and native addons
+        run: |
+          pnpm install --frozen-lockfile
+          node scripts/patch-bare-kit-linker.js
+          node node_modules/react-native-bare-kit/ios/link.mjs
+      - name: Install Pods
+        working-directory: ios
+        run: pod install
+      - name: Build simulator app
+        run: |
+          xcodebuild build -quiet \
+            -workspace ios/KaleidoSwap.xcworkspace -scheme KaleidoSwap \
+            -configuration Release -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/rate-bfa-ios" \
+            ARCHS=arm64 CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=
+      - name: Check app identity and archive simulator bundle
+        run: |
+          app="$RUNNER_TEMP/rate-bfa-ios/Build/Products/Release-iphonesimulator/KaleidoSwap.app"
+          test "$(plutil -extract CFBundleIdentifier raw -o - "$app/Info.plist")" = com.kaleidoswap.wallet.bfatest
+          test -s "$app/main.jsbundle"
+          ditto -c -k --keepParent "$app" "$RUNNER_TEMP/rate-bfa8-simulator.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rate-bfa8-ios-simulator
+          path: ${{ runner.temp }}/rate-bfa8-simulator.zip
+          if-no-files-found: error
+          retention-days: 14
+      - name: Verify BFA wallet reopen and encrypted restore offline
+        timeout-minutes: 10
+        run: |
+          simulator="$(xcrun simctl list devices available -j | jq -er \
+            '[.devices[][] | select(.isAvailable and (.name | startswith("iPhone"))) | .udid] | last')"
+          xcrun simctl boot "$simulator" || true
+          xcrun simctl bootstatus "$simulator" -b
+          SIMULATOR_UDID="$simulator" bash scripts/bfa-e2e/run-ios.sh

@@ -1,7 +1,7 @@
 import ExpoModulesCore
 import Foundation
 
-let rgbLibVersion = "0.3.0-beta.7"
+let rgbLibVersion = "0.3.0-beta.7-upstream-dev-bfa.8-bfa"
 
 struct NotOnline: Error {}
 
@@ -83,7 +83,7 @@ func settle(_ promise: Promise, _ body: () throws -> Any?) {
   }
 }
 
-/// rgb-lib (RGB-Tools' official Swift bindings) for the app. Every call takes a
+/// UTEXO rgb-lib BFA bindings for the app. Every call takes a
 /// plain object of arguments; wallet calls take the handle `openWallet` returned
 /// first and run on that wallet's own queue (see Session).
 public class KaleidoRgbModule: Module {
@@ -177,7 +177,8 @@ public class KaleidoRgbModule: Module {
           bitcoinNetwork: try Mappers.network(try a.string("network")),
           databaseType: .sqlite,
           maxAllocationsPerUtxo: try a.u32("maxAllocationsPerUtxo"),
-          supportedSchemas: try a.strings("supportedSchemas").map { try Mappers.schema($0) }
+          supportedSchemas: try a.strings("supportedSchemas").map { try Mappers.schema($0) },
+          allowRecklessSchemas: false
         )
         return self.sessions.add(try Wallet(walletData: data, keys: keys), walletKey: walletKey)
       }
@@ -198,11 +199,7 @@ public class KaleidoRgbModule: Module {
     }
 
     walletOp("goOnline") { s, a in
-      s.online = try s.wallet.goOnline(onlineOptions: OnlineOptions(
-        indexerUrl: try a.string("indexerUrl"),
-        skipConsistencyCheck: a.bool("skipConsistencyCheck", false),
-        vanillaSyncLookback: try a.u32("vanillaSyncLookback")
-      ))
+      s.online = try s.wallet.goOnline(onlineOptions: Mappers.onlineOptions(a))
       return nil
     }
     walletOp("getBtcBalance") { s, a in Mappers.js(try s.wallet.getBtcBalance(online: s.online, skipSync: a.bool("skipSync", false))) }
@@ -220,23 +217,50 @@ public class KaleidoRgbModule: Module {
     walletOp("getMediaDir") { s, _ in s.wallet.getMediaDir() }
     walletOp("getWalletDir") { s, _ in s.wallet.getWalletDir() }
     walletOp("blindReceive") { s, a in
-      Mappers.js(try s.wallet.blindReceive(assetId: a.stringOrNil("assetId"), assignment: try Mappers.assignment(try a.obj("assignment")), expirationTimestamp: try a.u64("expirationTimestamp"), transportEndpoints: try a.strings("transportEndpoints"), minConfirmations: try a.u8("minConfirmations")))
+      Mappers.js(try s.wallet.blindReceive(
+        online: s.online,
+        assetId: a.stringOrNil("assetId"),
+        assignment: try Mappers.assignment(try a.obj("assignment")),
+        expirationTimestamp: try a.u64("expirationTimestamp"),
+        transportEndpoints: try a.strings("transportEndpoints"),
+        minConfirmations: try a.u8("minConfirmations"),
+        encryption: try Mappers.encryption(a.stringOrNil("encryption"))
+      ))
     }
     walletOp("witnessReceive") { s, a in
-      Mappers.js(try s.wallet.witnessReceive(assetId: a.stringOrNil("assetId"), assignment: try Mappers.assignment(try a.obj("assignment")), expirationTimestamp: try a.u64("expirationTimestamp"), transportEndpoints: try a.strings("transportEndpoints"), minConfirmations: try a.u8("minConfirmations")))
+      Mappers.js(try s.wallet.witnessReceive(
+        online: s.online,
+        assetId: a.stringOrNil("assetId"),
+        assignment: try Mappers.assignment(try a.obj("assignment")),
+        expirationTimestamp: try a.u64("expirationTimestamp"),
+        transportEndpoints: try a.strings("transportEndpoints"),
+        minConfirmations: try a.u8("minConfirmations"),
+        encryption: try Mappers.encryption(a.stringOrNil("encryption"))
+      ))
     }
     walletOp("send") { s, a in
       let map = try a.raw("recipientMap")
       var recipients: [String: [Recipient]] = [:]
       for assetId in map.keys { recipients[assetId] = try Args(map).objects(assetId).map { try Mappers.recipient($0) } }
-      return Mappers.js(try s.wallet.send(online: try s.requireOnline(), recipientMap: recipients, donation: a.bool("donation", false), feeRate: try a.u64("feeRate"), minConfirmations: try a.u8("minConfirmations"), expirationTimestamp: try a.u64("expirationTimestamp")))
+      return Mappers.js(try s.wallet.send(
+        online: try s.requireOnline(),
+        recipientMap: recipients,
+        donation: a.bool("donation", false),
+        feeRate: try a.u64("feeRate"),
+        minConfirmations: try a.u8("minConfirmations"),
+        expirationTimestamp: try a.u64("expirationTimestamp"),
+        senderTransportEndpoint: a.stringOrNil("senderTransportEndpoint")
+      ))
     }
     walletOp("sendBtc") { s, a in
       try s.wallet.sendBtc(online: try s.requireOnline(), address: try a.string("address"), amount: try a.u64("amount"), feeRate: try a.u64("feeRate"), skipSync: a.bool("skipSync", false))
     }
     walletOp("drainTo") { s, a in try s.wallet.drainTo(online: try s.requireOnline(), address: try a.string("address"), feeRate: try a.u64("feeRate")) }
     walletOp("listTransactions") { s, a in try s.wallet.listTransactions(online: s.online, skipSync: a.bool("skipSync", false)).map { Mappers.js($0) } }
-    walletOp("listTransfers") { s, a in try s.wallet.listTransfers(assetId: a.stringOrNil("assetId")).map { Mappers.js($0) } }
+    walletOp("listTransfers") { s, a in
+      let filter = a.stringOrNil("assetId").map { AssetFilter.id(assetId: $0) } ?? .anyOrNone
+      return try s.wallet.listTransfers(assetFilter: filter, scope: .all).map { Mappers.js($0) }
+    }
     walletOp("listUnspents") { s, a in
       try s.wallet.listUnspents(online: s.online, settledOnly: a.bool("settledOnly", false), skipSync: a.bool("skipSync", false)).map { Mappers.js($0) }
     }
@@ -258,13 +282,37 @@ public class KaleidoRgbModule: Module {
       Mappers.js(try s.wallet.issueAssetUda(ticker: try a.string("ticker"), name: try a.string("name"), details: a.stringOrNil("details"), precision: try a.u8("precision"), mediaFilePath: a.stringOrNil("mediaFilePath"), attachmentsFilePaths: try a.strings("attachmentsFilePaths")))
     }
     walletOp("issueAssetIfa") { s, a in
-      Mappers.js(try s.wallet.issueAssetIfa(ticker: try a.string("ticker"), name: try a.string("name"), precision: try a.u8("precision"), amounts: try a.u64s("amounts"), inflationAmounts: try a.u64s("inflationAmounts"), rejectListUrl: a.stringOrNil("rejectListUrl")))
+      Mappers.js(try s.wallet.issueAssetIfa(
+        ticker: try a.string("ticker"),
+        name: try a.string("name"),
+        precision: try a.u8("precision"),
+        amounts: try a.u64s("amounts"),
+        inflationAmounts: try a.u64s("inflationAmounts"),
+        rejectListUrl: a.stringOrNil("rejectListUrl"),
+        linkRight: false,
+        linkedFromContract: nil,
+        skipContractChecks: false
+      ))
+    }
+    walletOp("issueAssetBfa") { s, a in
+      Mappers.js(try s.wallet.issueAssetBfa(
+        ticker: try a.string("ticker"),
+        name: try a.string("name"),
+        precision: try a.u8("precision"),
+        mintRights: try a.u8("mintRights"),
+        chainId: try a.u64("chainId"),
+        contractAddress: try a.string("contractAddress"),
+        rejectListAddress: a.stringOrNil("rejectListAddress"),
+        linkRight: a.bool("linkRight", false),
+        linkedFromContract: a.stringOrNil("linkedFromContract"),
+        skipContractChecks: false
+      ))
     }
     walletOp("inflate") { s, a in
       Mappers.js(try s.wallet.inflate(online: try s.requireOnline(), assetId: try a.string("assetId"), inflationAmounts: try a.u64s("inflationAmounts"), feeRate: try a.u64("feeRate"), minConfirmations: try a.u8("minConfirmations")))
     }
     walletOp("burn") { s, a in
-      Mappers.js(try s.wallet.burn(online: try s.requireOnline(), assetId: try a.string("assetId"), amount: try a.u64("amount"), feeRate: try a.u64("feeRate"), minConfirmations: try a.u8("minConfirmations")))
+      Mappers.js(try s.wallet.burn(online: try s.requireOnline(), assetId: try a.string("assetId"), amount: try a.u64("amount"), burnReason: a.stringOrNil("burnReason"), feeRate: try a.u64("feeRate"), minConfirmations: try a.u8("minConfirmations")))
     }
     walletOp("backup") { s, a in
       try s.wallet.backup(backupPath: try a.string("backupPath"), password: try a.string("password"))

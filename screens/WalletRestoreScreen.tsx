@@ -21,6 +21,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { createNewWallet, setInitialized, setUnlocked } from '../store/slices/walletSlice';
 import { theme } from '../theme';
 import { NetworkConfig } from '../services/DatabaseService';
+import { BFA_TEST_BUILD } from '../services/buildVariant';
 import { Button, Card, Input, ScreenHeader } from '../components';
 import { AlertBanner } from '@kaleidorg/kaleido-ui/native';
 import { SETUP_ACCOUNTS, DEFAULT_ACCOUNTS, hasAnyAccount, saveAccountPreferences, walletNetworksFor } from '../services/protocols/accountChoices';
@@ -319,7 +320,9 @@ export default function WalletRestoreScreen({ navigation }: Props) {
       <AlertBanner variant="info" style={styles.warningBox}>
         <Ionicons name="shield-checkmark" size={20} color={theme.colors.info[600]} />
         <Text style={styles.warningText}>
-          Your recovery phrase is never sent to our servers. It's used only on your device to restore your wallet.
+          {BFA_TEST_BUILD
+            ? 'Restore a Mutinynet test wallet using its test recovery phrase.'
+            : "Your recovery phrase is never sent to our servers. It's used only on your device to restore your wallet."}
         </Text>
       </AlertBanner>
     </ScrollView>
