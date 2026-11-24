@@ -1,4 +1,4 @@
-name: Check Rate BFA TestFlight availability
+name: Prepare Rate BFA TestFlight identifier
 
 on:
   push:
@@ -9,14 +9,14 @@ permissions: {}
 
 jobs:
   check:
-    name: Check the isolated App Store Connect record
+    name: Prepare the isolated iOS identifier
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Check whether Rate BFA Test has its own app record
+      - name: Register the Rate BFA Test Bundle ID and check its app record
         env:
           ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
@@ -38,17 +38,46 @@ jobs:
           const key = createPrivateKey(Buffer.from(ASC_KEY_P8_BASE64, 'base64'));
           const signature = sign('sha256', Buffer.from(signingInput), { key, dsaEncoding: 'ieee-p1363' });
           const bundleId = 'com.kaleidoswap.wallet.bfatest';
-          const url = new URL('https://api.appstoreconnect.apple.com/v1/apps');
-          url.search = new URLSearchParams({ 'filter[bundleId]': bundleId, 'fields[apps]': 'bundleId', limit: '1' });
-          const response = await fetch(url, {
-            headers: { Authorization: 'Bearer ' + signingInput + '.' + signature.toString('base64url') },
-            redirect: 'error',
-            signal: AbortSignal.timeout(20_000),
-          });
-          if (!response.ok) throw new Error('App Store Connect lookup returned HTTP ' + response.status);
-          const { data } = await response.json();
-          const found = data.some(({ attributes }) => attributes?.bundleId === bundleId);
-          const summary = found
+          const authorization = 'Bearer ' + signingInput + '.' + signature.toString('base64url');
+          async function request(resource, query = {}, body) {
+            const url = new URL('/v1/' + resource, 'https://api.appstoreconnect.apple.com');
+            url.search = new URLSearchParams(query);
+            return fetch(url, {
+              method: body ? 'POST' : 'GET',
+              headers: { Authorization: authorization, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+              body: body ? JSON.stringify(body) : undefined,
+              redirect: 'error',
+              signal: AbortSignal.timeout(20_000),
+            });
+          }
+          async function hasIdentifier() {
+            const response = await request('bundleIds', { 'filter[identifier]': bundleId, limit: '1' });
+            if (!response.ok) throw new Error('Bundle ID lookup returned HTTP ' + response.status);
+            const { data } = await response.json();
+            return data.some(({ attributes }) => attributes?.identifier === bundleId);
+          }
+
+          let identifierStatus = 'The isolated Bundle ID is already registered.';
+          if (!(await hasIdentifier())) {
+            const response = await request('bundleIds', {}, {
+              data: {
+                type: 'bundleIds',
+                attributes: { identifier: bundleId, name: 'Rate BFA Test', platform: 'IOS' },
+              },
+            });
+            if (response.ok) {
+              identifierStatus = 'Registered the isolated iOS Bundle ID.';
+            } else if (response.status !== 409 || !(await hasIdentifier())) {
+              throw new Error('Bundle ID registration returned HTTP ' + response.status);
+            }
+          }
+          console.log(identifierStatus);
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY, identifierStatus + '\n');
+
+          const apps = await request('apps', { 'filter[bundleId]': bundleId, 'fields[apps]': 'bundleId', limit: '1' });
+          if (!apps.ok) throw new Error('App Store Connect lookup returned HTTP ' + apps.status);
+          const { data } = await apps.json();
+          const summary = data.some(({ attributes }) => attributes?.bundleId === bundleId)
             ? 'The isolated bundle identifier has a record accessible to the release key.'
             : 'The release key found no app record for the isolated bundle identifier.';
           console.log(summary);
