@@ -153,7 +153,8 @@ jobs:
             printf '%s\n' "$badging" | grep -F "versionCode='$BUILD_CODE'"
             apksigner="$(dirname "$aapt")/apksigner"
             certificates="$("$apksigner" verify --print-certs "$apk" |
-              awk '/^Signer[[:space:]].* certificate SHA-256 digest:/ { print tolower($NF) }' | sort -u)"
+              LC_ALL=C sed -nE '/^(V[0-9][0-9.]* Signer|Signer #|Signer \()/s/^.* certificate SHA-256 digest: ([[:xdigit:]]{64})[[:space:]]*$/\1/p' |
+              tr '[:upper:]' '[:lower:]' | LC_ALL=C sort -u)"
             if [[ -z "$BFA_PREVIEW_CERTIFICATE_SHA256" || "$certificates" != "$BFA_PREVIEW_CERTIFICATE_SHA256" ]]; then
               echo "::error::The APK signer does not match the release certificate."
               exit 1
