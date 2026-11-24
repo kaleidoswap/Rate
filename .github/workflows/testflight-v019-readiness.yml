@@ -102,7 +102,7 @@ jobs:
             '| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | --- |',
           ];
 
-          for (const version of ['0.18.0', '0.19.0']) {
+          for (const version of ['0.18.0', '0.19.0', '0.19.1']) {
             const result = get('/v1/builds', {
               'filter[app]': app,
               'filter[preReleaseVersion.version]': version,
