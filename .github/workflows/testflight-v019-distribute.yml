@@ -1,0 +1,45 @@
+name: Distribute TestFlight 0.19
+
+on:
+  push:
+    branches: [ops/testflight-v019]
+    paths: ['.github/testflight-v019-build.txt']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rate-testflight-v019-distribution
+  cancel-in-progress: false
+
+jobs:
+  distribute:
+    name: Assign the approved 0.19 build and request external beta review
+    if: github.repository == 'kaleidoswap/Rate'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Update the approved build in App Store Connect
+        env:
+          ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_BASE: https://api.appstoreconnect.apple.com
+        run: |
+          set -euo pipefail
+          : "${ASC_KEY_P8_BASE64:?App Store Connect key is missing}"
+          : "${ASC_KEY_ID:?App Store Connect key ID is missing}"
+          : "${ASC_ISSUER_ID:?App Store Connect issuer ID is missing}"
+          umask 077
+          ASC_KEY_P8="$(mktemp "$RUNNER_TEMP/testflight-distribute.XXXXXX")"
+          export ASC_KEY_P8
+          trap 'rm -f -- "$ASC_KEY_P8"' EXIT
+          printf '%s' "$ASC_KEY_P8_BASE64" | base64 -d > "$ASC_KEY_P8"
+          unset ASC_KEY_P8_BASE64
+          node scripts/testflight-distribute-v019.mjs
