@@ -10,7 +10,7 @@ import { legacyBdkCacheAction } from './legacy'
 import { getNativeModule, type KaleidoRgbNative } from './native'
 import type {
   AssetCfa, AssetIfa, AssetNia, AssetSchema, AssetUda, Assets, Assignment, Balance, BitcoinNetwork, BtcBalance,
-  InvoiceData, Keys, Metadata, OperationResult, ReceiveData, Recipient, RefreshFilter, RefreshResult, SyncOptions,
+  Encryption, InvoiceData, Keys, Metadata, OnlineOptions, OperationResult, ReceiveData, Recipient, RefreshFilter, RefreshResult, SyncOptions,
   Transaction, Transfer, Unspent, WalletOptions, WitnessVersion,
 } from './types'
 
@@ -19,7 +19,7 @@ export * from './errors'
 export { legacyBdkCacheAction } from './legacy'
 
 /** The rgb-lib release this module is built on. */
-export const RGB_LIB_VERSION = '0.3.0-beta.7'
+export const RGB_LIB_VERSION = '0.3.0-beta.7-upstream-dev-bfa.8-bfa'
 /** rgb-lib's old defaults (before expirations became mandatory in 0.3.0-beta.7). */
 export const DEFAULT_RECEIVE_SECONDS = 86_400
 export const DEFAULT_SEND_SECONDS = 3_600
@@ -63,7 +63,12 @@ export function isAvailable(): boolean {
 
 /** The rgb-lib version of the native build, or null without one. */
 export function nativeRgbLibVersion(): string | null {
-  return getNativeModule()?.rgbLibVersion() ?? null
+  return getNativeModule()?.rgbLibVersion?.() ?? null
+}
+
+/** Exact version match keeps a JS update from requesting BFA on older binaries. */
+export function supportsBfa(): boolean {
+  return nativeRgbLibVersion() === RGB_LIB_VERSION
 }
 
 /** Wallets in folders of their own (`subdir`): always, with this module. */
@@ -146,8 +151,8 @@ export class Wallet {
    * Connects to the indexer. Unless skipped, rgb-lib full-scans both keychains and
    * checks its database against the chain: that also rebuilds a BDK cache moved aside.
    */
-  goOnline(indexerUrl: string, skipConsistencyCheck = false, vanillaSyncLookback = DEFAULT_VANILLA_SYNC_LOOKBACK): Promise<void> {
-    return this.op('goOnline', { indexerUrl, skipConsistencyCheck, vanillaSyncLookback })
+  goOnline(indexerUrl: string, skipConsistencyCheck = false, vanillaSyncLookback = DEFAULT_VANILLA_SYNC_LOOKBACK, options?: OnlineOptions): Promise<void> {
+    return this.op('goOnline', { ...options, indexerUrl, skipConsistencyCheck, vanillaSyncLookback })
   }
 
   getBtcBalance(skipSync = false): Promise<BtcBalance> {
@@ -192,18 +197,18 @@ export class Wallet {
   }
 
   /** An invoice for a blinded UTXO; expires `durationSeconds` from now (default a day). */
-  blindReceive(assetId: string | null, assignment: Assignment, durationSeconds: number | null, transportEndpoints: string[], minConfirmations: number): Promise<ReceiveData> {
-    return this.op('blindReceive', { assetId, assignment, expirationTimestamp: expiresAt(durationSeconds, DEFAULT_RECEIVE_SECONDS), transportEndpoints, minConfirmations })
+  blindReceive(assetId: string | null, assignment: Assignment, durationSeconds: number | null, transportEndpoints: string[], minConfirmations: number, encryption?: Encryption): Promise<ReceiveData> {
+    return this.op('blindReceive', { assetId, assignment, expirationTimestamp: expiresAt(durationSeconds, DEFAULT_RECEIVE_SECONDS), transportEndpoints, minConfirmations, ...(encryption ? { encryption } : {}) })
   }
 
   /** An invoice whose output the sender creates; expires `durationSeconds` from now (default a day). */
-  witnessReceive(assetId: string | null, assignment: Assignment, durationSeconds: number | null, transportEndpoints: string[], minConfirmations: number): Promise<ReceiveData> {
-    return this.op('witnessReceive', { assetId, assignment, expirationTimestamp: expiresAt(durationSeconds, DEFAULT_RECEIVE_SECONDS), transportEndpoints, minConfirmations })
+  witnessReceive(assetId: string | null, assignment: Assignment, durationSeconds: number | null, transportEndpoints: string[], minConfirmations: number, encryption?: Encryption): Promise<ReceiveData> {
+    return this.op('witnessReceive', { assetId, assignment, expirationTimestamp: expiresAt(durationSeconds, DEFAULT_RECEIVE_SECONDS), transportEndpoints, minConfirmations, ...(encryption ? { encryption } : {}) })
   }
 
   /** Sends assets; the transfer expires (if never acknowledged) at `expirationTimestamp`, default an hour from now. */
-  send(recipientMap: Record<string, Recipient[]>, donation: boolean, feeRate: number, minConfirmations: number, expirationTimestamp?: number): Promise<OperationResult> {
-    return this.op('send', { recipientMap, donation, feeRate, minConfirmations, expirationTimestamp: expirationTimestamp ?? expiresAt(null, DEFAULT_SEND_SECONDS) })
+  send(recipientMap: Record<string, Recipient[]>, donation: boolean, feeRate: number, minConfirmations: number, expirationTimestamp?: number, senderTransportEndpoint?: string): Promise<OperationResult> {
+    return this.op('send', { recipientMap, donation, feeRate, minConfirmations, expirationTimestamp: expirationTimestamp ?? expiresAt(null, DEFAULT_SEND_SECONDS), ...(senderTransportEndpoint ? { senderTransportEndpoint } : {}) })
   }
 
   sendBtc(address: string, amount: number, feeRate: number, skipSync = false): Promise<string> {

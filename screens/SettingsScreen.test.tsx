@@ -284,12 +284,13 @@ test('a Labs feature turned off loses its entry points', async () => {
   }
 });
 
-test.each([null, 'mainnet'])('held builds only offer phone RGB backups for a configured wallet (%s)', async (network) => {
+test.each([null, 'mainnet'])('store builds only offer phone RGB backups for a configured wallet (%s)', async (network) => {
   mockPhoneNetwork = network;
   const features = require('../services/features') as typeof import('../services/features');
   const isFeatureOn = features.isFeatureOn;
+  const buildChannel = jest.replaceProperty(features, 'CHANNEL', 'store');
   const channel = jest.spyOn(features, 'isFeatureOn').mockImplementation(
-    (feature, labs) => isFeatureOn(feature, labs, 'beta')
+    (feature, labs) => isFeatureOn(feature, labs, 'store')
   );
   try {
     const screen = render(<SettingsScreen navigation={navigation} />);
@@ -299,5 +300,25 @@ test.each([null, 'mainnet'])('held builds only offer phone RGB backups for a con
   } finally {
     mockPhoneNetwork = null;
     channel.mockRestore();
+    buildChannel.restore();
+  }
+});
+
+test('a fresh TestFlight wallet can find the on-device RGB account in Settings', async () => {
+  const features = require('../services/features') as typeof import('../services/features');
+  const isFeatureOn = features.isFeatureOn;
+  const channel = jest.replaceProperty(features, 'CHANNEL', 'beta');
+  const featuresForBeta = jest.spyOn(features, 'isFeatureOn').mockImplementation(
+    (feature, labs) => isFeatureOn(feature, labs, 'beta')
+  );
+  try {
+    const screen = render(<SettingsScreen navigation={navigation} />);
+    await act(async () => {});
+    fireEvent.press(screen.getByLabelText('Advanced'));
+    fireEvent.press(screen.getByLabelText('RGB account settings'));
+    expect(screen.getByLabelText('This phone')).toBeTruthy();
+  } finally {
+    featuresForBeta.mockRestore();
+    channel.restore();
   }
 });

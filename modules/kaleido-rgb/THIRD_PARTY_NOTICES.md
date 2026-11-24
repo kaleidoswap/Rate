@@ -1,11 +1,11 @@
 # Third-party notices
 
-## rgb-lib (RGB-Tools)
+## rgb-lib-bfa (RGB-Tools and UTEXO)
 
-`ios/RgbLib.swift` is the uniffi-generated Swift binding published with
-[RGB-Tools/rgb-lib-swift](https://github.com/RGB-Tools/rgb-lib-swift) 0.3.0-beta.7.
-The native libraries are the official rgb-lib release artifacts
-(`org.rgbtools:rgb-lib-android` and `rgb_libFFI.xcframework`).
+`ios/RgbLib.swift` is the UniFFI-generated Swift binding published with
+[UTEXO rgb-lib-swift](https://github.com/UTEXO-Protocol/rgb-lib-swift/releases/tag/0.3.0-beta.7-upstream-dev-bfa.8-bfa).
+The test build uses the paired `rgb_libFFI.xcframework` and the
+`com.utexo:rgb-lib-bfa-android` AAR at `0.3.0-beta.7-upstream-dev-bfa.8-bfa`.
 
 MIT License
 

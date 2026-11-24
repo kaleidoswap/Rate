@@ -14,6 +14,7 @@ import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { theme } from '../theme';
 import DatabaseService from '../services/DatabaseService';
+import { CHANNEL } from '../services/features';
 import { rgbWalletErrorMessage } from '../utils/rgb-wallet';
 import { protocolManager, reconcileRgbOnDevice, switchRgbOnDeviceNetwork } from '../services/protocols';
 import {
@@ -513,6 +514,7 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
               phrase: they are backed up to the cloud after every send and receive, and you can
               export a backup file.
             </Text>
+            {CHANNEL === 'beta' && <Text style={styles.description}>Choose Mutinynet to test BFA assets.</Text>}
           </>
         )}
         {enabled && !busy && (

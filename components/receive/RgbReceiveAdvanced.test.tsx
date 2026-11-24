@@ -40,7 +40,20 @@ test('the node over NWC offers invoice kind, expiry and confirmations without lo
   expect(screen.getByText('Private')).toBeTruthy();
   expect(screen.queryByText('UTXOs')).toBeNull();
   expect(screen.getByText('Expires in')).toBeTruthy();
+  expect(screen.getByText('10 min')).toBeTruthy();
   expect(screen.getByText('Confirmations')).toBeTruthy();
+});
+
+test('proxy v1 advanced settings replace the old short expiry in the picker and summary', () => {
+  const onChange = jest.fn();
+  const options = { ...DEFAULT_RGB_RECEIVE_OPTIONS, durationSeconds: 600 };
+  const screen = render(<RgbReceiveAdvanced support={all} options={options} onChange={onChange}
+    requestExpirySeconds={3600} proxyV1 utxos={null} onLoadUtxos={jest.fn()} />);
+  fireEvent.press(screen.getByLabelText('Advanced RGB options: 30 min'));
+  expect(screen.queryByLabelText('10 min')).toBeNull();
+  expect(screen.getByLabelText('30 min').props.accessibilityState.selected).toBe(true);
+  fireEvent.press(screen.getByLabelText('30 min'));
+  expect(onChange).toHaveBeenCalledWith({ ...options, durationSeconds: 1800 });
 });
 
 test('the summary lists only what differs from the default', () => {

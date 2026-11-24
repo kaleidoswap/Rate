@@ -69,28 +69,36 @@ export interface RgbL1Host {
   transportEndpoint: string
 }
 
+const RGB_PROXY_V1 = 'rpcs://proxy.iriswallet.com/1.0/json-rpc'
+
+/** Rate's legacy Iris endpoint has a direct v1 equivalent. Preserve custom hosts. */
+const rgbProxyEndpoint = (endpoint?: string) => (endpoint || RGB_PROXY_V1)
+  .replace(/^https:/i, 'rpcs:')
+  .replace(/^http:/i, 'rpc:')
+  .replace(/^(rpcs:\/\/proxy\.iriswallet\.com)\/0\.2(\/json-rpc\/?$)/i, '$1/1.0$2')
+
 // EXPO_PUBLIC_* vars are inlined at build time only on direct member access.
 const DEFAULTS: Record<RgbL1Network, RgbL1Host> = {
   signet: {
     network: 'signet',
     indexerUrl: process.env.EXPO_PUBLIC_RGB_L1_SIGNET_INDEXER_URL || 'https://mempool.space/signet/api',
-    transportEndpoint: process.env.EXPO_PUBLIC_RGB_L1_SIGNET_PROXY_ENDPOINT || 'rpcs://proxy.iriswallet.com/0.2/json-rpc',
+    transportEndpoint: rgbProxyEndpoint(process.env.EXPO_PUBLIC_RGB_L1_SIGNET_PROXY_ENDPOINT),
   },
   testnet: {
     network: 'testnet',
     indexerUrl: process.env.EXPO_PUBLIC_RGB_L1_TESTNET_INDEXER_URL || 'https://blockstream.info/testnet/api',
-    transportEndpoint: process.env.EXPO_PUBLIC_RGB_L1_TESTNET_PROXY_ENDPOINT || 'rpcs://proxy.iriswallet.com/0.2/json-rpc',
+    transportEndpoint: rgbProxyEndpoint(process.env.EXPO_PUBLIC_RGB_L1_TESTNET_PROXY_ENDPOINT),
   },
   mainnet: {
     network: 'mainnet',
     indexerUrl: process.env.EXPO_PUBLIC_RGB_L1_MAINNET_INDEXER_URL || 'https://blockstream.info/api',
-    transportEndpoint: process.env.EXPO_PUBLIC_RGB_L1_MAINNET_PROXY_ENDPOINT || 'rpcs://proxy.iriswallet.com/0.2/json-rpc',
+    transportEndpoint: rgbProxyEndpoint(process.env.EXPO_PUBLIC_RGB_L1_MAINNET_PROXY_ENDPOINT),
   },
   mutinynet: {
     network: 'mutinynet',
     // KaleidoSwap's Esplora for Mutinynet (KaleidoSwap's signet).
     indexerUrl: process.env.EXPO_PUBLIC_RGB_L1_INDEXER_URL || 'https://esplora.signet.kaleidoswap.com',
-    transportEndpoint: process.env.EXPO_PUBLIC_RGB_L1_PROXY_ENDPOINT || 'rpcs://proxy.iriswallet.com/0.2/json-rpc',
+    transportEndpoint: rgbProxyEndpoint(process.env.EXPO_PUBLIC_RGB_L1_PROXY_ENDPOINT),
   },
 }
 
@@ -108,7 +116,7 @@ export async function loadRgbL1Host(mnemonic: string, network: RgbL1Network): Pr
   return {
     ...DEFAULTS[network],
     ...(custom.indexerUrl ? { indexerUrl: custom.indexerUrl } : {}),
-    ...(custom.transportEndpoint ? { transportEndpoint: custom.transportEndpoint } : {}),
+    ...(custom.transportEndpoint ? { transportEndpoint: rgbProxyEndpoint(custom.transportEndpoint) } : {}),
   }
 }
 

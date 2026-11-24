@@ -83,17 +83,19 @@ import { MyAddressPanel } from '../components/receive/MyAddressPanel';
 import { Sheet } from '../components/Sheet';
 import { SegmentedControl } from '../components/SegmentedControl';
 import { arkadeReceiveOptions, receiveAccountChain } from '../services/kaleidoPay/connect';
+import { rgbLibModule } from '../services/protocols/rgbL1';
 import { claimArkadeLightningReceive, createArkadeLightningReceive, type ArkadeLightningReceive } from '../services/kaleidoPay/arkadeIntents';
 import { BarkBoardingPanel } from '../components/receive/BarkBoardingPanel';
 import NostrContactsSelector from '../components/NostrContactsSelector';
 import { contactKeyFor, recordContactEvent } from '../services/contactHistory';
 import {
-  ANY_RGB_ASSET_ID, DEFAULT_RGB_RECEIVE_OPTIONS, listRgbUtxos, rgbInvoiceParams, rgbReceiveErrorMessage, rgbReceiveSupport,
+  ANY_RGB_ASSET_ID, DEFAULT_RGB_RECEIVE_OPTIONS, listRgbUtxos, rgbInvoiceParams, rgbReceiveErrorMessage, rgbReceiveSupport, rgbReceiveUsesProxyV1,
   type RgbReceiveOptions,
 } from '../utils/rgb-receive';
 import { useFeature } from '../hooks/useFeature';
 
 const NEW_RGB_ASSET_ID = ANY_RGB_ASSET_ID;
+const nativeRgbSupportsBfa = () => rgbLibModule().supportsBfa?.() === true;
 // Verbose receive logging is opt-in even in dev. In an Expo dev client every
 // console.log is a bridge round-trip, and the unified flow emits ~12+ lines per
 // generation plus one on every tap — enough to visibly stall the JS thread while
@@ -458,6 +460,7 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
   const rgbAdapterNow = rgbAccountAdapter();
   const rgbConnected = !!rgbAdapterNow?.isConnected();
   const rgbSupport = rgbReceiveSupport(rgbConnected ? rgbAdapterNow : null);
+  const rgbProxyV1 = rgbConnected && rgbReceiveUsesProxyV1(rgbAdapterNow, nativeRgbSupportsBfa);
   // RGB invoice options are an Advanced-mode control; Lite always makes the default invoice.
   const showRgbAdvanced = !isLite && selectedAsset.isRGB && networkType === 'onchain' && rgbConnected;
   const rgbOptionsInEffect = isLite ? DEFAULT_RGB_RECEIVE_OPTIONS : rgbOptions;
@@ -865,6 +868,7 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
             expirySeconds,
             options: rgbOptionsInEffect,
             support: rgbReceiveSupport(rgbAssetAdapter),
+            proxyV1: rgbReceiveUsesProxyV1(rgbAssetAdapter, nativeRgbSupportsBfa),
           });
           const rgbInvoice = await runReceiveOperation('Create RGB asset invoice', (signal) =>
             callAbortableAdapterMethod<any>(rgbAssetAdapter, 'createRgbInvoice', [params], signal));
@@ -1757,6 +1761,7 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
               options={rgbOptions}
               onChange={changeRgbOptions}
               requestExpirySeconds={expirySeconds}
+              proxyV1={rgbProxyV1}
               utxos={rgbUtxos}
               onLoadUtxos={() => { void loadRgbUtxos(); }}
               onCreateUtxos={rgbSupport.createUtxos ? () => afterOptions(() => setShowCreateUtxos(true)) : undefined}
@@ -1819,6 +1824,7 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
         visible={showAmountEditor}
         onClose={() => setShowAmountEditor(false)}
         requestOptions={{ expirySeconds, showCountdown, note }}
+        rgbProxyV1={selectedAsset.isRGB && networkType === 'onchain' && rgbProxyV1}
         initialSats={currentAmountSats}
         rates={fiatRates}
         bitcoinUnit={bitcoinUnit}

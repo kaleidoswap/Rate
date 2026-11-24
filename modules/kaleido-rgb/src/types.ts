@@ -1,9 +1,10 @@
 /** rgb-lib's types as they cross the bridge (amounts are numbers: sats and asset units). */
 
 export type BitcoinNetwork = 'MAINNET' | 'TESTNET' | 'TESTNET4' | 'SIGNET' | 'REGTEST' | 'SIGNET_CUSTOM'
-export type AssetSchema = 'NIA' | 'UDA' | 'CFA' | 'IFA'
+export type AssetSchema = 'NIA' | 'UDA' | 'CFA' | 'IFA' | 'BFA'
+export type Encryption = 'REQUIRED' | 'UNSUPPORTED' | 'OPTIONAL'
 export type WitnessVersion = 'TAPROOT' | 'SEG_WIT_V0'
-export type TransferKind = 'ISSUANCE' | 'RECEIVE_BLIND' | 'RECEIVE_WITNESS' | 'SEND' | 'INFLATION' | 'BURN'
+export type TransferKind = 'ISSUANCE' | 'RECEIVE_BLIND' | 'RECEIVE_WITNESS' | 'SEND' | 'INFLATION' | 'BURN' | 'LINK' | 'MINT'
 export type TransferStatus =
   | 'INITIATED' | 'WAITING_COUNTERPARTY' | 'WAITING_SAFE_HEIGHT' | 'WAITING_BROADCAST'
   | 'WAITING_CONFIRMATIONS' | 'SETTLED' | 'FAILED'
@@ -24,6 +25,8 @@ export type Assignment =
   | { type: 'FUNGIBLE'; amount: number }
   | { type: 'NON_FUNGIBLE' }
   | { type: 'INFLATION_RIGHT'; amount: number }
+  | { type: 'LINK_RIGHT' }
+  | { type: 'MINT_RIGHT' }
   | { type: 'ANY' }
 
 export interface Balance { settled: number; future: number; spendable: number }
@@ -66,11 +69,18 @@ export interface AssetIfa extends AssetBase {
   knownCirculatingSupply: number
   rejectListUrl: string | null
 }
+export interface AssetBfa extends AssetBase {
+  ticker: string
+  knownCirculatingSupply: number
+  rejectListUrl: string | null
+}
 export interface Assets {
   nia: AssetNia[] | null
   uda: AssetUda[] | null
   cfa: AssetCfa[] | null
   ifa: AssetIfa[] | null
+  /** Present when the native library supports bridged fungible assets. */
+  bfa?: AssetBfa[] | null
 }
 
 export interface Metadata {
@@ -85,9 +95,17 @@ export interface Metadata {
   details: string | null
   token: Token | null
   rejectListUrl: string | null
+  linkedFromContract?: string | null
+  linkedToContract?: string | null
 }
 
-export interface ReceiveData { invoice: string; recipientId: string; expirationTimestamp: number; batchTransferIdx: number }
+export interface ReceiveData {
+  invoice: string
+  recipientId: string
+  expirationTimestamp: number
+  batchTransferIdx: number
+  publicKey?: string
+}
 
 export interface WitnessData { amountSat: number; blinding?: number | null }
 export interface Recipient {
@@ -95,6 +113,10 @@ export interface Recipient {
   witnessData?: WitnessData | null
   assignment: Assignment
   transportEndpoints: string[]
+  publicKey?: string | null
+  encryption?: Encryption
+  /** Recipient's invoice expiration, distinct from the send operation's expiration. */
+  expirationTimestamp?: number | null
 }
 
 /** `entropy` is a u64: a decimal string so it keeps every digit. */
@@ -109,6 +131,8 @@ export interface InvoiceData {
   network: BitcoinNetwork
   expirationTimestamp: number | null
   transportEndpoints: string[]
+  publicKey?: string | null
+  encryption?: Encryption
   unknownQueryParams: Record<string, string>
 }
 
@@ -136,6 +160,8 @@ export interface Transfer {
   recipientId: string | null
   receiveUtxo: Outpoint | null
   changeUtxo: Outpoint | null
+  changeUtxos?: Outpoint[]
+  senderTransportEndpoint?: string | null
   expirationTimestamp: number | null
   transportEndpoints: { endpoint: string; transportType: 'JSON_RPC'; used: boolean }[]
   invoiceString: string | null
@@ -156,6 +182,13 @@ export type RefreshResult = Record<string, { updatedStatus: TransferStatus | nul
 export type SyncOptions =
   | { keychain: 'COLORED'; strategy: SyncStrategy }
   | { keychain: 'VANILLA'; strategy: SyncStrategy; lookback: number }
+
+/** Extra connection options offered by the BFA bindings. */
+export interface OnlineOptions {
+  failedWitnessReceiveGraceSecs?: number
+  proxyAuthKeys?: Record<string, string>
+  evmChains?: Record<string, { rpcUrl: string; minMintLockBlocks: number; maxMintLockBlocks: number }>
+}
 
 /** What's in a wallet's folder before it opens (see ./legacy.ts). */
 export interface WalletDirState {
