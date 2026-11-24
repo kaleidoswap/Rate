@@ -37,3 +37,32 @@ test('masks asset balances and fiat values visually and in accessibility labels'
   fireEvent.press(row);
   expect(onAssetPress).toHaveBeenCalledWith(expect.objectContaining({ asset_id: 'USDT' }));
 });
+
+test('managing the home list hides and restores an asset and fills the visible slots', () => {
+  const assets = ['A', 'B', 'C', 'D', 'E'].map(id => asset(id));
+  const onSetHidden = jest.fn();
+  const props = { assets, onSetHidden, onAssetPress: jest.fn(), onViewAll: jest.fn() };
+  const screen = render(<AssetList {...props} />);
+  expect(screen.queryByLabelText('E, 5 E')).toBeNull();
+  fireEvent.press(screen.getByLabelText('Manage assets on Home'));
+  fireEvent.press(screen.getByRole('checkbox', { name: 'A', checked: true }));
+  expect(onSetHidden).toHaveBeenLastCalledWith('wallet:A', true);
+
+  screen.rerender(<AssetList {...props} hiddenAssetKeys={['wallet:A']} />);
+  expect(screen.queryByLabelText('A, 5 A')).toBeNull();
+  expect(screen.getByLabelText('E, 5 E')).toBeTruthy();
+  fireEvent.press(screen.getByRole('checkbox', { name: 'A', checked: false }));
+  expect(onSetHidden).toHaveBeenLastCalledWith('wallet:A', false);
+  expect(assets).toHaveLength(5);
+});
+
+test('asset controls stay reachable with every asset hidden', () => {
+  const onViewAll = jest.fn();
+  const screen = render(<AssetList assets={[asset('BTC')]} onAssetPress={jest.fn()}
+    onViewAll={onViewAll} hiddenAssetKeys={['wallet:BTC']} onSetHidden={jest.fn()} />);
+  expect(screen.getByText('All assets are hidden on Home')).toBeTruthy();
+  fireEvent.press(screen.getByLabelText('View All'));
+  expect(onViewAll).toHaveBeenCalledTimes(1);
+  fireEvent.press(screen.getByLabelText('Manage assets on Home'));
+  expect(screen.getByRole('checkbox', { name: 'BTC', checked: false })).toBeTruthy();
+});

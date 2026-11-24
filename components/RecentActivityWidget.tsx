@@ -29,6 +29,7 @@ import {
 import { loadSwapAttemptActivity, PAYMENT_ATTEMPT_KIND } from '../services/kaleidoPay/activity';
 import { useActivityFeed } from '../hooks/useActivityFeed';
 import { ACTIVITY_STATUS_VISUAL } from '../utils/paymentStatus';
+import { isRgbPaymentInProgress } from '../utils/activity-layers';
 import { activityAmountIsIncoming, activityAmountPrefix, activityIcon, activityShortTime, activityTypeLabel, activityToneColor } from '../utils/activity-presentation';
 import { useFiatRates } from '../hooks/useFiatRates';
 import { formatSatoshisToUSD } from '../utils/bitcoinUnits';
@@ -96,7 +97,8 @@ export const RecentActivityWidget: React.FC<Props> = ({ onViewAll, onOpenPayment
     const items = useMemo(() => {
         const list = assetId
             ? feed.items.filter(item => item.asset === assetId || (!!assetTicker && item.type === 'swap' && item.asset === assetTicker))
-            : [...feed.items].sort((a, b) => Number(['pending', 'unknown'].includes(b.status)) - Number(['pending', 'unknown'].includes(a.status)));
+            : feed.items.filter(item => !isRgbPaymentInProgress(item))
+                .sort((a, b) => Number(['pending', 'unknown'].includes(b.status)) - Number(['pending', 'unknown'].includes(a.status)));
         return list.slice(0, limit ?? (assetId ? 25 : MAX_ITEMS));
     }, [feed.items, assetId, assetTicker, limit]);
     const loading = feed.updating && items.length === 0;

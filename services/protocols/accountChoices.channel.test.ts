@@ -30,10 +30,10 @@ afterEach(() => {
   jest.clearAllMocks();
 });
 
-test.each(['beta', 'store'])('a %s build offers only Spark during onboarding', channel => {
+test.each(['beta', 'store'])('a %s build offers Arkade as opt-in alongside Spark during onboarding', channel => {
   const { DEFAULT_ACCOUNTS, SETUP_ACCOUNTS } = loadChoices(channel);
   expect(DEFAULT_ACCOUNTS).toEqual({ spark: true, arkade: false, bark: false, rgbOnDevice: false });
-  expect(SETUP_ACCOUNTS.map(account => account.key)).toEqual(['spark']);
+  expect(SETUP_ACCOUNTS.map(account => account.key)).toEqual(['spark', 'arkade']);
 });
 
 test('a development build offers choices with Spark and RGB initially selected', () => {

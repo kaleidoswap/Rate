@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { theme, motion } from '../theme';
@@ -7,6 +7,7 @@ import { Card } from './Card';
 import { AssetIcon } from './AssetIcon';
 import { NetworkIcon } from './NetworkIcon';
 import { SectionHeader } from './SectionHeader';
+import { Sheet } from './Sheet';
 import { AmountText } from './AmountText';
 import { PressableScale } from './PressableScale';
 import { feedback } from '../utils/feedback';
@@ -32,11 +33,15 @@ interface AssetListProps {
     onViewAll: () => void;
     onAssetPress: (asset: NiaAsset) => void;
     hideAmounts?: boolean;
+    showNetworks?: boolean;
+    hiddenAssetKeys?: readonly string[];
+    onSetHidden?: (assetKey: string, hidden: boolean) => void;
 }
 
 const VISIBLE = 4;
 
 const PROTOCOL_LABEL: Record<string, string> = { RGB: 'RGB', SPARK: 'Spark', ARKADE: 'Arkade' };
+const assetKey = (asset: NiaAsset) => `${asset.protocol ?? 'wallet'}:${asset.asset_id}`;
 
 /** "21000" → "21,000", "1234.5678" → "1,234.5678": the integer part gets separators. */
 function groupThousands(amount: string): string {
@@ -52,16 +57,18 @@ interface AssetRowProps {
     index: number;
     last: boolean;
     hideAmounts: boolean;
+    showNetworks: boolean;
     onPress: () => void;
 }
 
-const AssetRow: React.FC<AssetRowProps> = ({ asset, index, last, hideAmounts, onPress }) => {
+const AssetRow: React.FC<AssetRowProps> = ({ asset, index, last, hideAmounts, showNetworks, onPress }) => {
     const baseUnits = getAssetBaseUnitBalance(asset.balance);
     const amount = groupThousands(formatAssetAmount(baseUnits, asset.precision));
     const unit = asset.unit ?? asset.ticker;
     const empty = baseUnits <= 0;
     const ticker = asset.ticker !== asset.name ? asset.ticker : null;
-    const network = asset.protocol ? PROTOCOL_LABEL[asset.protocol] : null;
+    const protocol = showNetworks ? asset.protocol : undefined;
+    const network = protocol ? PROTOCOL_LABEL[protocol] : null;
     const fiat = !hideAmounts && asset.fiatValue !== undefined && asset.fiatValue > 0 ? formatUsd(asset.fiatValue) : null;
     const identity = network ? `${asset.name} on ${network}` : asset.name;
     const balanceLabel = hideAmounts ? 'balance hidden' : `${amount} ${unit}${fiat ? `, about ${fiat}` : ''}`;
@@ -75,14 +82,14 @@ const AssetRow: React.FC<AssetRowProps> = ({ asset, index, last, hideAmounts, on
                 accessibilityLabel={`${identity}, ${balanceLabel}`}
                 style={[styles.row, !last && styles.rowDivider]}
             >
-                <AssetIcon ticker={asset.ticker} protocol={asset.protocol} logoUri={asset.icon} size={40} />
+                <AssetIcon ticker={asset.ticker} protocol={protocol} logoUri={asset.icon} size={40} />
                 <View style={styles.info}>
                     <Text style={styles.name} numberOfLines={1}>{asset.name}</Text>
                     {(!!ticker || !!network) && (
                         <View style={styles.subtitleRow}>
                             {!!ticker && <Text style={styles.subtitle} numberOfLines={1}>{ticker}</Text>}
                             {!!ticker && !!network && <Text style={styles.subtitle}>·</Text>}
-                            {!!network && <NetworkIcon network={asset.protocol!} size={12} />}
+                            {!!protocol && <NetworkIcon network={protocol} size={12} />}
                             {!!network && <Text style={styles.subtitle} numberOfLines={1}>{network}</Text>}
                         </View>
                     )}
@@ -106,31 +113,90 @@ export const AssetList: React.FC<AssetListProps> = ({
     onViewAll,
     onAssetPress,
     hideAmounts = false,
+    showNetworks = true,
+    hiddenAssetKeys = [],
+    onSetHidden,
 }) => {
-    const shown = assets.slice(0, VISIBLE);
+    const [managing, setManaging] = useState(false);
+    const hidden = new Set(hiddenAssetKeys);
+    const shown = assets.filter(asset => !hidden.has(assetKey(asset))).slice(0, VISIBLE);
+    const managingAvailable = !!onSetHidden && assets.length > 0;
     return (
         <View style={styles.section}>
-            <SectionHeader title="Assets" actionLabel="View All" onAction={onViewAll} />
+            <View style={styles.header}>
+                <SectionHeader title="Assets" actionLabel="View All" onAction={onViewAll} style={styles.heading} />
+                {managingAvailable && (
+                    <PressableScale
+                        accessibilityRole="button"
+                        accessibilityLabel="Manage assets on Home"
+                        onPress={() => setManaging(true)}
+                        style={styles.manageButton}
+                    >
+                        <Ionicons name="options-outline" size={20} color={theme.colors.text.primary} />
+                        <Text style={styles.manageLabel}>Manage</Text>
+                    </PressableScale>
+                )}
+            </View>
 
-            {assets.length === 0 ? (
+            {shown.length === 0 ? (
                 <Card style={styles.emptyCard}>
                     <View style={styles.emptyState}>
                         <View style={styles.emptyIcon}>
                             <Ionicons name="layers-outline" size={28} color={theme.colors.text.tertiary} />
                         </View>
-                        <Text style={styles.emptyTitle}>No assets yet</Text>
+                        <Text style={styles.emptyTitle}>{assets.length ? 'All assets are hidden on Home' : 'No assets yet'}</Text>
                         <Text style={styles.emptyDescription}>
-                            Your tokens and assets will appear here
+                            {assets.length ? 'Open Manage to show them again.' : 'Your tokens and assets will appear here'}
                         </Text>
                     </View>
                 </Card>
             ) : (
                 <View style={styles.group}>
                     {shown.map((asset, i) => (
-                        <AssetRow key={asset.asset_id} asset={asset} index={i} last={i === shown.length - 1} hideAmounts={hideAmounts}
+                        <AssetRow key={assetKey(asset)} asset={asset} index={i} last={i === shown.length - 1} hideAmounts={hideAmounts} showNetworks={showNetworks}
                             onPress={() => onAssetPress(asset)} />
                     ))}
                 </View>
+            )}
+
+            {managingAvailable && (
+                <Sheet
+                    visible={managing}
+                    onClose={() => setManaging(false)}
+                    title="Assets on Home"
+                    subtitle={`Choose which assets to include. Home shows up to ${VISIBLE}.`}
+                >
+                    <ScrollView>
+                        {assets.map(asset => {
+                            const key = assetKey(asset);
+                            const checked = !hidden.has(key);
+                            const protocol = showNetworks ? asset.protocol : undefined;
+                            const network = protocol ? PROTOCOL_LABEL[protocol] : null;
+                            const detail = [asset.ticker !== asset.name ? asset.ticker : null, network].filter(Boolean).join(' · ');
+                            return (
+                                <PressableScale
+                                    key={key}
+                                    accessible
+                                    accessibilityRole="checkbox"
+                                    accessibilityLabel={network ? `${asset.name} on ${network}` : asset.name}
+                                    accessibilityState={{ checked }}
+                                    style={styles.manageRow}
+                                    onPress={() => {
+                                        feedback.select();
+                                        onSetHidden?.(key, checked);
+                                    }}
+                                >
+                                    <AssetIcon ticker={asset.ticker} protocol={protocol} logoUri={asset.icon} size={32} />
+                                    <View style={styles.info}>
+                                        <Text style={styles.name}>{asset.name}</Text>
+                                        {!!detail && <Text style={styles.subtitle}>{detail}</Text>}
+                                    </View>
+                                    <Ionicons name={checked ? 'checkbox' : 'square-outline'} size={24} color={checked ? theme.colors.primary[500] : theme.colors.text.secondary} />
+                                </PressableScale>
+                            );
+                        })}
+                    </ScrollView>
+                </Sheet>
             )}
         </View>
     );
@@ -140,6 +206,39 @@ const styles = StyleSheet.create({
     section: {
         marginTop: theme.spacing[6],
         paddingHorizontal: theme.spacing[4],
+    },
+    header: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: theme.spacing[2],
+        marginBottom: theme.spacing[2],
+    },
+    heading: {
+        flex: 1,
+        marginBottom: 0,
+    },
+    manageButton: {
+        flexDirection: 'row',
+        gap: theme.spacing[1],
+        minWidth: 44,
+        minHeight: 44,
+        paddingHorizontal: theme.spacing[2],
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: theme.colors.surface.secondary,
+        borderRadius: theme.borderRadius.lg,
+    },
+    manageLabel: {
+        fontSize: theme.typography.fontSize.xs,
+        fontWeight: theme.typography.fontWeight.semibold,
+        color: theme.colors.text.primary,
+    },
+    manageRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: theme.spacing[3],
+        minHeight: 56,
+        paddingVertical: theme.spacing[2],
     },
     // All assets in one surface: rows separated by hairlines read as a single list.
     group: {

@@ -1,8 +1,19 @@
 import React from 'react';
 import { render } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
 import { PaymentOutcome } from './PaymentOutcome';
 import type { PaymentAttempt } from '../../services/kaleidoPay/attempts';
 const attempt: PaymentAttempt = { id: 'example', sourceId: 'arkade', provider: 'Arkade', status: 'unknown', recipient: '500 sats', total: '500 sats', recipientName: 'Alice', feeDisplay: '0 sats', createdAt: 1791900000000 };
+it('centers the loading indicator and its badge within the status ring', () => {
+  const ui = render(<PaymentOutcome attempt={{ ...attempt, status: 'pending' }} />);
+  const badge = ui.getByLabelText('Checking payment').parent;
+  expect(StyleSheet.flatten(badge?.props.style)).toMatchObject({
+    width: 64, height: 64, alignItems: 'center', justifyContent: 'center',
+  });
+  expect(StyleSheet.flatten(badge?.parent?.props.style)).toMatchObject({
+    width: 80, height: 80, alignItems: 'center', justifyContent: 'center',
+  });
+});
 it('keeps unknown results explicit and shows key info without a toggle', () => {
   const ui = render(<PaymentOutcome attempt={attempt} />);
   expect(ui.getByText('Payment outcome unknown')).toBeTruthy();

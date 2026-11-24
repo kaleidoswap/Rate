@@ -38,7 +38,7 @@ import * as SecureStore from 'expo-secure-store'
 import { NwcRgbAdapter, NWC_CONNECTION_KEY } from '../nwc/NwcRgbAdapter'
 import type { ProtocolType } from '@kaleidorg/wallet-engine'
 import { buildArkadeStorage } from './arkadeStorage'
-import { getDefaultArkadeServerUrl, resolveSparkNetwork } from './networkConfig'
+import { ARKADE_ENABLED, getDefaultArkadeServerUrl, resolveSparkNetwork } from './networkConfig'
 import { BARK_ENABLED, buildBarkConfig, isBarkNativeAvailable } from './bark'
 import { connectBarkToKaleidoPay, disconnectBarkFromKaleidoPay } from '../kaleidoPay/bark'
 import { setPayOptions, type PayOptions } from '../kaleidoPay/payOptions'
@@ -81,7 +81,6 @@ export function payOptionsFrom(networkConfigs: Array<{ type: string; enabled: bo
  *   wallet (./rgbL1.ts). Connects only when no RGB node is connected: the node is the
  *   RGB account when paired (a plain Lightning wallet over NWC is not an RGB node). Disable with EXPO_PUBLIC_RGB_L1=0.
  */
-const ARKADE_ENABLED = process.env.EXPO_PUBLIC_WDK_ARKADE !== '0'
 // On mobile, RLN/RGB is reached over Nostr Wallet Connect by default (the app
 // drives a remote node via an NWC connection string instead of a direct HTTP
 // nodeUrl). Set EXPO_PUBLIC_RGB_VIA_NWC=0 to use the HTTP WDK RLN adapter.

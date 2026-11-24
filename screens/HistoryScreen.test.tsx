@@ -70,25 +70,29 @@ test('removing an active chip clears that filter', async () => {
   expect(ui.getByLabelText('Filters')).toBeTruthy();
 });
 
-test('pending RGB rows show what they are waiting for and open status details', async () => {
+test('hides in-progress RGB payments until they settle and keeps failures and unknown results visible', async () => {
   const common = {
     source: 'transfer', asset: 'rgb:qa', assetTicker: 'RATEQA', assetPrecision: 0, amount: '5',
     status: 'pending', txid: '', layer: 'RGB-L1',
   } as const;
   const items: ActivityItem[] = [
     { ...common, id: 'invoice', type: 'receive', rgbTransfer: { direction: 'incoming', status: 'waiting-counterparty' } },
-    { ...common, id: 'broadcast', type: 'send', rgbTransfer: { direction: 'outgoing', status: 'waiting-confirmations' } },
+    { ...common, id: 'broadcast', type: 'send', amount: '6', rgbTransfer: { direction: 'outgoing', status: 'waiting-confirmations' } },
+    { ...common, id: 'lightning', type: 'send', source: 'payment', amount: '7', layer: 'RGB-LN' },
+    { ...common, id: 'failed', type: 'send', amount: '8', status: 'failed' },
+    { ...common, id: 'check', type: 'send', amount: '9', status: 'unknown', layer: 'RGB-LN' },
+    { ...common, id: 'btc', type: 'send', source: 'onchain', amount: '10', asset: 'BTC', assetTicker: 'sats', account: 'RGB', layer: 'L1' },
   ];
   const ui = render(<HistoryScreen previewItems={items} />);
   await act(async () => {});
-  expect(ui.getByText('Waiting for sender')).toBeTruthy();
-  expect(ui.getByText('Waiting for confirmations')).toBeTruthy();
-  fireEvent.press(ui.getByLabelText(/Waiting for confirmations.*View status/));
-  expect(ui.getByText('Details broadcast')).toBeTruthy();
-  expect(ui.getByText('Status waiting-confirmations')).toBeTruthy();
-  ui.rerender(<HistoryScreen previewItems={[items[0], {
-    ...items[1], txid: 'new-txid', status: 'confirmed', rgbTransfer: { direction: 'outgoing', status: 'settled' },
-  }]} />);
+  expect(ui.queryByLabelText(/[567] RATEQA/)).toBeNull();
+  expect(ui.getByLabelText(/8 RATEQA.*Failed/)).toBeTruthy();
+  expect(ui.getByLabelText(/9 RATEQA.*Needs checking/)).toBeTruthy();
+  expect(ui.getByLabelText(/10 sats.*In progress/)).toBeTruthy();
+  ui.rerender(<HistoryScreen previewItems={items.map(item => item.id === 'broadcast' ? {
+    ...item, txid: 'new-txid', status: 'confirmed', rgbTransfer: { direction: 'outgoing', status: 'settled' },
+  } : item)} />);
+  fireEvent.press(ui.getByLabelText(/6 RATEQA.*Completed/));
   expect(ui.getByText('Details broadcast')).toBeTruthy();
   expect(ui.getByText('Status settled')).toBeTruthy();
 });

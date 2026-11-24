@@ -33,6 +33,11 @@ const italian: Record<string, string> = {
   'Change PIN': 'Modifica PIN', 'Turn off PIN': 'Disattiva PIN', 'Set up PIN': 'Imposta PIN',
   'Auto-lock': 'Blocco automatico', 'View recovery phrase': 'Mostra frase di recupero',
   'RGB data backup': 'Backup dati RGB', 'Accounts & networks': 'Account e reti',
+  'Choose the accounts this wallet uses. Open an account to change its network or reconnect.':
+    'Scegli gli account di questo portafoglio. Apri un account per cambiare rete o riconnetterlo.',
+  'Use Arkade account': 'Usa account Arkade', 'Use Bark account': 'Usa account Bark',
+  'Unavailable in this build': 'Non disponibile in questa build', 'Updating…': 'Aggiornamento…',
+  'Checking…': 'Verifica…', 'Connected': 'Connesso', 'Not connected': 'Disconnesso', 'Off': 'Disattivato',
   'Interface detail': 'Dettagli interfaccia', 'Display detail': 'Livello di dettaglio',
   'Remove from this device': 'Rimuovi da questo dispositivo', Cancel: 'Annulla', Save: 'Salva',
   'Export voice diagnostics': 'Esporta diagnostica vocale', 'Voice details & retry': 'Dettagli voce e riprova',
@@ -41,7 +46,6 @@ const italian: Record<string, string> = {
   'Experimental features are still being tested. Turn one on to try it; your funds stay in their accounts whether it is on or off.':
     'Le funzioni sperimentali sono ancora in prova. Attivane una per provarla: i tuoi fondi restano nei loro account, che sia attiva o no.',
   'Development build: every feature starts on.': 'Build di sviluppo: tutte le funzioni partono attive.',
-  'Arkade account': 'Account Arkade', 'Low-fee off-chain bitcoin on Ark': 'Bitcoin off-chain a basse commissioni su Ark',
   'On-device assistant for chat and voice': 'Assistente sul dispositivo per chat e voce',
   'Contacts and chat': 'Contatti e chat', 'Pay and message your Nostr contacts': 'Paga e scrivi ai tuoi contatti Nostr',
   'Places to pay': 'Dove pagare', 'Nearby businesses accepting bitcoin': 'Attività vicine che accettano bitcoin',

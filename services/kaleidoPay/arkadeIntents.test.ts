@@ -32,7 +32,7 @@ jest.mock('@kaleidorg/swap-sdk/arkade', () => ({
     constructor(opts: any) { this.opts = opts; mockVenue.instances.push(this); }
     async prepareLightningSend(params: any) {
       mockVenue.prepare(params, this.opts.transport);
-      const id = `rfq-${mockVenue.instances.length}`;
+      const id = `rfq-${mockVenue.prepare.mock.calls.length}`;
       const record = { id, route: 'arkade:BTC->lightning:BTC', phase: 'prepared', quote: { valid_until: Math.floor(Date.now() / 1000) + 60 } };
       await this.opts.store.put(record);
       return { record, address: 'tark1lockup', fundAmountSats: mockVenue.binding.from,
@@ -309,14 +309,36 @@ describe('restart, offline and expiry guards', () => {
     expect(results.filter(r => r.status === 'fulfilled')).toHaveLength(1);
     expect(wallet.sendBitcoin).toHaveBeenCalledTimes(1);
   });
-  test('expiry during the balance lookup blocks funding', async () => {
+  test('a live binding quote can fund after an approved estimate times out during negotiation', async () => {
+    const { swap, preview, route } = fixture();
+    const q = (await swap.quoteOptions(preview, route))[0].quote!;
+    let now = Date.now();
+    const clock = jest.spyOn(Date, 'now').mockImplementation(() => now);
+    mockVenue.prepare.mockImplementationOnce(() => { now += 70_000; });
+    try { await expect(swap.execute(preview, route, q, 'slow-rfq')).resolves.toMatchObject({ status: 'pending' }); }
+    finally { clock.mockRestore(); }
+    expect(mockVenue.prepare).toHaveBeenCalledTimes(1);
+    expect(wallet.sendBitcoin).toHaveBeenCalledTimes(1);
+  });
+  test('an expired RFQ is requested once more before funding', async () => {
+    const { swap, preview, route } = fixture();
+    const q = (await swap.quoteOptions(preview, route))[0].quote!;
+    mockVenue.prepare.mockImplementationOnce(() => {
+      throw Object.assign(new Error('quote expired — request a fresh one'), { reason: 'quote_expired' });
+    });
+    await expect(swap.execute(preview, route, q, 'fresh-rfq')).resolves.toMatchObject({ status: 'pending', reference: 'rfq-2' });
+    expect(mockVenue.prepare).toHaveBeenCalledTimes(2);
+    expect(wallet.sendBitcoin).toHaveBeenCalledTimes(1);
+  });
+  test('both RFQs expiring during balance lookup blocks funding', async () => {
     const { swap, preview, route, balance } = fixture();
     const q = (await swap.quoteOptions(preview, route))[0].quote!;
-    const now = Date.now();
-    const clock = jest.spyOn(Date, 'now');
-    balance.mockImplementationOnce(async () => { clock.mockReturnValue(now + 70_000); return 100_000; });
+    let now = Date.now();
+    const clock = jest.spyOn(Date, 'now').mockImplementation(() => now);
+    balance.mockImplementation(async () => { now += 70_000; return 100_000; });
     try { await expect(swap.execute(preview, route, q, 'late')).rejects.toThrow('expired'); }
     finally { clock.mockRestore(); }
+    expect(mockVenue.prepare).toHaveBeenCalledTimes(2);
     expect(wallet.sendBitcoin).not.toHaveBeenCalled();
   });
   test('restart after uncertain funding recovers the same receipt without resending', async () => {

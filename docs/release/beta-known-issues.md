@@ -7,14 +7,16 @@ small: new wallets use Bitcoin mainnet.
 
 - Bitcoin and Lightning on Spark, send, receive, scan, activity, Lightning address.
 - Swaps on Flashnet (BTC ↔ USDB) and the cross-chain bridge.
-- Everything else experimental is in **Settings → Labs**, off by default:
-  Arkade, Prismo, contacts and chat, places to pay, wallet connections (NWC),
-  the RGB Lightning node and Lightning channels.
+- **Settings → Accounts & networks** has switches for Arkade and Bark in
+  builds that support them.
+- Prismo and contacts are on by default in **Settings → Labs**. Places to pay,
+  wallet connections (NWC), the RGB Lightning node and Lightning channels
+  start off.
 
 ## Not in the beta
 
 - **KaleidoSwap maker swaps.** Swap shows Flashnet only.
-- **RGB on this phone, Bark and merchant offers.**
+- **New RGB accounts on this phone and merchant offers.**
 
 ## Known issues
 
@@ -23,8 +25,7 @@ small: new wallets use Bitcoin mainnet.
   from an earlier version, don't remove that wallet from the device.
 - **Accounts from earlier versions stay.** If you set up Arkade, Bark or RGB
   before the beta, the account is still listed in Settings and keeps
-  working, so you can always send those funds out. New wallets can't add
-  them, except Arkade after turning it on in Labs.
+  working, so you can access those funds in Settings.
 - **Crash reports are opt-in and partial.** Turn on *Send crash reports* in
   Settings → Preferences to help. Crashes in native code (for example RGB,
   Bark or the on-device assistant) are not reported yet; please describe them

@@ -15,6 +15,7 @@ type Props = {
   onSave: (config: Record<string, unknown>) => void;
   /** Whether this wallet uses the account; with onEnabled, a switch turns it on or off. */
   enabled?: boolean;
+  canEnable?: boolean;
   onEnabled?: (on: boolean) => void;
   children?: React.ReactNode;
 };
@@ -54,15 +55,17 @@ export function AccountSettings(props: Props) {
   });
   const action = (label: string, onPress: () => void, disabled = accountBusy) => <Button title={label} variant={label === 'Save and reconnect' ? 'primary' : 'secondary'} onPress={onPress} disabled={disabled} />;
   const host = props.account === 'BARK' ? currentBarkHost() : null;
-  const off = props.onEnabled && props.enabled === false;
+  const off = !!props.onEnabled && props.enabled !== true;
+  const switchDisabled = accountBusy || props.enabled == null || (off && props.canEnable === false);
   return <>
     {props.onEnabled && <View style={styles.card}>
       <View style={styles.switchRow}>
         <View style={{ flex: 1 }}>
           <Text style={styles.title}>Use this account</Text>
           <Text style={styles.text}>{USE_TEXT[props.account]}</Text>
+          {props.canEnable === false && <Text style={styles.text}>Unavailable in this build</Text>}
         </View>
-        <Switch accessibilityLabel="Use this account" value={!!props.enabled} disabled={accountBusy} onValueChange={props.onEnabled}
+        <Switch accessibilityLabel="Use this account" value={!!props.enabled} disabled={switchDisabled} onValueChange={props.onEnabled}
           trackColor={{ true: theme.colors.primary[500], false: theme.colors.gray[300] }} />
       </View>
     </View>}

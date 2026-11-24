@@ -60,9 +60,8 @@ interface BalanceCardProps {
     secondaryText?: string;
     onCycleDenomination?: () => void;
     /**
-     * Rendered inside the card, below the balance/breakdown and separated by an
-     * inset divider line. Used to host the action buttons (Receive/Swap/Send) so
-     * the whole wallet header reads as one unified card (extension parity).
+     * Rendered below the headline balance and above the expandable breakdown,
+     * so actions stay in place when the details open.
      */
     footer?: React.ReactNode;
 }
@@ -207,6 +206,22 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
         });
     }
 
+    const fiatTotal = useDenominated || loading || hideAmounts ? '' : formatUSD(totalBalance);
+    const fiatEquivalent = fiatTotal && fiatTotal !== '0.00' ? `$${fiatTotal} USD` : '';
+    const equivalent = hideAmounts ? '' : useDenominated ? secondaryText : fiatEquivalent;
+    const displayAmount = hideAmounts ? '••••' : primaryText ?? formatSatoshis(totalBalance);
+    const unit = useDenominated ? primaryUnitLabel : bitcoinUnit;
+    const showUnit = !hideAmounts && (!useDenominated || unit === 'sats' || unit === 'BTC');
+    const canCycle = useDenominated && !!onCycleDenomination;
+    const amountStatus = holdingBalance ? 'Last balance' : syncing ? 'Balance so far' : 'Total balance';
+    const balanceFigure = (
+        <View style={styles.balanceRow}>
+            <AmountText style={styles.balanceAmount} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.65}>{displayAmount}</AmountText>
+            {showUnit && <Text style={styles.balanceCurrency}>{unit}</Text>}
+            {canCycle && !hideAmounts && <Ionicons name="repeat-outline" size={16} color={theme.colors.text.secondary} />}
+        </View>
+    );
+
     return (
         <View style={styles.container}>
             <View style={styles.cardHeader}>
@@ -226,95 +241,75 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
             </View>
             <Animated.View style={[styles.totalBalanceContainer, { opacity: amountOpacity }]}>
                 {loading ? (
-                    <>
-                        <Skeleton width={180} height={44} radius={12} label="Balance loading" />
-                        <Skeleton width={110} height={13} style={{ marginTop: theme.spacing[2], alignSelf: 'center' }} label="Balance equivalent loading" />
-                        <Text style={styles.balanceUsd}>Your balance will appear here</Text>
-                    </>
-                ) : useDenominated ? (
-                    <>
-                        {/* Tap the amount to cycle sats / BTC / fiat. The unit sits inline
-                            next to the figure; no separate picker row below it. */}
-                        <TouchableOpacity style={styles.primaryBalance} onPress={onCycleDenomination} disabled={!onCycleDenomination}
-                            accessibilityRole="button"
-                            accessibilityLabel={`${holdingBalance ? 'Last balance' : syncing ? 'Balance so far' : 'Total balance'} ${primaryText} ${primaryUnitLabel ?? ''}.${onCycleDenomination ? ' Tap to change unit.' : ''}`}>
-                            <View style={styles.balanceRow}>
-                                <AmountText style={styles.balanceAmount} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.65}>{primaryText}</AmountText>
-                                {/* Fiat figures already carry their symbol, so only sats/BTC get a unit label. */}
-                                {!hideAmounts && (primaryUnitLabel === 'sats' || primaryUnitLabel === 'BTC') && (
-                                    <Text style={styles.balanceCurrency}>{primaryUnitLabel}</Text>
-                                )}
-                                {onCycleDenomination && !hideAmounts && (
-                                    <Ionicons name="swap-horizontal" size={16} color={theme.colors.text.secondary} />
-                                )}
-                            </View>
-                        </TouchableOpacity>
-                        {!!secondaryText && <AmountText style={styles.balanceUsd}>{secondaryText}</AmountText>}
-                    </>
-                ) : (
-                    <>
-                        <View style={styles.balanceRow}>
-                            <AmountText style={styles.balanceAmount}>
-                                {formatSatoshis(totalBalance)}
-                            </AmountText>
-                            <Text style={styles.balanceCurrency}>{bitcoinUnit}</Text>
-                        </View>
-                        <AmountText style={styles.balanceUsd}>
-                            {formatUSD(totalBalance) !== '0.00' ? `$${formatUSD(totalBalance)} USD` : ''}
-                        </AmountText>
-                    </>
-                )}
-                {/* The details toggle reads as words, not a twin of the refresh
-                    button: one control per corner job. */}
-                {hasBreakdown && (
-                    <TouchableOpacity
-                        style={styles.detailsToggle}
-                        accessibilityRole="button"
-                        onPress={() => setShowBreakdown(v => !v)}
-                        accessibilityState={{ expanded: showBreakdown }}
-                        accessibilityLabel={showBreakdown ? 'Hide network balances' : 'Show network balances'}
-                    >
-                        <Text style={styles.detailsToggleText}>{showBreakdown ? 'Hide details' : 'Details'}</Text>
-                        <Ionicons
-                            name={showBreakdown ? 'chevron-up' : 'chevron-down'}
-                            size={12}
-                            color={theme.colors.primary[500]}
-                        />
-                    </TouchableOpacity>
-                )}
-                {/* Only the figure (and its equivalent) under the balance; status, pending and
-                    test funds are in the details. Slow accounts are named there. */}
-                {showBreakdown && syncing && slow && <Text accessibilityLiveRegion="polite" style={styles.subLine}>
-                    Still syncing{pendingAccounts.length ? ` · ${pendingAccounts.join(', ')}` : ''}
-                </Text>}
-                {!loading && showBreakdown && (availableBtc !== undefined || pendingBtc > 0) && (
-                    <View style={{ gap: theme.spacing[2], marginTop: theme.spacing[3] }}>
-                        {availableBtc !== undefined && <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: theme.spacing[3] }}>
-                            <Text style={styles.subLine}>{stale || updating ? 'Last known available BTC' : 'Available bitcoin'}</Text>
-                            <AmountText style={[styles.subLine, { color: theme.colors.text.primary, fontWeight: '600' }]}>{hideAmounts ? '••••' : `${formatSatoshis(availableBtc)} ${bitcoinUnit}`}</AmountText>
-                        </View>}
-                        {pendingBtc > 0 && <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: theme.spacing[3] }}>
-                            <Text style={styles.subLine}>Not yet available</Text>
-                            <AmountText style={[styles.subLine, { color: theme.colors.text.primary, fontWeight: '600' }]}>{hideAmounts ? '••••' : `${formatSatoshis(pendingBtc)} ${bitcoinUnit}`}</AmountText>
-                        </View>}
-                        {pendingBtc > 0 && <Text style={styles.subLine}>Some funds are still confirming.</Text>}
+                    <View style={styles.balanceLoading}>
+                        <Skeleton width={180} height={44} radius={theme.borderRadius.lg} label="Balance loading" />
+                        <Skeleton width={110} height={13} label="Balance equivalent loading" />
                     </View>
-                )}
-                {showBreakdown && !loading && !syncing && (stale || lastUpdatedAt) && <Text accessibilityLiveRegion="polite" style={[styles.subLine, stale && { color: theme.colors.warning[500] }]}>
-                    {stale ? 'Balance may be incomplete' : 'Updated'}{lastUpdatedAt ? ` · ${new Date(lastUpdatedAt).toLocaleString()}` : ''}
-                </Text>}
-                {showBreakdown && !loading && testBtc > 0 && (
-                    <Text style={styles.subLine}>
-                        Test funds · {hideAmounts ? '••••' : `${formatSatoshis(testBtc)} ${bitcoinUnit}`}
-                    </Text>
+                ) : canCycle ? (
+                    <TouchableOpacity
+                        style={styles.primaryBalance}
+                        onPress={onCycleDenomination}
+                        accessibilityRole="button"
+                        accessibilityLabel={`${amountStatus} ${displayAmount} ${hideAmounts ? '' : primaryUnitLabel ?? ''}. Tap to change unit.`}
+                    >
+                        {balanceFigure}
+                    </TouchableOpacity>
+                ) : balanceFigure}
+                {(hasBreakdown || (!loading && !!equivalent)) && (
+                    <View style={styles.balanceMeta}>
+                        {!loading && !!equivalent && <AmountText style={styles.balanceEquivalent}>{equivalent}</AmountText>}
+                        {hasBreakdown && (
+                            <TouchableOpacity
+                                style={styles.detailsToggle}
+                                accessibilityRole="button"
+                                onPress={() => setShowBreakdown(v => !v)}
+                                accessibilityState={{ expanded: showBreakdown }}
+                                accessibilityLabel={showBreakdown ? 'Hide network balances' : 'Show network balances'}
+                            >
+                                <Text style={styles.detailsToggleText}>{showBreakdown ? 'Hide details' : 'Details'}</Text>
+                                <Ionicons
+                                    name={showBreakdown ? 'chevron-up' : 'chevron-down'}
+                                    size={14}
+                                    color={theme.colors.primary[500]}
+                                />
+                            </TouchableOpacity>
+                        )}
+                    </View>
                 )}
             </Animated.View>
 
-            {/* Per-network breakdown — vertical row list, collapsed behind the
-                chevron above. Mirrors the extension's BITCOIN section. */}
+            {footer != null && <>
+                <View style={styles.footerDivider} />
+                {footer}
+            </>}
+
             {hasBreakdown && showBreakdown && (
                 <View style={styles.breakdownSection}>
                     <View style={styles.breakdownHairline} />
+                    {syncing && slow && <Text accessibilityLiveRegion="polite" style={styles.subLine}>
+                        Still syncing{pendingAccounts.length ? ` · ${pendingAccounts.join(', ')}` : ''}
+                    </Text>}
+                    {!loading && (availableBtc !== undefined || pendingBtc > 0) && (
+                        <View style={{ gap: theme.spacing[2], marginTop: theme.spacing[3] }}>
+                            {availableBtc !== undefined && <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: theme.spacing[3] }}>
+                                <Text style={styles.subLine}>{stale || updating ? 'Last known available BTC' : 'Available bitcoin'}</Text>
+                                <AmountText style={[styles.subLine, { color: theme.colors.text.primary, fontWeight: '600' }]}>{hideAmounts ? '••••' : `${formatSatoshis(availableBtc)} ${bitcoinUnit}`}</AmountText>
+                            </View>}
+                            {pendingBtc > 0 && <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: theme.spacing[3] }}>
+                                <Text style={styles.subLine}>Not yet available</Text>
+                                <AmountText style={[styles.subLine, { color: theme.colors.text.primary, fontWeight: '600' }]}>{hideAmounts ? '••••' : `${formatSatoshis(pendingBtc)} ${bitcoinUnit}`}</AmountText>
+                            </View>}
+                            {pendingBtc > 0 && <Text style={styles.subLine}>Some funds are still confirming.</Text>}
+                        </View>
+                    )}
+                    {!loading && !syncing && (stale || lastUpdatedAt) && <Text accessibilityLiveRegion="polite" style={[styles.subLine, stale && { color: theme.colors.warning[500] }]}>
+                        {stale ? 'Balance may be incomplete' : 'Updated'}{lastUpdatedAt ? ` · ${new Date(lastUpdatedAt).toLocaleString()}` : ''}
+                    </Text>}
+                    {!loading && testBtc > 0 && (
+                        <Text style={styles.subLine}>
+                            Test funds · {hideAmounts ? '••••' : `${formatSatoshis(testBtc)} ${bitcoinUnit}`}
+                        </Text>
+                    )}
                     {breakdownRows.length > 0 && <Text style={styles.breakdownEyebrow}>Bitcoin</Text>}
                     <AllocationBar hideAmounts={hideAmounts} items={breakdownRows.filter(row => !testOf(row.key)).map(row => ({ label: row.name, value: row.value, color: row.accent }))} />
                     <View style={styles.breakdownList}>
@@ -386,24 +381,12 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                     )}
                 </View>
             )}
-
-            {/* Inset divider + footer (action buttons) — turns the balance + actions
-                into a single unified card, matching the extension. The divider sits
-                within the card's padding so it stops short of the card edges. */}
-            {footer !== undefined && footer !== null && (
-                <>
-                    <View style={styles.footerDivider} />
-                    {footer}
-                </>
-            )}
         </View>
     );
 };
 
 const makeStyles = (theme: typeof import('../theme').theme) => StyleSheet.create({
     container: {
-        // Distinct rounded card surface, matching the extension's TOTAL BALANCE
-        // card (#0F1C33, 16px radius, hairline border on the navy background).
         backgroundColor: theme.colors.surface.primary,
         borderRadius: theme.borderRadius.xl,
         borderWidth: StyleSheet.hairlineWidth,
@@ -421,9 +404,18 @@ const makeStyles = (theme: typeof import('../theme').theme) => StyleSheet.create
         fontWeight: theme.typography.fontWeight.semibold,
     },
     totalBalanceContainer: {
-        alignItems: 'center', paddingTop: theme.spacing[1], paddingBottom: theme.spacing[2],
+        paddingTop: theme.spacing[2],
     },
-    primaryBalance: { width: '100%', minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+    balanceLoading: {
+        gap: theme.spacing[2],
+        paddingVertical: theme.spacing[2],
+    },
+    primaryBalance: {
+        alignSelf: 'flex-start',
+        maxWidth: '100%',
+        minHeight: 44,
+        justifyContent: 'center',
+    },
     subLine: {
         fontSize: theme.typography.fontSize.xs,
         color: theme.colors.text.secondary,
@@ -433,7 +425,6 @@ const makeStyles = (theme: typeof import('../theme').theme) => StyleSheet.create
         flexDirection: 'row',
         flexWrap: 'wrap',
         alignItems: 'baseline',
-        justifyContent: 'center',
         gap: theme.spacing[1.5],
     },
     balanceAmount: {
@@ -445,16 +436,22 @@ const makeStyles = (theme: typeof import('../theme').theme) => StyleSheet.create
         fontWeight: theme.typography.fontWeight.black,
         letterSpacing: -0.7,
         color: theme.colors.text.primary,
-        textAlign: 'center',
+        flexShrink: 1,
+    },
+    balanceMeta: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: theme.spacing[2],
     },
     detailsToggle: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 2,
-        alignSelf: 'center',
-        marginTop: theme.spacing[2],
+        gap: theme.spacing[1],
+        marginStart: 'auto',
         minHeight: 44,
-        paddingHorizontal: theme.spacing[2],
+        paddingHorizontal: theme.spacing[1],
     },
     detailsToggleText: {
         color: theme.colors.primary[500],
@@ -466,12 +463,12 @@ const makeStyles = (theme: typeof import('../theme').theme) => StyleSheet.create
         fontWeight: theme.typography.fontWeight.medium,
         color: theme.colors.text.secondary,
     },
-    balanceUsd: {
+    balanceEquivalent: {
         // Equivalent balance (e.g. "0.00003652 BTC") — monospaced like the extension.
         fontFamily: theme.typography.fontFamily.mono,
         fontSize: theme.typography.fontSize.sm,
-        color: theme.colors.text.tertiary,
-        marginTop: theme.spacing[0.5],
+        color: theme.colors.text.secondary,
+        flexShrink: 1,
     },
     controlButton: {
         width: 44,
@@ -482,12 +479,12 @@ const makeStyles = (theme: typeof import('../theme').theme) => StyleSheet.create
         alignItems: 'center',
     },
     breakdownSection: {
-        marginTop: theme.spacing[3],
+        marginTop: theme.spacing[4],
+        gap: theme.spacing[2],
     },
     breakdownHairline: {
         height: StyleSheet.hairlineWidth,
         backgroundColor: theme.colors.border.medium,
-        marginBottom: theme.spacing[3],
     },
     breakdownEyebrow: {
         fontSize: theme.typography.fontSize.xs,
@@ -553,9 +550,6 @@ const makeStyles = (theme: typeof import('../theme').theme) => StyleSheet.create
         color: theme.colors.text.muted,
     },
     footerDivider: {
-        // Hairline separator between the balance block and the footer (action
-        // buttons). Lives inside the card's padding so it stops short of the
-        // card edges, leaving a little breathing room before the borders.
         height: StyleSheet.hairlineWidth,
         backgroundColor: theme.colors.border.medium,
         marginTop: theme.spacing[1],

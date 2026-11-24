@@ -8,6 +8,7 @@ test('calls the matching wallet action from each labeled tile', () => {
   const onSwap = jest.fn();
   const screen = render(<ActionButtons {...{ onReceive, onSend, onSwap }} />);
 
+  expect(screen.getAllByText(/^(Receive|Swap|Send)$/).map(text => text.props.children)).toEqual(['Receive', 'Swap', 'Send']);
   fireEvent.press(screen.getByLabelText('Receive'));
   expect(onReceive).toHaveBeenCalledTimes(1);
   expect(onSend).not.toHaveBeenCalled();

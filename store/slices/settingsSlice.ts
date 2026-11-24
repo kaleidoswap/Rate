@@ -75,6 +75,8 @@ interface SettingsState {
   transactionNotifications: boolean;
   priceAlerts: boolean;
   hideBalances: boolean;
+  /** Asset rows hidden on Home, keyed by wallet. */
+  hiddenHomeAssets?: Record<string, string[]>;
   // UI sound effects (paired with haptics for accessible, multi-modal feedback).
   soundEnabled: boolean;
   biometricEnabled: boolean;
@@ -114,6 +116,7 @@ const initialState: SettingsState = {
   transactionNotifications: true,
   priceAlerts: false,
   hideBalances: false,
+  hiddenHomeAssets: {},
   soundEnabled: true,
   biometricEnabled: false,
   pinEnabled: false,
@@ -186,6 +189,19 @@ const settingsSlice = createSlice({
     setHideBalances: (state, action: PayloadAction<boolean>) => {
       state.hideBalances = action.payload;
     },
+    setHomeAssetHidden: (state, action: PayloadAction<{ walletKey: string; assetKey: string; hidden: boolean }>) => {
+      const { walletKey, assetKey, hidden } = action.payload;
+      const current = state.hiddenHomeAssets?.[walletKey];
+      if (hidden) {
+        if (current?.includes(assetKey)) return;
+        state.hiddenHomeAssets ??= {};
+        state.hiddenHomeAssets[walletKey] = [...(current ?? []), assetKey];
+      } else if (state.hiddenHomeAssets && current?.includes(assetKey)) {
+        const remaining = current.filter(key => key !== assetKey);
+        if (remaining.length) state.hiddenHomeAssets[walletKey] = remaining;
+        else delete state.hiddenHomeAssets[walletKey];
+      }
+    },
     setSoundEnabled: (state, action: PayloadAction<boolean>) => {
       state.soundEnabled = action.payload;
     },
@@ -255,6 +271,7 @@ export const {
   setTransactionNotifications,
   setPriceAlerts,
   setHideBalances,
+  setHomeAssetHidden,
   setSoundEnabled,
   setBiometricEnabled,
   setPinEnabled,
@@ -274,6 +291,11 @@ export const {
 } = settingsSlice.actions;
 
 export const selectCrashReports = (state: RootState): boolean => state.settings.crashReports ?? false;
+
+const NO_HIDDEN_HOME_ASSETS: readonly string[] = [];
+
+export const selectHiddenHomeAssets = (state: RootState, walletKey: string | null): readonly string[] =>
+  (walletKey ? state.settings.hiddenHomeAssets?.[walletKey] : undefined) ?? NO_HIDDEN_HOME_ASSETS;
 
 // Whether a feature ships in this build and is on. State persisted before Labs
 // existed has no `labs` field, so unset features follow the build channel.

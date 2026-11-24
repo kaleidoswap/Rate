@@ -17,8 +17,8 @@ const ACTION_ITEMS: Array<{
     icon: keyof typeof Ionicons.glyphMap;
 }> = [
     { action: 'onReceive', label: 'Receive', icon: 'arrow-down' },
-    { action: 'onSend', label: 'Send', icon: 'arrow-up' },
     { action: 'onSwap', label: 'Swap', icon: 'swap-horizontal' },
+    { action: 'onSend', label: 'Send', icon: 'arrow-up' },
 ];
 
 export const ActionButtons: React.FC<ActionButtonsProps> = (props) => {

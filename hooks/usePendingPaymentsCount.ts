@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAppSelector } from '../store/hooks';
 import { loadPendingPaymentActivity } from '../services/kaleidoPay/activity';
+import { isRgbPaymentInProgress } from '../utils/activity-layers';
 
 /**
  * How many payments still need attention (pending or needing a check), for
@@ -14,7 +15,7 @@ export function usePendingPaymentsCount(pollMs = 60_000): number {
     let active = true;
     if (walletId == null) { setCount(0); return; }
     const read = () => { void loadPendingPaymentActivity(walletId).then(items => {
-      if (active) setCount(items.length);
+      if (active) setCount(items.filter(item => !isRgbPaymentInProgress(item)).length);
     }, () => {}); };
     read();
     const timer = setInterval(read, pollMs);

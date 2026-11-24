@@ -17,15 +17,16 @@ test('a development build ships everything, with Labs features on', () => {
   }
 });
 
-test.each(['beta', 'store'] as const)('a %s build drops Held features and starts Labs features off', (channel) => {
+test.each(['beta', 'store'] as const)('a %s build starts Prismo and Contacts on and respects Labs choices', (channel) => {
   for (const feature of HELD_FEATURES) {
     expect(isAvailable(feature, channel)).toBe(false);
     expect(isFeatureOn(feature, undefined, channel)).toBe(false);
   }
   for (const feature of LABS_FEATURES) {
     expect(isAvailable(feature, channel)).toBe(true);
-    expect(isFeatureOn(feature, undefined, channel)).toBe(false);
+    expect(isFeatureOn(feature, undefined, channel)).toBe(feature === 'prismo' || feature === 'social');
     expect(isFeatureOn(feature, { [feature]: true }, channel)).toBe(true);
+    expect(isFeatureOn(feature, { [feature]: false }, channel)).toBe(false);
   }
 });
 
@@ -37,7 +38,7 @@ test('the settings slice records a Labs choice and the selector reads it', () =>
   const settings = reducer(undefined, setLabsFeature({ feature: 'map', enabled: false }));
   expect(settings.labs).toEqual({ map: false });
   expect(selectFeatureOn({ settings } as any, 'map')).toBe(false);
-  expect(selectFeatureOn({ settings } as any, 'arkade')).toBe(true);
+  expect(selectFeatureOn({ settings } as any, 'prismo')).toBe(true);
 });
 
 test('state persisted before Labs existed follows the build channel', () => {

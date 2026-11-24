@@ -5,18 +5,34 @@ import { act, fireEvent, render } from '@testing-library/react-native';
 import SettingsScreen from './SettingsScreen';
 const mockDispatch = jest.fn();
 const mockState = { settings: { currency: 'USD', bitcoinUnit: 'sats', disclosureLevel: 'lite', soundEnabled: true }, nostr: { nwcConnections: [] }, wallet: { activeWallet: { id: 1, name: 'Daily wallet' }, isUnlocked: false } };
-let mockNetworks: { type: 'spark' | 'arkade'; enabled: boolean }[] = [];
+let mockNetworks: { type: 'spark' | 'arkade'; enabled: boolean; config?: string }[] = [];
+const mockUpdateNetworkConfig = jest.fn();
+const mockAddNetworkToWallet = jest.fn();
+let mockBarkNativeAvailable = true;
+let mockBarkOff = false;
 jest.mock('../store/hooks', () => ({ useAppSelector: (f: any) => f(mockState), useAppDispatch: () => mockDispatch }));
 jest.mock('@react-navigation/native', () => ({ useFocusEffect: (f: any) => require('react').useEffect(f, [f]) }));
-jest.mock('../services/protocols/bark', () => ({ BARK_ENABLED: true }));
-jest.mock('../services/protocols/barkPreferences', () => ({ currentBarkHost: () => ({ network: 'signet' }), isBarkOff: async () => false, loadBarkHost: async () => ({ network: 'signet' }), saveBarkNetwork: jest.fn() }));
+jest.mock('../services/protocols/bark', () => ({ BARK_ENABLED: true, isBarkNativeAvailable: () => mockBarkNativeAvailable }));
+jest.mock('../services/protocols/barkPreferences', () => ({
+  currentBarkHost: () => ({ network: 'signet' }),
+  isBarkOff: async () => mockBarkOff,
+  preferredBarkNetwork: async () => 'signet',
+  saveBarkNetwork: jest.fn(),
+  setBarkOff: jest.fn(),
+}));
 let mockPhoneNetwork: string | null = null;
 jest.mock('../services/protocols/rgbL1', () => ({
   ...jest.requireActual('../services/protocols/rgbL1'),
   loadRgbL1Network: async () => mockPhoneNetwork,
 }));
-jest.mock('../services/protocols', () => ({ protocolManager: { getAdapterIfAvailable: () => null, disconnect: jest.fn() }, rgbAccountAdapter: () => null, rgbNodeConnected: () => false, reconcileRgbOnDevice: jest.fn(), initializeProtocols: jest.fn(async () => new Map([['BARK', { success: true }]])) }));
-jest.mock('../services/DatabaseService', () => ({ __esModule: true, default: { getInstance: () => ({ getWalletNetworks: async () => mockNetworks, getActiveWallet: async () => ({ id: 1, encrypted_mnemonic: 'public test fixture' }) }) } }));
+jest.mock('../services/protocols', () => ({ protocolManager: { getAdapterIfAvailable: jest.fn(() => null), disconnect: jest.fn() }, rgbAccountAdapter: () => null, rgbNodeConnected: () => false, reconcileRgbOnDevice: jest.fn(), initializeProtocols: jest.fn(async () => new Map([['BARK', { success: true }]])) }));
+jest.mock('../services/kaleidoPay/connect', () => ({ syncPayAccounts: jest.fn() }));
+jest.mock('../services/DatabaseService', () => ({ __esModule: true, default: { getInstance: () => ({
+  getWalletNetworks: async () => mockNetworks,
+  getActiveWallet: async () => ({ id: 1, encrypted_mnemonic: 'public test fixture' }),
+  updateNetworkConfig: mockUpdateNetworkConfig,
+  addNetworkToWallet: mockAddNetworkToWallet,
+}) } }));
 jest.mock('../services/SecurityService', () => ({ __esModule: true, default: { getInstance: jest.fn() } }));
 jest.mock('../services/nwc/connectionStore', () => ({ removeNwcCredential: jest.fn() }));
 jest.mock('../store/slices/walletSlice', () => ({ loadBtcBalance: jest.fn(), setActiveWallet: jest.fn() }));
@@ -40,7 +56,7 @@ const lockState = (over: Partial<{ pinEnabled: boolean; biometricEnabled: boolea
   };
   require('../services/SecurityService').default.getInstance.mockReturnValue(mockSecurity);
 };
-beforeEach(() => { jest.clearAllMocks(); mockNetworks = []; lockState({}); (require('react-native') as any).BackHandler = { addEventListener: () => ({ remove: jest.fn() }) }; (require('react-native') as any).Keyboard = { dismiss: jest.fn() }; });
+beforeEach(() => { jest.clearAllMocks(); mockNetworks = []; mockBarkNativeAvailable = true; mockBarkOff = false; lockState({}); (require('react-native') as any).BackHandler = { addEventListener: () => ({ remove: jest.fn() }) }; (require('react-native') as any).Keyboard = { dismiss: jest.fn() }; });
 test('home shows categories and keeps sensitive and technical actions in their sections', async () => {
   const screen = render(<SettingsScreen navigation={navigation} />);
   await act(async () => {});
@@ -85,7 +101,7 @@ test('preferences remain actionable and connections retain their destinations', 
 test('Bark’s network is picked on the same bottom sheet as every other setting', async () => {
   const screen = render(<SettingsScreen navigation={navigation} />);
   await act(async () => {});
-  fireEvent.press(screen.getByLabelText('Advanced'));
+  fireEvent.press(screen.getByLabelText('Accounts & networks'));
   fireEvent.press(screen.getByLabelText('Bark account settings'));
   fireEvent.press(screen.getByText('Change network'));
   // An OptionSheet, not a native alert: both networks visible, the current one explained.
@@ -98,7 +114,7 @@ test('selecting Bark mainnet saves the preference and reconnects through protoco
   const { protocolManager, initializeProtocols } = require('../services/protocols');
   const screen = render(<SettingsScreen navigation={navigation} />);
   await act(async () => {});
-  fireEvent.press(screen.getByLabelText('Advanced'));
+  fireEvent.press(screen.getByLabelText('Accounts & networks'));
   fireEvent.press(screen.getByLabelText('Bark account settings'));
   fireEvent.press(screen.getByText('Change network'));
   await act(async () => { fireEvent.press(screen.getByText('Bark network: Mainnet')); });
@@ -111,7 +127,7 @@ test('account pages expose supported controls and back returns to the account li
   mockNetworks = [{ type: 'spark', enabled: true }, { type: 'arkade', enabled: true }];
   const screen = render(<SettingsScreen navigation={navigation} />);
   await act(async () => {});
-  fireEvent.press(screen.getByLabelText('Advanced'));
+  fireEvent.press(screen.getByLabelText('Accounts & networks'));
   fireEvent.press(screen.getByLabelText('Spark account settings'));
   expect(screen.getByText('Reconnect account')).toBeTruthy();
   expect(screen.getByLabelText('Use this account')).toBeTruthy();
@@ -253,7 +269,7 @@ test('advanced tools and the map remain accessible without crowding everyday con
   expect(screen.queryByLabelText('Spark account settings')).toBeNull();
   fireEvent.press(screen.getByLabelText('Back'));
   fireEvent.press(screen.getByLabelText('Advanced'));
-  expect(screen.getByLabelText('Spark account settings')).toBeTruthy();
+  expect(screen.queryByLabelText('Spark account settings')).toBeNull();
   fireEvent.press(screen.getByLabelText('Open a Lightning channel'));
   expect(navigation.navigate).toHaveBeenCalledWith('LSP');
 });
@@ -262,7 +278,9 @@ test('Labs lists each experimental feature with a switch that records the choice
   const screen = render(<SettingsScreen navigation={navigation} />);
   await act(async () => {});
   fireEvent.press(screen.getByLabelText('Labs'));
-  expect(screen.getByText('Arkade account')).toBeTruthy();
+  expect(screen.queryByText('Arkade account')).toBeNull();
+  expect(screen.getByLabelText('Prismo').props.value).toBe(true);
+  expect(screen.getByLabelText('Contacts and chat').props.value).toBe(true);
   fireEvent(screen.getByLabelText('Prismo'), 'valueChange', false);
   expect(mockDispatch).toHaveBeenCalledWith({ type: 'settings/setLabsFeature', payload: { feature: 'prismo', enabled: false } });
 });
@@ -276,12 +294,54 @@ test('a Labs feature turned off loses its entry points', async () => {
     expect(screen.queryByLabelText('Places to pay')).toBeNull();
     fireEvent.press(screen.getByLabelText('Advanced'));
     expect(screen.queryByLabelText('Open a Lightning channel')).toBeNull();
-    // Arkade is off and this wallet never set it up, so its account row is gone; Spark stays.
-    expect(screen.queryByLabelText('Arkade account settings')).toBeNull();
+    fireEvent.press(screen.getByLabelText('Back'));
+    fireEvent.press(screen.getByLabelText('Accounts & networks'));
+    // An old Labs choice never controls a wallet account.
+    expect(screen.getByLabelText('Arkade account settings')).toBeTruthy();
+    expect(screen.getByLabelText('Use Arkade account').props.value).toBe(false);
     expect(screen.getByLabelText('Spark account settings')).toBeTruthy();
   } finally {
     delete settings.labs;
   }
+});
+
+test('the account list turns Arkade on through the wallet config and synchronizes payment routes', async () => {
+  const { initializeProtocols } = require('../services/protocols');
+  initializeProtocols.mockResolvedValueOnce(new Map([['ARKADE', { success: true }]]));
+  const screen = render(<SettingsScreen navigation={navigation} />);
+  await act(async () => {});
+  fireEvent.press(screen.getByLabelText('Accounts & networks'));
+  const toggle = screen.getByLabelText('Use Arkade account');
+  expect(toggle.props.value).toBe(false);
+  await act(async () => { fireEvent(toggle, 'valueChange', true); });
+  expect(mockAddNetworkToWallet).toHaveBeenCalledWith(1, expect.objectContaining({ type: 'arkade', enabled: true }));
+  expect(require('../services/kaleidoPay/connect').syncPayAccounts).toHaveBeenCalled();
+  expect(screen.getByLabelText('Use Arkade account').props.value).toBe(true);
+});
+
+test('turning Bark off from Accounts invokes its disconnect lifecycle and preserves the network display', async () => {
+  const { initializeProtocols } = require('../services/protocols');
+  initializeProtocols.mockResolvedValueOnce(new Map([['BARK', { success: false, error: 'skipped: Bark is off for this wallet' }]]));
+  const screen = render(<SettingsScreen navigation={navigation} />);
+  await act(async () => {});
+  fireEvent.press(screen.getByLabelText('Accounts & networks'));
+  await act(async () => { fireEvent(screen.getByLabelText('Use Bark account'), 'valueChange', false); });
+  expect(require('../services/protocols/barkPreferences').setBarkOff).toHaveBeenCalledWith('public test fixture');
+  expect(initializeProtocols).toHaveBeenCalledWith('public test fixture', []);
+  expect(screen.getByLabelText('Use Bark account').props.value).toBe(false);
+  expect(screen.getByLabelText('Bark account settings').props.accessibilityHint).toBe('Off · Signet');
+});
+
+test('a build without native Bark does not let the wallet turn it on', async () => {
+  mockBarkNativeAvailable = false;
+  mockBarkOff = true;
+  const screen = render(<SettingsScreen navigation={navigation} />);
+  await act(async () => {});
+  fireEvent.press(screen.getByLabelText('Accounts & networks'));
+  const toggle = screen.getByLabelText('Use Bark account');
+  expect(toggle.props.disabled).toBe(true);
+  await act(async () => { fireEvent(toggle, 'valueChange', true); });
+  expect(require('../services/protocols/barkPreferences').saveBarkNetwork).not.toHaveBeenCalled();
 });
 
 test.each([null, 'mainnet'])('held builds only offer phone RGB backups for a configured wallet (%s)', async (network) => {
