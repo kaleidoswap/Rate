@@ -1,0 +1,40 @@
+name: BFA beta.7 compatibility probe
+
+on:
+  push:
+    branches: [test/rgb-bfa8-legacy]
+
+permissions:
+  contents: read
+
+jobs:
+  legacy-ios:
+    name: Reopen and restore a beta.7 wallet with bfa.8
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 3427378a06631a8fd8b5612fc9b2fc81fabbf9c3
+          path: standard-beta7
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install the official pinned native libraries
+        run: |
+          test "$(uname -m)" = arm64
+          df -h .
+          node standard-beta7/modules/kaleido-rgb/scripts/download-rgb-lib-ios.js
+          node modules/kaleido-rgb/scripts/download-rgb-lib-ios.js
+      - name: Boot iOS and run the isolated Regtest probe
+        timeout-minutes: 15
+        run: |
+          simulator="$(xcrun simctl list devices available -j | jq -er \
+            '[.devices[][] | select(.isAvailable and (.name | startswith("iPhone"))) | .udid] | last')"
+          xcrun simctl boot "$simulator" || true
+          xcrun simctl bootstatus "$simulator" -b
+          SIMULATOR_UDID="$simulator" bash scripts/bfa-e2e/run-beta7-compat-ios.sh "$GITHUB_WORKSPACE/standard-beta7"
