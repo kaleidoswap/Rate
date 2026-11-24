@@ -1,0 +1,152 @@
+name: TestFlight 0.19 readiness
+
+on:
+  push:
+    branches: [ops/testflight-v019]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rate-testflight-v019-readiness
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    name: Read production TestFlight build and group status
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Report builds and external distribution
+        env:
+          ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_BASE: https://api.appstoreconnect.apple.com
+        run: |
+          set -euo pipefail
+          : "${ASC_KEY_P8_BASE64:?App Store Connect key is missing}"
+          : "${ASC_KEY_ID:?App Store Connect key ID is missing}"
+          : "${ASC_ISSUER_ID:?App Store Connect issuer ID is missing}"
+          umask 077
+          export ASC_KEY_P8="$(mktemp "$RUNNER_TEMP/testflight-readiness.XXXXXX")"
+          trap 'rm -f -- "$ASC_KEY_P8"' EXIT
+          printf '%s' "$ASC_KEY_P8_BASE64" | base64 -d > "$ASC_KEY_P8"
+          unset ASC_KEY_P8_BASE64
+
+          node <<'NODE'
+          const { spawnSync } = require('node:child_process');
+          const { appendFileSync } = require('node:fs');
+
+          const bundleId = 'com.kaleidoswap.wallet';
+          const publishedInvite = 'https://testflight.apple.com/join/ddrZT98T';
+
+          function get(route, filters) {
+            const query = new URLSearchParams(filters);
+            const reply = spawnSync(process.execPath, ['scripts/asc-api.mjs', 'GET', route + '?' + query], {
+              encoding: 'utf8',
+              timeout: 30_000,
+            });
+            const status = reply.stdout?.match(/^HTTP (\d{3})\r?\n/);
+            if (reply.status !== 0 || !status) {
+              throw new Error('App Store Connect GET ' + route + ' failed (' + (status?.[1] ?? 'no HTTP response') + ')');
+            }
+            try {
+              return JSON.parse(reply.stdout.slice(status[0].length));
+            } catch {
+              throw new Error('App Store Connect GET ' + route + ' returned an invalid response');
+            }
+          }
+
+          function isPublishedInvite(group) {
+            const attrs = group.attributes;
+            return attrs.isInternalGroup === false &&
+              (attrs.publicLink === publishedInvite || attrs.publicLinkId === 'ddrZT98T');
+          }
+
+          const apps = get('/v1/apps', {
+            'filter[bundleId]': bundleId,
+            'fields[apps]': 'bundleId',
+            limit: '2',
+          }).data;
+          if (apps.length !== 1 || apps[0].attributes.bundleId !== bundleId) {
+            throw new Error('The release key does not resolve the expected production app uniquely');
+          }
+          const app = apps[0].id;
+          const groupFields = 'isInternalGroup,publicLinkEnabled,publicLinkId,publicLink';
+          const publicGroups = get('/v1/betaGroups', {
+            'filter[app]': app,
+            'filter[isInternalGroup]': 'false',
+            'fields[betaGroups]': groupFields,
+            limit: '200',
+          }).data;
+          const invite = publicGroups.find(isPublishedInvite);
+          const inviteStatus = invite ? (invite.attributes.publicLinkEnabled ? 'enabled' : 'disabled') : 'not found';
+          const summary = [
+            '## Production TestFlight build status',
+            '',
+            'Published invite ' + publishedInvite + ' is ' + inviteStatus + '.',
+            '',
+            '| Version | Build | Processing | Internal | External | Internal groups | External groups | Enabled public groups | Published invite |',
+            '| --- | --- | --- | --- | --- | ---: | ---: | ---: | --- |',
+          ];
+
+          for (const version of ['0.18.0', '0.19.0']) {
+            const result = get('/v1/builds', {
+              'filter[app]': app,
+              'filter[preReleaseVersion.version]': version,
+              'fields[builds]': 'version,processingState,expired,preReleaseVersion,buildBetaDetail',
+              'fields[preReleaseVersions]': 'version,platform',
+              'fields[buildBetaDetails]': 'internalBuildState,externalBuildState',
+              include: 'preReleaseVersion,buildBetaDetail',
+              sort: '-uploadedDate',
+              limit: '5',
+            });
+            const included = new Map((result.included ?? []).map(item => [item.type + ':' + item.id, item.attributes]));
+            const attributesOf = relation => {
+              const item = relation?.data;
+              return item && included.get(item.type + ':' + item.id);
+            };
+            const builds = result.data.filter(build =>
+              attributesOf(build.relationships.preReleaseVersion)?.platform === 'IOS'
+            );
+            if (builds.length === 0) {
+              summary.push('| ' + version + ' | — | No iOS build visible | — | — | — | — | — | — |');
+              continue;
+            }
+            for (const build of builds) {
+              const groups = get('/v1/betaGroups', {
+                'filter[app]': app,
+                'filter[builds]': build.id,
+                'fields[betaGroups]': groupFields,
+                limit: '200',
+              }).data;
+              const external = groups.filter(group => group.attributes.isInternalGroup === false);
+              const enabledLinks = external.filter(group => group.attributes.publicLinkEnabled);
+              const details = attributesOf(build.relationships.buildBetaDetail);
+              const processing = build.attributes.processingState + (build.attributes.expired ? ' (expired)' : '');
+              const row = [
+                version,
+                build.attributes.version,
+                processing,
+                details?.internalBuildState ?? '—',
+                details?.externalBuildState ?? '—',
+                groups.length - external.length,
+                external.length,
+                enabledLinks.length,
+                enabledLinks.some(isPublishedInvite) ? 'assigned' : '—',
+              ];
+              summary.push('| ' + row.join(' | ') + ' |');
+            }
+          }
+
+          const report = summary.join('\n') + '\n';
+          console.log(report.trimEnd());
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY, report);
+          NODE
