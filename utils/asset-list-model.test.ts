@@ -1,5 +1,5 @@
 import {
-  assetListUsdTotal, availableAssetFilters, buildAssetListItems, dominantHolding, filterAssetItems, LITE_USD_KEY,
+  assetDetailForItem, assetListUsdTotal, availableAssetFilters, buildAssetListItems, dominantHolding, filterAssetItems, LITE_USD_KEY,
 } from './asset-list-model';
 
 const token = (asset_id: string, ticker: string, protocol: string, baseUnits: number, precision = 6, name = ticker) =>
@@ -80,4 +80,21 @@ test('amounts read with separators and no trailing zeros', () => {
   expect(formatTokenAmount(21000, 0)).toBe('21,000');
   expect(formatTokenAmount(0, 2)).toBe('0');
   expect(networkLabel('onchain')).toBe('Bitcoin');
+});
+
+test('network filters do not assign fiat value to test bitcoin', () => {
+  const items = buildAssetListItems({ ...base, btcMainnetNetworks: { onchain: 10_000 } });
+  const [sparkBtc] = filterAssetItems(items, 'spark');
+  expect(sparkBtc.amount).toBe(5_000);
+  expect(sparkBtc.usdValue).toBeUndefined();
+  expect(filterAssetItems(items, 'onchain')[0].usdValue).toBeCloseTo(10);
+});
+
+test('asset detail uses the account of the selected holding', () => {
+  const [btc, usdt] = filterAssetItems(buildAssetListItems(base), 'spark');
+  expect(assetDetailForItem(btc, 'BTC')).toMatchObject({ precision: 8, unit: 'BTC', protocol: 'BTC', balance: { spendable: 5000 } });
+  expect(assetDetailForItem(usdt, 'sats')).toMatchObject({
+    asset_id: 'spark-usdt', isRGB: false, protocol: 'SPARK', fiatValue: 10,
+    locations: [{ label: 'Spark', amount: 10, unit: 'USDT' }],
+  });
 });
