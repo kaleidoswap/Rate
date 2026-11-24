@@ -12,7 +12,7 @@ const mockHasBarkPreference = jest.fn(async () => false);
 const mockSetBarkOff = jest.fn(async () => undefined);
 const mockSaveRgbL1Network = jest.fn(async () => undefined);
 jest.mock('../DatabaseService', () => ({ __esModule: true, default: { getInstance: () => ({}) } }));
-jest.mock('./bark', () => ({ BARK_ENABLED: true }));
+jest.mock('./bark', () => ({ BARK_ENABLED: true, isBarkNativeAvailable: () => true }));
 jest.mock('./barkPreferences', () => ({
   hasBarkPreference: mockHasBarkPreference,
   saveBarkNetwork: jest.fn(),
@@ -30,10 +30,10 @@ afterEach(() => {
   jest.clearAllMocks();
 });
 
-test.each(['beta', 'store'])('a %s build offers only Spark during onboarding', channel => {
+test.each(['beta', 'store'])('a %s build offers Arkade as opt-in alongside Spark during onboarding', channel => {
   const { DEFAULT_ACCOUNTS, SETUP_ACCOUNTS } = loadChoices(channel);
   expect(DEFAULT_ACCOUNTS).toEqual({ spark: true, arkade: false, bark: false, rgbOnDevice: false });
-  expect(SETUP_ACCOUNTS.map(account => account.key)).toEqual(['spark']);
+  expect(SETUP_ACCOUNTS.map(account => account.key)).toEqual(['spark', 'arkade']);
 });
 
 test('a development build offers choices with Spark and RGB initially selected', () => {

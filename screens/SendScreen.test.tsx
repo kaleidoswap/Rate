@@ -74,13 +74,19 @@ test('one flow: decode, compare ways to pay, and pay only the reviewed total', a
   const screen = await reviewed();
   expect(previewInput).toHaveBeenCalledWith('lnbc1', 1000, 'test-uuid', { asset: undefined });
   expect(executePaymentOffer).not.toHaveBeenCalled();
-  expect(screen.getByText('Slide to pay 1010 sats')).toBeTruthy();
+  expect(screen.getByText('Hold to pay 1010 sats')).toBeTruthy();
   // Pay from: all accounts visible inline, the cheapest picked.
   expect(screen.getByLabelText(/^Pay from Spark\. Total 1010 sats/).props.accessibilityState.checked).toBe(true);
   expect(screen.getByLabelText(/^Pay from Bark/).props.accessibilityState.checked).toBe(false);
   fireEvent.press(screen.getByLabelText('Change account'));
   fireEvent.press(screen.getByLabelText(/^Bark\. Total you pay/));
-  await act(async () => { pay(screen, 'Pay 1020 sats'); });
+  const paymentControl = screen.getByLabelText('Pay 1020 sats');
+  fireEvent.press(paymentControl);
+  expect(executePaymentOffer).not.toHaveBeenCalled();
+  await act(async () => {
+    fireEvent(paymentControl, 'pressIn');
+    fireEvent(paymentControl, 'longPress');
+  });
   expect(executePaymentOffer).toHaveBeenCalledWith(mockPreview, expect.objectContaining({ id: 'Bark' }), expect.any(String));
   expect(screen.getByText('Verify payment')).toBeTruthy();
   expect(mockDispatch).toHaveBeenCalledWith({ type: 'loadBtcBalance' });
@@ -119,6 +125,50 @@ test('a confirmed expired invoice can be replaced from review', async () => {
   expect(beginPaymentAttempt).not.toHaveBeenCalled();
   expect(dismissPaymentAttempt).not.toHaveBeenCalled();
   expect(executePaymentOffer).not.toHaveBeenCalled();
+});
+
+test('refresh selects Arkade Intents when no provider had a usable first quote', async () => {
+  const arkade = {
+    ...offer('arkade', 1020),
+    route: { kind: 'swap', sourceId: 'arkade', from: 'ark:mainnet', to: 'ln:mainnet', providerId: 'arkade-intents' },
+  };
+  (quotePaymentOffers as jest.Mock)
+    .mockResolvedValueOnce([{ ...arkade, quote: undefined, unavailable: 'The payment quote is invalid or expired.' }])
+    .mockResolvedValueOnce([arkade]);
+  const screen = await reviewed();
+  expect(screen.getByText('The payment quote is invalid or expired.')).toBeTruthy();
+  await act(async () => { fireEvent.press(screen.getByText('Refresh price')); });
+  expect(screen.getByLabelText(/^Pay from Arkade\. Total 1020 sats/).props.accessibilityState.checked).toBe(true);
+  expect(screen.queryByText('Refresh price')).toBeNull();
+});
+
+test('an automatic refresh waits for the selected Arkade quote while Spark responds first', async () => {
+  jest.useFakeTimers();
+  try {
+    const arkadeRoute = { kind: 'swap', sourceId: 'arkade', from: 'ark:mainnet', to: 'ln:mainnet', providerId: 'arkade-intents' };
+    const arkade = { ...offer('arkade', 1020, Math.floor(Date.now() / 1000) + 2), route: arkadeRoute };
+    const spark = offer('Spark', 1010);
+    let finishRefresh!: (offers: unknown[]) => void;
+    (quotePaymentOffers as jest.Mock)
+      .mockResolvedValueOnce([arkade])
+      .mockImplementationOnce((_preview, onProgress) => {
+        onProgress([spark]);
+        return new Promise(resolve => { finishRefresh = resolve; });
+      });
+    const screen = render(<SendScreen navigation={nav()} route={{ params: { prefilledAddress: 'lnbc1' } }} />);
+    await act(async () => { await jest.advanceTimersByTimeAsync(100); });
+    expect(screen.getByLabelText(/^Pay from Arkade/).props.accessibilityState.checked).toBe(true);
+    await act(async () => { await jest.advanceTimersByTimeAsync(2000); });
+    await act(async () => { await jest.advanceTimersByTimeAsync(500); });
+    expect(quotePaymentOffers).toHaveBeenCalledTimes(2);
+    expect(screen.queryByLabelText(/^Pay from Spark/)).toBeNull();
+    const refreshedArkade = { ...offer('arkade', 1025), route: arkadeRoute };
+    await act(async () => { finishRefresh([spark, refreshedArkade]); });
+    expect(screen.getByLabelText(/^Pay from Arkade\. Total 1025 sats/).props.accessibilityState.checked).toBe(true);
+    expect(screen.getByLabelText(/^Pay from Spark/).props.accessibilityState.checked).toBe(false);
+  } finally {
+    jest.useRealTimers();
+  }
 });
 
 test('a completed payment can be closed and refreshes balances', async () => {
@@ -282,7 +332,7 @@ test('Lite leaves Bark out unless it holds funds', async () => {
   mockState = { ...baseState(), settings: { bitcoinUnit: 'sats', disclosureLevel: 'lite' } };
   let screen = await reviewed();
   expect(screen.queryByLabelText(/^Pay from Bark/)).toBeNull();
-  expect(screen.getByText('Slide to pay 1010 sats')).toBeTruthy();
+  expect(screen.getByText('Hold to pay 1010 sats')).toBeTruthy();
   screen.unmount();
   mockState = { ...mockState, wallet: { activeWallet: { id: 1 }, btcBalance: { byProtocol: { BARK: { confirmed: 5000, unconfirmed: 2000, total: 7000 } } } } };
   screen = await reviewed();

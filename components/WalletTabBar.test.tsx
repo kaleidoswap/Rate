@@ -1,7 +1,7 @@
 let mockLanguage = 'en';
 let mockPending = 0;
 jest.mock('../store/hooks', () => ({ useAppSelector: (selector: any) => selector({ settings: { language: mockLanguage }, wallet: mockPending ? { activeWallet: { id: 1 } } : {} }) }));
-jest.mock('../services/kaleidoPay/activity', () => ({ loadPendingPaymentActivity: async () => Array.from({ length: mockPending }) }));
+jest.mock('../services/kaleidoPay/activity', () => ({ loadPendingPaymentActivity: async () => Array.from({ length: mockPending }, () => ({ type: 'send', status: 'pending', layer: 'Spark' })) }));
 beforeEach(() => { mockLanguage = 'en'; mockPending = 0; });
 import React from 'react';
 import { render, fireEvent, act } from '@testing-library/react-native';

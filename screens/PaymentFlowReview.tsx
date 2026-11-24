@@ -3,7 +3,7 @@ import { ScrollView, Text, View } from 'react-native';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { Button } from '../components/Button';
 import { SegmentedTabs } from '../components/SegmentedTabs';
-import { SlideToConfirm } from '../components/SlideToConfirm';
+import { HoldToConfirm } from '../components/HoldToConfirm';
 import { PaymentReceiptDetails } from '../components/PaymentReceiptDetails';
 import { PaymentOutcome } from '../components/payments/PaymentOutcome';
 import DepositSuccessOverlay from '../components/DepositSuccessOverlay';
@@ -42,7 +42,7 @@ export function PaymentFlowReview({ initialAccount = 'arkade', initialStep = 're
         <Text style={{ color: t.colors.text.primary, fontSize: t.typography.fontSize['3xl'], fontWeight: '700', textAlign: 'center' }}>{amount}</Text>
         <Text style={{ ...label, textAlign: 'center' }}>to Alice · esempio</Text>
         <PaymentReceiptDetails details={{ amount, recipient: a.recipientName, fees: fee, total: a.total, account: name }} />
-        <SlideToConfirm label={`Pay ${amount}`} onConfirm={() => setStep('pending')} />
+        <HoldToConfirm label={`Pay ${amount}`} onConfirm={() => setStep('pending')} />
         {rgb && <Button title="Change asset" variant="ghost" onPress={() => setStep('asset')} />}
       </> : <>
         <PaymentOutcome key={`${account}-${step}`} attempt={a} statusChecking={step === 'pending'} />

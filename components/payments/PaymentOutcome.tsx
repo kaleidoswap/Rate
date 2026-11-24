@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, ActivityIndicator } from 'react-native';
+import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
 import Animated, { ZoomIn, FadeInDown } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppTheme } from '../../theme/ThemeProvider';
@@ -7,22 +7,6 @@ import { motion } from '../../theme';
 import { AmountText } from '../AmountText';
 import { awaitingOnchainConfirmation, paymentPresentation } from '../../utils/payment-presentation';
 import { unresolvedAttempt, type PaymentAttempt } from '../../services/kaleidoPay/attempts';
-
-/** A pulsing ring around the status icon while the payment is being checked. */
-function PulseRing({ color, active }: { color: string; active: boolean }) {
-  const t = useAppTheme();
-  if (!active) return null;
-  return (
-    <Animated.View
-      entering={ZoomIn.springify().damping(motion.springSnappy.damping)}
-      style={{
-        position: 'absolute', width: 80, height: 80, borderRadius: 40,
-        borderWidth: 2, borderColor: color + '40',
-        alignItems: 'center', justifyContent: 'center',
-      }}
-    />
-  );
-}
 
 /** One row of the summary card: label on the left, value on the right. */
 function InfoRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
@@ -65,7 +49,8 @@ export function PaymentOutcome({ attempt: a, busy = false, statusChecking = fals
   useEffect(() => {
     if (!pending) return;
     const start = Date.now();
-    const timer = setInterval(() => setElapsed(Math.floor((Date.now() - start) / 1000)), 1);
+    setElapsed(0);
+    const timer = setInterval(() => setElapsed(Math.floor((Date.now() - start) / 1000)), 1000);
     return () => clearInterval(timer);
   }, [pending, a.id]);
   const elapsedText = elapsed < 60 ? `${elapsed}s` : `${Math.floor(elapsed / 60)}m`;
@@ -73,16 +58,22 @@ export function PaymentOutcome({ attempt: a, busy = false, statusChecking = fals
   return <View style={{ gap: t.spacing[5], paddingTop: t.spacing[4] }}>
     {/* Status hero: animated icon, pulse ring, title, amount, recipient. */}
     <View style={{ alignItems: 'center', gap: t.spacing[2] }}>
-      <Animated.View
-        key={`${a.status}-${a.onchainConfirmed ?? false}`}
-        entering={ZoomIn.springify().damping(motion.springSnappy.damping)}
-        style={{ width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center', backgroundColor: tone + '1A' }}
-      >
-        {checking
-          ? <ActivityIndicator accessibilityLabel="Checking payment" color={tone} size="large" />
-          : <Ionicons name={iconName as any} size={32} color={tone} />}
-      </Animated.View>
-      {pending && <PulseRing color={tone} active={checking} />}
+      <View style={{ width: 80, height: 80, alignItems: 'center', justifyContent: 'center' }}>
+        {pending && checking && <Animated.View
+          pointerEvents="none"
+          entering={ZoomIn.springify().damping(motion.springSnappy.damping)}
+          style={[StyleSheet.absoluteFillObject, { borderRadius: 40, borderWidth: 2, borderColor: tone + '40' }]}
+        />}
+        <Animated.View
+          key={`${a.status}-${a.onchainConfirmed ?? false}`}
+          entering={ZoomIn.springify().damping(motion.springSnappy.damping)}
+          style={{ width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center', backgroundColor: tone + '1A' }}
+        >
+          {checking
+            ? <ActivityIndicator accessibilityLabel="Checking payment" color={tone} size="large" />
+            : <Ionicons name={iconName} size={32} color={tone} />}
+        </Animated.View>
+      </View>
       <Text
         accessibilityRole="header"
         style={{ color: t.colors.text.primary, fontSize: t.typography.fontSize.xl, fontWeight: '700', textAlign: 'center' }}>

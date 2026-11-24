@@ -44,7 +44,7 @@ jest.mock('expo-secure-store', () => ({ getItemAsync: async () => 'nostr+walletc
 jest.mock('./MobileSparkAdapter', () => ({ MobileSparkAdapter: jest.fn() }));
 jest.mock('../nwc/NwcRgbAdapter', () => ({ NwcRgbAdapter: jest.fn(), NWC_CONNECTION_KEY: 'nwc' }));
 jest.mock('./arkadeStorage', () => ({ buildArkadeStorage: () => undefined }));
-jest.mock('./networkConfig', () => ({ getDefaultArkadeServerUrl: () => 'https://ark.test', resolveSparkNetwork: () => 'regtest' }));
+jest.mock('./networkConfig', () => ({ ARKADE_ENABLED: true, getDefaultArkadeServerUrl: () => 'https://ark.test', resolveSparkNetwork: () => 'regtest' }));
 jest.mock('./bark', () => ({ BARK_ENABLED: false, buildBarkConfig: jest.fn(), isBarkNativeAvailable: () => false }));
 jest.mock('./barkPreferences', () => ({}));
 jest.mock('../kaleidoPay/bark', () => ({ connectBarkToKaleidoPay: jest.fn(), disconnectBarkFromKaleidoPay: jest.fn() }));

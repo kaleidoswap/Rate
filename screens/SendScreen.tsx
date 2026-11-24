@@ -21,7 +21,7 @@ import * as Crypto from 'expo-crypto';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { Button } from '../components/Button';
 import { PressableScale } from '../components/PressableScale';
-import { SlideToConfirm } from '../components/SlideToConfirm';
+import { HoldToConfirm } from '../components/HoldToConfirm';
 import { AmountText } from '../components/AmountText';
 import { ProviderSheet } from '../components/payments/ProviderSheet';
 import { NetworkIcon } from '../components/NetworkIcon';
@@ -81,7 +81,7 @@ function decodeQuietly(text: string): { target?: PayTarget; error?: string } {
 }
 
 function sendRecovery(message: string) {
-  if (/\binvoice (?:has )?expired\b/i.test(message)) return 'replace-invoice';
+  if (/\binvoice (?:(?:has )?expired|expires too soon)\b/i.test(message)) return 'replace-invoice';
   if (/different network|none of your connected accounts|no connected account|account disconnected|connect your RGB wallet|turn on RGB in Settings/i.test(message)) return 'settings';
   return null;
 }
@@ -281,7 +281,10 @@ export default function SendScreen({ navigation, route }: Props) {
   const getOffers = useCallback(async (refresh = false, quiet = false) => {
     const current = ++revision.current;
     setBusy(true); setError(''); setMoreQuotes(false);
-    if (refresh && !quiet) setPreviousTotal(total);
+    if (refresh && !quiet) {
+      autoRefreshes.current = 0;
+      setPreviousTotal(total);
+    }
     try {
       await prepareKaleidoPay();
       if (route.params?.makerNetwork) {
@@ -319,17 +322,24 @@ export default function SendScreen({ navigation, route }: Props) {
       if (current !== revision.current) return;
       if (fresh.plan.status !== 'ready') { setPreview(fresh); setOffers([]); setError(fresh.plan.reason); return; }
       // Show quotes as they arrive: the first payable one ends the wait, slower providers fill in after.
-      let picked = refresh;
+      const keepSelection = refresh && selectedId !== undefined;
+      let picked = keepSelection;
       const show = (list: PaymentOffer[], done: boolean) => {
         if (current !== revision.current) return;
         if (route.params?.makerNetwork) list = makerSendOffers(list, route.params.makerNetwork);
+        const shown = visibleOffers(list);
+        const payable = shown.filter(o => o.executable && o.quote && !o.unavailable && o.quote.expiresAt * 1000 > Date.now());
+        const best = bestOffer(payable) ?? payable[0];
+        const updatedSelection = keepSelection ? payable.find(o => o.id === selectedId) : best;
+        // During a refresh, keep waiting for the user's chosen account while
+        // independent routes finish ahead of it.
+        if (keepSelection && !done && !updatedSelection) return;
         setPreview(fresh); setOffers(list);
         if (done && route.params?.makerNetwork && !list.length) setError('KaleidoSwap cannot pay this request from Arkade on the selected network.');
-        const shown = visibleOffers(list);
-        const best = bestOffer(shown.filter(o => o.executable)) ?? shown.find(o => o.executable && o.quote && !o.unavailable);
         // Pick once, the first time something payable shows (or at the end); later quotes never move the selection.
         if (!picked && (best || done)) { picked = true; setSelectedId((best ?? bestOffer(shown))?.id); }
-        if (best || done) setBusy(false);
+        if (updatedSelection) autoRefreshes.current = 0;
+        if (updatedSelection || done) setBusy(false);
         setMoreQuotes(!done);
       };
       const result = await quotePaymentOffers(fresh, partial => show(partial, false));
@@ -340,16 +350,16 @@ export default function SendScreen({ navigation, route }: Props) {
     } catch (e) {
       if (current === revision.current) setError(e instanceof Error ? e.message : 'Could not get quotes. Please try again.');
     } finally { if (current === revision.current) { setBusy(false); setMoreQuotes(false); } }
-  }, [input, fixedSat, amountSat, assetAmount, rgbAsset, sparkToken, target, total, visibleOffers, route.params?.makerNetwork, route.params?.makerUrl]);
+  }, [input, fixedSat, amountSat, assetAmount, rgbAsset, sparkToken, target, total, selectedId, visibleOffers, route.params?.makerNetwork, route.params?.makerUrl]);
 
-  // An expired price refreshes itself: no extra taps, the slide stays armed.
+  // Refresh an expired price automatically while the review is open.
   // After a few failed tries it stops and the manual Refresh button remains.
   useEffect(() => {
-    if (!expired || busy || !preview || attempt) return;
+    if (!expired || busy || !preview || attempt || sendRecovery(error) === 'replace-invoice') return;
     if (autoRefreshes.current >= 3) return;
     const timer = setTimeout(() => { autoRefreshes.current += 1; void getOffers(true, true); }, 400);
     return () => clearTimeout(timer);
-  }, [expired, busy, preview, attempt, getOffers]);
+  }, [expired, busy, preview, attempt, error, getOffers]);
 
   // A Spark address can also be paid in the Spark tokens this wallet holds.
   const sparkAddressTarget = target?.kind === 'spark' && fixedSat === undefined;
@@ -970,7 +980,8 @@ export default function SendScreen({ navigation, route }: Props) {
             : recovery === 'replace-invoice' ? null
             : !quote || quote.expiresAt * 1000 <= now || selected?.unavailable || zeroRgbFeeBalance
               ? <Button title={busy ? (target?.kind === 'rgb' ? 'Checking transfer…' : 'Updating price…') : (target?.kind === 'rgb' ? 'Refresh transfer' : 'Refresh price')} disabled={busy} onPress={() => void getOffers(true)} />
-              : <SlideToConfirm label={payLabel} loading={busy} disabled={!selected?.executable || !walletId || !journalReady} onConfirm={() => void pay()} />}
+              : <HoldToConfirm key={`${walletId}:${selected?.id}:${quote.expiresAt}:${total}`}
+                label={payLabel} loading={busy} disabled={!selected?.executable || !walletId || !journalReady} onConfirm={() => void pay()} />}
           {preview && !walletId && <Text style={{ ...muted, textAlign: 'center' }}>Set up a wallet to pay.</Text>}
         </View>}
       </KeyboardAvoidingView>

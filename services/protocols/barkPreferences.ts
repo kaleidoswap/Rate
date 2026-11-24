@@ -2,6 +2,7 @@ import DatabaseService from '../DatabaseService';
 import { barkWalletKey, BARK_DEFAULT_ENDPOINTS, resolveBarkHostConfig, type BarkHostConfig, type BarkNetwork } from './bark';
 
 const key = (mnemonic: string) => `bark-network-v1-${barkWalletKey(mnemonic)}`;
+const lastNetworkKey = (mnemonic: string) => `bark-last-network-v1-${barkWalletKey(mnemonic)}`;
 let connected: { walletKey: string; host: BarkHostConfig } | null = null;
 
 export const currentBarkHost = () => connected?.host ?? resolveBarkHostConfig();
@@ -24,8 +25,22 @@ export async function hasBarkPreference(mnemonic: string): Promise<boolean> {
   return saved === OFF || saved === 'mainnet' || saved === 'signet';
 }
 
+/** The selected network, including while an account is turned off. */
+export async function preferredBarkNetwork(mnemonic: string): Promise<BarkNetwork> {
+  const db = DatabaseService.getInstance();
+  const saved = await db.getSetting(key(mnemonic));
+  if (saved === 'mainnet' || saved === 'signet') return saved;
+  if (saved === OFF) {
+    const previous = await db.getSetting(lastNetworkKey(mnemonic));
+    if (previous === 'mainnet' || previous === 'signet') return previous;
+  }
+  return resolveBarkHostConfig()?.network ?? 'mainnet';
+}
+
 export async function setBarkOff(mnemonic: string): Promise<void> {
-  await DatabaseService.getInstance().setSetting(key(mnemonic), OFF);
+  const db = DatabaseService.getInstance();
+  await db.setSetting(lastNetworkKey(mnemonic), await preferredBarkNetwork(mnemonic));
+  await db.setSetting(key(mnemonic), OFF);
 }
 
 export async function loadBarkHost(mnemonic: string): Promise<BarkHostConfig | null> {

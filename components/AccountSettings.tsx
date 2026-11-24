@@ -15,6 +15,7 @@ type Props = {
   onSave: (config: Record<string, unknown>) => void;
   /** Whether this wallet uses the account; with onEnabled, a switch turns it on or off. */
   enabled?: boolean;
+  canEnable?: boolean;
   onEnabled?: (on: boolean) => void;
   children?: React.ReactNode;
 };
@@ -54,19 +55,22 @@ export function AccountSettings(props: Props) {
   });
   const action = (label: string, onPress: () => void, disabled = accountBusy) => <Button title={label} variant={label === 'Save and reconnect' ? 'primary' : 'secondary'} onPress={onPress} disabled={disabled} />;
   const host = props.account === 'BARK' ? currentBarkHost() : null;
-  const off = props.onEnabled && props.enabled === false;
+  const off = !!props.onEnabled && props.enabled !== true;
+  const switchDisabled = accountBusy || props.enabled == null || (off && props.canEnable === false);
+  const showConnectedSettings = !off && props.canEnable !== false;
   return <>
     {props.onEnabled && <View style={styles.card}>
       <View style={styles.switchRow}>
         <View style={{ flex: 1 }}>
           <Text style={styles.title}>Use this account</Text>
           <Text style={styles.text}>{USE_TEXT[props.account]}</Text>
+          {props.canEnable === false && <Text style={styles.text}>Unavailable in this build</Text>}
         </View>
-        <Switch accessibilityLabel="Use this account" value={!!props.enabled} disabled={accountBusy} onValueChange={props.onEnabled}
+        <Switch accessibilityLabel="Use this account" value={!!props.enabled} disabled={switchDisabled} onValueChange={props.onEnabled}
           trackColor={{ true: theme.colors.primary[500], false: theme.colors.gray[300] }} />
       </View>
     </View>}
-    {!off && <View style={styles.card}>
+    {showConnectedSettings && <View style={styles.card}>
       <Text style={styles.title}>{props.busy ? 'Connecting…' : props.connected ? 'Connected' : 'Offline'}</Text>
       {/* Arkade's "signet" setting runs on Mutinynet; Bark's is plain Signet. */}
       <Text style={styles.text}>Network: {props.account === 'BARK' && props.network === 'signet' ? 'Signet' : NETWORK_LABEL[props.network as ProtocolNetwork] ?? props.network}</Text>
@@ -76,10 +80,10 @@ export function AccountSettings(props: Props) {
       {action('Reconnect account', props.onReconnect)}
 
     </View>}
-    {!off && props.account === 'SPARK' && <View style={styles.card}><Text style={styles.title}>Spark connection</Text><Text style={styles.text}>Servers are managed automatically.</Text></View>}
-    {!off && props.account === 'BARK' && <View style={styles.card}><Text style={styles.title}>Connection details</Text><Text style={styles.text}>Current connection: {host?.network ?? 'Not configured'}</Text><Text style={styles.text}>Ark server</Text><Text selectable style={styles.text}>{host?.arkServerUrl || 'Not configured'}</Text><Text style={styles.text}>Bitcoin explorer</Text><Text selectable style={styles.text}>{host?.esploraUrl || 'Not configured'}</Text><Text style={styles.text}>Servers are managed by Bark.</Text></View>}
-    {!off && props.account === 'ARKADE' && <ArkadeMaintenanceSettings walletId={props.walletId} connected={props.connected} busy={props.busy} onSave={props.onSave} onBusyChange={setMaintenanceBusy} />}
-    {!off && props.account === 'ARKADE' && <View style={styles.card}>
+    {showConnectedSettings && props.account === 'SPARK' && <View style={styles.card}><Text style={styles.title}>Spark connection</Text><Text style={styles.text}>Servers are managed automatically.</Text></View>}
+    {showConnectedSettings && props.account === 'BARK' && <View style={styles.card}><Text style={styles.title}>Connection details</Text><Text style={styles.text}>Current connection: {host?.network ?? 'Not configured'}</Text><Text style={styles.text}>Ark server</Text><Text selectable style={styles.text}>{host?.arkServerUrl || 'Not configured'}</Text><Text style={styles.text}>Bitcoin explorer</Text><Text selectable style={styles.text}>{host?.esploraUrl || 'Not configured'}</Text><Text style={styles.text}>Servers are managed by Bark.</Text></View>}
+    {showConnectedSettings && props.account === 'ARKADE' && <ArkadeMaintenanceSettings walletId={props.walletId} connected={props.connected} busy={props.busy} onSave={props.onSave} onBusyChange={setMaintenanceBusy} />}
+    {showConnectedSettings && props.account === 'ARKADE' && <View style={styles.card}>
       <TouchableOpacity accessibilityRole="button" accessibilityState={{ expanded: serverExpanded }} onPress={() => setServerExpanded(!serverExpanded)} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', minHeight: 48 }}><Text style={styles.title}>Server settings</Text><Text style={styles.title}>{serverExpanded ? '−' : '+'}</Text></TouchableOpacity>
       {serverExpanded && <><Text style={styles.text}>Use endpoints for the selected network. Saving reconnects this account.</Text>
       <Text style={styles.text}>Ark server</Text><TextInput accessibilityLabel="Ark server URL" style={styles.input} value={server} onChangeText={setServer} editable={ready && !accountBusy} autoCapitalize="none" autoCorrect={false} keyboardType="url" />

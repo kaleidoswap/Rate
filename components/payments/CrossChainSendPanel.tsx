@@ -17,7 +17,7 @@ import { Callout } from '../Callout';
 import { AmountText } from '../AmountText';
 import { PressableScale } from '../PressableScale';
 import { SegmentedControl } from '../SegmentedControl';
-import { SlideToConfirm } from '../SlideToConfirm';
+import { HoldToConfirm } from '../HoldToConfirm';
 import { NetworkIcon } from '../NetworkIcon';
 import { feedback } from '../../utils/feedback';
 import { formatBitcoinAmount } from '../../utils/bitcoinUnits';
@@ -467,7 +467,7 @@ export function CrossChainSendPanel({ address, family, walletId, bitcoinUnit, he
   const footer = () => {
     if (step === 'configure') return configured ? <Button title={estimating ? 'Getting a price…' : 'Review'} disabled={!canReview} onPress={review} /> : null;
     if (step === 'review') return <>
-      <SlideToConfirm label={sendLabel} loading={busy} disabled={busy || !estimate} onConfirm={() => void send()} />
+      <HoldToConfirm label={sendLabel} loading={busy} disabled={!canReview} onConfirm={() => void send()} />
       <Button title="Edit" variant="secondary" disabled={busy} onPress={() => { setError(''); setStep('configure'); }} />
     </>;
     if (step !== 'status' || !session) return null;

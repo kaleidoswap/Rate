@@ -8,7 +8,7 @@ import lightningPreviewCard from './arkadeLightningSolver.json';
  *
  * Reviewing a payment never contacts a solver: every RFQ is a real negotiation
  * that registers a lockup contract in the wallet, so quotes are ESTIMATES priced
- * from each provider's published card (fee_bps / fee_flat, min / max). The one
+ * from each provider's published card (fee_bps / fee_flat, min / max). The
  * binding RFQ goes to the provider the user chose, at execute time, and is
  * refused (nothing funded) when it asks for more than the approved total.
  */
@@ -30,6 +30,7 @@ const FETCH_TIMEOUT_MS = 8_000;
 const QUOTE_TTL_S = 60;
 /** The invoice must outlive the swap's funding window by at least this much. */
 const INVOICE_MARGIN_S = 120;
+const FUNDING_MARGIN_S = 5;
 
 // ---------------------------------------------------------------------------
 // Lazy module loading. Static require strings so Metro bundles them; executed
@@ -306,8 +307,15 @@ export interface ArkadeIntentsOptions {
   fetchImpl?: typeof fetch;
 }
 
-interface Approval { providerId: string; facts: InvoiceFacts; terms: string; fundingFee: number }
+interface Approval { providerId: string; terms: string; fundingFee: number }
 interface AttemptRef { rfqId: string; providerId: string; fundAmountSats: number; fundingTxid?: string }
+
+function checkInvoiceWindow(facts: InvoiceFacts, now: number) {
+  if (facts.expiresAt <= now) throw new PaymentNotSentError('The Lightning invoice has expired. Ask the recipient for a new invoice.');
+  if (facts.expiresAt <= now + INVOICE_MARGIN_S) {
+    throw new PaymentNotSentError('The Lightning invoice expires too soon for Arkade. Ask the recipient for a new invoice.');
+  }
+}
 
 export function resultOfPhase(phase: ArkadeSwapPhase | undefined, reference?: string): PaymentResult {
   switch (phase) {
@@ -339,7 +347,7 @@ export function createArkadeIntentsSwap(opts: ArkadeIntentsOptions) {
     if (!preview.code.invoice) throw new Error('Arkade swaps pay Lightning invoices (BOLT11), not offers.');
     const facts = invoiceFacts(preview.code.invoice);
     if (facts.amountSats !== preview.request.amountSat) throw new Error('The invoice asks for a different amount than this payment.');
-    if (facts.expiresAt <= Math.floor(Date.now() / 1000) + INVOICE_MARGIN_S) throw new Error('The Lightning invoice has expired or expires too soon.');
+    checkInvoiceWindow(facts, Math.floor(Date.now() / 1000));
     return facts;
   }
   const terms = (preview: Preview, route: Route) => JSON.stringify({ request: preview.request, invoice: preview.code.invoice, route });
@@ -349,7 +357,9 @@ export function createArkadeIntentsSwap(opts: ArkadeIntentsOptions) {
     const fundingFee = opts.fundingFee();
     const [list, balance] = await Promise.all([providers(), opts.balance().catch(() => null)]);
     if (!list.length) throw new Error('No Arkade swap provider pays Lightning on this network right now.');
-    const expiresAt = Math.min(Math.floor(Date.now() / 1000) + QUOTE_TTL_S, facts.expiresAt - INVOICE_MARGIN_S);
+    const now = Math.floor(Date.now() / 1000);
+    checkInvoiceWindow(facts, now);
+    const expiresAt = Math.min(now + QUOTE_TTL_S, facts.expiresAt - INVOICE_MARGIN_S);
     return list.map(p => {
       const option: AccountQuoteOption = { id: p.id, name: p.name, detail: 'detail' in p ? p.detail : undefined };
       if (!('market' in p)) { option.unavailable = p.unavailable; return option; }
@@ -362,7 +372,7 @@ export function createArkadeIntentsSwap(opts: ArkadeIntentsOptions) {
       if (totalSat > balance) { option.unavailable = `Insufficient Arkade balance (${totalSat.toLocaleString('en-US')} sats needed).`; return option; }
       option.detail = `${p.detail} · estimated from the provider's published fee; the final price is confirmed before paying and never exceeds this total`;
       option.quote = { recipientSat: preview.request.amountSat, feeSat, totalSat, expiresAt, estimatedSeconds: 30 };
-      approved.set(option.quote, { providerId: p.id, facts, terms: terms(preview, route), fundingFee });
+      approved.set(option.quote, { providerId: p.id, terms: terms(preview, route), fundingFee });
       return option;
     });
   }
@@ -417,51 +427,56 @@ export function createArkadeIntentsSwap(opts: ArkadeIntentsOptions) {
     } catch (error) {
       throw new PaymentNotSentError(error instanceof Error ? error.message : 'Review the payment again.');
     }
-    approved.delete(quote);
-
     const transport = provider.transport();
     try {
       const venue = new (load().venue.ArkadeIntentsVenue)({ wallet, arkServerUrl, store, transport });
-      // The one binding RFQ. It persists its recovery record before returning; nothing is funded yet.
-      let prepared: Awaited<ReturnType<ArkadeIntentsVenue['prepareLightningSend']>>;
-      try { prepared = await venue.prepareLightningSend({ invoice: facts }); }
-      catch (error) {
-        const reason = error instanceof Error ? error.message : 'no answer';
-        if (reason.includes('invoice_cltv_too_large')) {
-          throw new PaymentNotSentError('This Lightning invoice requires a longer payment window than the provider supports. Ask for a different invoice or choose another provider. Nothing was sent.');
+      // The estimate is checked when the user approves it. Once negotiation starts, the amount
+      // they approved remains the cap and the binding quote and invoice govern the funding window.
+      for (let round = 0; round < 2; round++) {
+        checkInvoiceWindow(facts, Math.floor(Date.now() / 1000));
+        let prepared: Awaited<ReturnType<ArkadeIntentsVenue['prepareLightningSend']>>;
+        try { prepared = await venue.prepareLightningSend({ invoice: facts }); }
+        catch (error) {
+          const reason = error instanceof Error ? error.message : 'no answer';
+          if ((error as { reason?: string } | null)?.reason === 'quote_expired') continue;
+          if (reason.includes('invoice_cltv_too_large')) {
+            throw new PaymentNotSentError('This Lightning invoice requires a longer payment window than the provider supports. Ask for a different invoice or choose another provider. Nothing was sent.');
+          }
+          throw new PaymentNotSentError(`${provider.name} did not give a usable quote (${reason}). Choose another way to pay.`);
         }
-        throw new PaymentNotSentError(`${provider.name} did not give a usable quote (${reason}). Choose another way to pay.`);
-      }
-      const now = Math.floor(Date.now() / 1000);
-      const spend = prepared.fundAmountSats + approval.fundingFee;
-      if (prepared.summary.toAmountSats !== quote.recipientSat || prepared.fundAmountSats !== prepared.summary.fromAmountSats) {
-        throw new PaymentNotSentError('The provider quoted a different payment. Nothing was sent.');
-      }
-      if (spend > quote.totalSat!) {
-        throw new PaymentNotSentError(`${provider.name} now asks ${spend.toLocaleString('en-US')} sats, more than the ${quote.totalSat!.toLocaleString('en-US')} you approved. Nothing was sent.`);
-      }
-      if (prepared.summary.validUntil <= now + 5) throw new PaymentNotSentError('The provider quote expired before paying. Nothing was sent.');
-      const balance = await opts.balance().catch(() => null);
-      if (balance === null || spend > balance) throw new PaymentNotSentError('Insufficient Arkade balance. Nothing was sent.');
-
-      const checkFundingDeadline = () => {
+        const spend = prepared.fundAmountSats + approval.fundingFee;
+        if (prepared.summary.toAmountSats !== quote.recipientSat || prepared.fundAmountSats !== prepared.summary.fromAmountSats) {
+          throw new PaymentNotSentError('The provider quoted a different payment. Nothing was sent.');
+        }
+        if (spend > quote.totalSat!) {
+          throw new PaymentNotSentError(`${provider.name} now asks ${spend.toLocaleString('en-US')} sats, more than the ${quote.totalSat!.toLocaleString('en-US')} you approved. Nothing was sent.`);
+        }
+        const validUntil = prepared.summary.validUntil;
+        if (!Number.isSafeInteger(validUntil)) throw new PaymentNotSentError('The provider did not give a valid quote deadline.');
+        if (validUntil <= Math.floor(Date.now() / 1000) + FUNDING_MARGIN_S) continue;
+        const balance = await opts.balance().catch(() => null);
+        if (balance === null || spend > balance) throw new PaymentNotSentError('Insufficient Arkade balance. Nothing was sent.');
         const now = Math.floor(Date.now() / 1000);
-        if (prepared.summary.validUntil <= now + 5 || quote.expiresAt <= now || facts.expiresAt <= now + INVOICE_MARGIN_S) {
-          throw new PaymentNotSentError('The quote or invoice expired before funding. Nothing was sent.');
+        checkInvoiceWindow(facts, now);
+        if (validUntil <= now + FUNDING_MARGIN_S) continue;
+
+        // Recovery data first: the venue record is already stored; link it to this attempt.
+        const ref: AttemptRef = { rfqId: prepared.record.id, providerId: provider.id, fundAmountSats: prepared.fundAmountSats };
+        await AsyncStorage.setItem(attemptKey(attemptId), JSON.stringify(ref));
+        const fundingTime = Math.floor(Date.now() / 1000);
+        checkInvoiceWindow(facts, fundingTime);
+        if (validUntil <= fundingTime + FUNDING_MARGIN_S) {
+          throw new PaymentNotSentError('The provider quote expired before funding. Review the payment again.');
         }
-      };
-      checkFundingDeadline();
-      // Recovery data first: the venue record is already stored; link it to this attempt.
-      const ref: AttemptRef = { rfqId: prepared.record.id, providerId: provider.id, fundAmountSats: prepared.fundAmountSats };
-      await AsyncStorage.setItem(attemptKey(attemptId), JSON.stringify(ref));
-      checkFundingDeadline();
-      // Funding is the acceptance. Past this point a failure may have moved funds: it is not "not sent".
-      const txid: string = await wallet.sendBitcoin({ address: prepared.address, amount: prepared.fundAmountSats });
-      if (!txid) return { status: 'unknown', reference: prepared.record.id };
-      await AsyncStorage.setItem(attemptKey(attemptId), JSON.stringify({ ...ref, fundingTxid: txid }));
-      // A lost notify self-heals: reconcile finds the funded lockup from chain evidence.
-      await venue.notifyFunded(prepared.record.id, txid).catch(() => undefined);
-      return { status: 'pending', reference: prepared.record.id };
+        // Funding is the acceptance. Past this point a failure may have moved funds.
+        const txid: string = await wallet.sendBitcoin({ address: prepared.address, amount: prepared.fundAmountSats });
+        if (!txid) return { status: 'unknown', reference: prepared.record.id };
+        await AsyncStorage.setItem(attemptKey(attemptId), JSON.stringify({ ...ref, fundingTxid: txid }));
+        // A lost notify self-heals: reconcile finds the funded lockup from chain evidence.
+        await venue.notifyFunded(prepared.record.id, txid).catch(() => undefined);
+        return { status: 'pending', reference: prepared.record.id };
+      }
+      throw new PaymentNotSentError(`${provider.name} returned an expired quote twice. Review the payment again or choose another provider.`);
     } finally {
       void transport.close().catch(() => undefined);
     }

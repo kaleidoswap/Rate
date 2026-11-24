@@ -3,16 +3,16 @@
  *
  * The build channel (EXPO_PUBLIC_CHANNEL) sets the ceiling:
  * - `dev` (default): everything exists and Labs features start on.
- * - `beta` / `store`: Held features don't exist; Labs features exist but start
- *   off until the user turns them on in Settings → Labs.
+ * - `beta` / `store`: Held features are unavailable. Prismo and Contacts start
+ *   on. The remaining Labs features start off.
  */
 
 export type Channel = 'dev' | 'beta' | 'store';
 
-/** Off by default outside `dev`; the user can turn them on. */
-export const LABS_FEATURES = ['arkade', 'prismo', 'social', 'map', 'nwc', 'rgbNode', 'lsp'] as const;
+/** The user can override the build defaults for these features. */
+export const LABS_FEATURES = ['prismo', 'social', 'map', 'nwc', 'rgbNode', 'lsp'] as const;
 /** Not shipped outside `dev`. */
-export const HELD_FEATURES = ['makerSwaps', 'rgbOnDevice', 'bark', 'merchantOffer'] as const;
+export const HELD_FEATURES = ['makerSwaps', 'rgbOnDevice', 'merchantOffer'] as const;
 
 export type LabsFeature = typeof LABS_FEATURES[number];
 export type HeldFeature = typeof HELD_FEATURES[number];
@@ -39,11 +39,10 @@ export function isAvailable(feature: Feature, channel: Channel = CHANNEL): boole
 export function isFeatureOn(feature: Feature, labs: LabsState | undefined, channel: Channel = CHANNEL): boolean {
   if (!isAvailable(feature, channel)) return false;
   if (!isLabsFeature(feature)) return true;
-  return labs?.[feature] ?? channel === 'dev';
+  return labs?.[feature] ?? (channel === 'dev' || feature === 'prismo' || feature === 'social');
 }
 
 export const LABS_COPY: Record<LabsFeature, { label: string; description: string }> = {
-  arkade: { label: 'Arkade account', description: 'Low-fee off-chain bitcoin on Ark' },
   prismo: { label: 'Prismo', description: 'On-device assistant for chat and voice' },
   social: { label: 'Contacts and chat', description: 'Pay and message your Nostr contacts' },
   map: { label: 'Places to pay', description: 'Nearby businesses accepting bitcoin' },

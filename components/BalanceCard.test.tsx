@@ -1,4 +1,5 @@
 import React from 'react';
+import { Text } from 'react-native';
 import { render, fireEvent, act } from '@testing-library/react-native';
 import { BalanceCard } from './BalanceCard';
 
@@ -152,4 +153,18 @@ it('keeps partial amounts visible and names slow accounts in the details only', 
   expect(screen.queryByLabelText('Updating balance')).toBeNull();
   screen.unmount();
   jest.useRealTimers();
+});
+
+test('keeps the wallet actions above the open network breakdown', () => {
+  const screen = render(<BalanceCard {...props} footer={<Text>Wallet actions</Text>} />);
+  fireEvent.press(screen.getByLabelText('Show network balances'));
+  expect(screen.getAllByText(/^(Wallet actions|BTC on Spark)$/).map(text => text.props.children)).toEqual([
+    'Wallet actions', 'BTC on Spark',
+  ]);
+});
+
+test('hides an unformatted headline and secondary balance when balance privacy is active', () => {
+  const { queryByText, getByText } = render(<BalanceCard {...props} hideAmounts primaryText={undefined} secondaryText="$15" />);
+  expect(getByText('••••')).toBeTruthy();
+  expect(queryByText(/1500|\$15/)).toBeNull();
 });

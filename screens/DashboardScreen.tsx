@@ -35,6 +35,8 @@ import { setProtocolAssets, setRgbAssets } from '../store/slices/assetsSlice';
 import { loadNostrProfile } from '../store/slices/nostrSlice';
 import {
   selectDisclosureLevel,
+  selectHiddenHomeAssets,
+  setHomeAssetHidden,
 } from '../store/slices/settingsSlice';
 import { policyFor } from '@kaleidorg/wallet-engine';
 
@@ -230,6 +232,7 @@ export default function DashboardScreen({ navigation }: Props) {
   const [snapshotPrice, setSnapshotPrice] = useState(0);
   const [channelsLive, setChannelsLive] = useState(false);
   const walletKey = snapshotWalletKey(activeWallet);
+  const hiddenHomeAssets = useAppSelector(state => selectHiddenHomeAssets(state, walletKey));
   const walletKeyRef = useRef(walletKey);
   const activeWalletRef = useRef(activeWallet);
   activeWalletRef.current = activeWallet;
@@ -1019,9 +1022,13 @@ export default function DashboardScreen({ navigation }: Props) {
         />
 
         {showAssets && <AssetList
+          key={walletKey}
           hideAmounts={denominatedTotal.hidden}
-          // BTC always leads the list; in lite mode hide USDt (it's folded into the
-          // USD figure above) and strip the per-asset protocol badge (a network detail).
+          showNetworks={!isLite}
+          hiddenAssetKeys={hiddenHomeAssets}
+          onSetHidden={walletKey ? (assetKey, hidden) => {
+            dispatch(setHomeAssetHidden({ walletKey, assetKey, hidden }));
+          } : undefined}
           assets={[
             btcListEntry,
             // Lite folds every dollar stablecoin into one USD line.
@@ -1030,16 +1037,14 @@ export default function DashboardScreen({ navigation }: Props) {
               balance: { spendable: Math.round(liteUsdDisplay * 100) },
               fiatValue: liteUsdDisplay,
             }] : []),
-            ...(isLite
-              ? liteOtherAssets.map((a) => ({ ...a, protocol: undefined, fiatValue: usdValueOf(a) }))
-              // The list mixes protocols (RGB, Spark tokens, Arkade): each row
-              // carries the account it is on for the badge.
-              : tokens.map((a) => ({ ...a, protocol: a.protocol as 'RGB' | 'SPARK' | 'ARKADE', fiatValue: usdValueOf(a) }))),
+            ...(isLite ? liteOtherAssets : tokens).map(a => ({
+              ...a, protocol: a.protocol as 'RGB' | 'SPARK' | 'ARKADE', fiatValue: usdValueOf(a),
+            })),
           ]}
           onViewAll={() => navigation.getParent()?.navigate('Assets')}
           onAssetPress={(asset) => {
             if (asset.asset_id === LITE_USD_ID) { navigation.getParent()?.navigate('Assets'); return; }
-            const token = tokens.find((t) => t.asset_id === asset.asset_id);
+            const token = tokens.find(t => t.asset_id === asset.asset_id && t.protocol === asset.protocol);
             const protocol = token?.protocol ?? getAssetFamily(asset.asset_id, asset.ticker);
             navigation.getParent()?.navigate('AssetDetail', {
               asset: {

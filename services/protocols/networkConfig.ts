@@ -3,6 +3,7 @@ import type { NetworkType } from '../DatabaseService';
 export type ProtocolNetwork = 'mainnet' | 'testnet' | 'regtest' | 'signet';
 export type SparkProtocolNetwork = Extract<ProtocolNetwork, 'mainnet' | 'regtest'>;
 export const SPARK_TEST_NETWORK: SparkProtocolNetwork = 'regtest';
+export const ARKADE_ENABLED = process.env.EXPO_PUBLIC_WDK_ARKADE !== '0';
 
 export const PROTOCOL_SUPPORTED_NETWORKS: Record<'RGB' | 'SPARK' | 'ARKADE', ProtocolNetwork[]> = {
   // Spark uses one hosted test environment in this app: REGTEST.
