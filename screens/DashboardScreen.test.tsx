@@ -8,6 +8,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const mockState: any = { wallet: { activeWallet: null, btcPriceUSD: 0 }, assets: { rgbAssets: [] }, node: {}, settings: { bitcoinUnit: 'sats' }, nostr: {} };
 const mockDispatch = jest.fn();
+let mockLevel: 'lite' | 'advanced' = 'lite';
 jest.mock('react-redux', () => ({ useDispatch: () => mockDispatch, useSelector: (fn: any) => fn(mockState) }));
 jest.mock('../store/hooks', () => ({ useAppSelector: (fn: any) => fn(mockState) }));
 jest.mock('@react-navigation/native', () => ({
@@ -15,7 +16,9 @@ jest.mock('@react-navigation/native', () => ({
   useFocusEffect: (fn: any) => require('react').useEffect(fn, [fn]),
 }));
 jest.mock('../components/RecentActivityWidget', () => ({ RecentActivityWidget: () => null }));
-jest.mock('../components/mind/InsightCards', () => ({ InsightCards: () => null }));
+jest.mock('../components/mind/InsightCards', () => ({
+  InsightCards: () => require('react').createElement(require('react-native').Text, {}, 'Insights'),
+}));
 jest.mock('../services/initializeServices', () => ({ initializeProtocolServices: jest.fn() }));
 jest.mock('../services/protocols', () => ({ protocolManager: { getAdapterIfAvailable: jest.fn() }, rgbAccountAdapter: jest.fn(), rgbAccountProtocol: () => 'RGB_LN' }));
 jest.mock('../store/slices/walletSlice', () => ({ setBtcBalance: (payload: any) => ({ type: 'balance', payload }) }));
@@ -24,8 +27,8 @@ jest.mock('../store/slices/assetsSlice', () => ({
   setProtocolAssets: (payload: any) => ({ type: 'protocolAssets', payload }),
 }));
 jest.mock('../store/slices/nostrSlice', () => ({ loadNostrProfile: jest.fn() }));
-jest.mock('../store/slices/settingsSlice', () => ({ selectDisclosureLevel: () => 'lite' }));
-jest.mock('@kaleidorg/wallet-engine', () => ({ policyFor: () => ({}), liteBucketOf: () => 'OTHER' }));
+jest.mock('../store/slices/settingsSlice', () => ({ selectDisclosureLevel: () => mockLevel }));
+jest.mock('@kaleidorg/wallet-engine', () => ({ policyFor: (level: string) => ({ showNetworks: level === 'advanced' }), liteBucketOf: () => 'OTHER' }));
 jest.mock('../utils/bitcoinUnits', () => ({
   formatBitcoinAmount: String,
   useBitcoinConversion: () => ({ formatSatoshisToUSD: String }),
@@ -41,7 +44,8 @@ jest.mock('../components', () => ({
       h(Text, {}, `Accounts: ${accounts || 'none'}`), h(Text, {}, `Waiting: ${(pendingAccounts ?? []).join(', ')}`));
   },
   ActionButtons: () => null,
-  AssetList: () => require('react').createElement(require('react-native').Text, {}, 'Assets'),
+  AssetList: jest.requireActual('../components/AssetList').AssetList,
+  SectionHeader: jest.requireActual('../components/SectionHeader').SectionHeader,
   ChannelList: () => null, MainHeader: ({ leftNode }: any) => leftNode ?? null,
 }));
 
@@ -183,4 +187,37 @@ describe('fast first balance', () => {
     await waitFor(() => expect(screen.queryByText('Updating')).toBeNull());
     screen.unmount();
   });
+});
+
+test('shows the grouped cached portfolio inline and opens details on the selected account', async () => {
+  mockLevel = 'advanced';
+  const wallet = { id: 9, created_at: 1, encrypted_mnemonic: 'test-only-seed' };
+  mockState.wallet.activeWallet = wallet;
+  (initializeProtocolServices as jest.Mock).mockReturnValue(new Promise(() => {}));
+  (protocolManager.getAdapterIfAvailable as jest.Mock).mockReturnValue(undefined);
+  await saveBalanceSnapshot(wallet, {
+    byProtocol: { SPARK: { confirmed: 10_000, unconfirmed: 0, total: 10_000 } },
+    assets: [
+      { asset_id: 'first-usdt', ticker: 'USDT', name: 'Tether USD', balance: 30_000_000, precision: 6, protocol: 'RGB' },
+      { asset_id: 'second-usdt', ticker: 'USDT', name: 'Tether USD', balance: 10_000_000, precision: 6, protocol: 'SPARK' },
+    ],
+    channels: [],
+    btcPriceUSD: 100_000,
+  });
+  const navigate = jest.fn();
+  const screen = render(<DashboardScreen navigation={{ navigate, getParent: () => ({ navigate }) }} />);
+  await waitFor(() => expect(screen.getByLabelText(/^Tether USD, 40 USDT/)).toBeTruthy());
+  expect(screen.getAllByText(/^(Balance ready|Assets|Insights)$/).map(text => text.props.children))
+    .toEqual(['Balance ready', 'Assets', 'Insights']);
+  fireEvent.changeText(screen.getByLabelText('Search assets'), 'tether');
+  expect(screen.queryByLabelText(/^Bitcoin,/)).toBeNull();
+  fireEvent.press(screen.getByLabelText('Show assets on Spark'));
+  fireEvent.press(screen.getByLabelText(/^Tether USD, 10 USDT/));
+  expect(navigate).toHaveBeenCalledWith('AssetDetail', {
+    asset: expect.objectContaining({ asset_id: 'second-usdt', protocol: 'SPARK', isRGB: false }),
+  });
+  fireEvent.press(screen.getByLabelText('Open Assets'));
+  expect(navigate).toHaveBeenCalledWith('Assets');
+  screen.unmount();
+  mockLevel = 'lite';
 });

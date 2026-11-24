@@ -6,9 +6,9 @@ import { feedback } from '../utils/feedback';
 import { PressableScale } from './PressableScale';
 
 interface ActionButtonsProps {
-    onSend: () => void;
-    onReceive: () => void;
-    onSwap: () => void;
+    onSend?: () => void;
+    onReceive?: () => void;
+    onSwap?: () => void;
 }
 
 const ACTION_ITEMS: Array<{
@@ -17,8 +17,8 @@ const ACTION_ITEMS: Array<{
     icon: keyof typeof Ionicons.glyphMap;
 }> = [
     { action: 'onReceive', label: 'Receive', icon: 'arrow-down' },
-    { action: 'onSend', label: 'Send', icon: 'arrow-up' },
     { action: 'onSwap', label: 'Swap', icon: 'swap-horizontal' },
+    { action: 'onSend', label: 'Send', icon: 'arrow-up' },
 ];
 
 export const ActionButtons: React.FC<ActionButtonsProps> = (props) => {
@@ -30,18 +30,22 @@ export const ActionButtons: React.FC<ActionButtonsProps> = (props) => {
     return (
         <View style={[styles.actions, stacked && styles.stacked]}>
             {ACTION_ITEMS.map(({ action, label, icon }) => {
-                const primary = action === 'onReceive';
-                const color = primary ? theme.colors.text.inverse : theme.colors.text.primary;
+                const callback = props[action];
+                const primary = action === 'onReceive' && !!callback;
+                const color = !callback ? theme.colors.text.tertiary : primary ? theme.colors.text.inverse : theme.colors.text.primary;
                 return (
                     <PressableScale
                         key={action}
                         style={[styles.action, stacked && styles.wideAction, primary && styles.primaryAction]}
-                        onPress={() => {
+                        onPress={callback ? () => {
                             feedback.tap();
-                            props[action]();
-                        }}
+                            callback();
+                        } : undefined}
+                        disabled={!callback}
+                        accessible
                         accessibilityRole="button"
                         accessibilityLabel={label}
+                        accessibilityState={{ disabled: !callback }}
                     >
                         <Ionicons name={icon} size={22} color={color} />
                         <Text style={[styles.label, { color }]}>{label}</Text>
