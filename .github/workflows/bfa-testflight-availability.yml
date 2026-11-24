@@ -1,0 +1,56 @@
+name: Check Rate BFA TestFlight availability
+
+on:
+  push:
+    branches: [release/bfa-preview]
+    paths: [.github/workflows/bfa-testflight-availability.yml]
+
+permissions: {}
+
+jobs:
+  check:
+    name: Check the isolated App Store Connect record
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Check whether Rate BFA Test has its own app record
+        env:
+          ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { createPrivateKey, sign } from 'node:crypto';
+          import { appendFileSync } from 'node:fs';
+
+          const { ASC_KEY_P8_BASE64, ASC_KEY_ID, ASC_ISSUER_ID } = process.env;
+          if (!ASC_KEY_P8_BASE64 || !ASC_KEY_ID || !ASC_ISSUER_ID) {
+            throw new Error('App Store Connect credentials are unavailable in this workflow.');
+          }
+          const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
+          const now = Math.floor(Date.now() / 1000);
+          const header = encode({ alg: 'ES256', kid: ASC_KEY_ID, typ: 'JWT' });
+          const payload = encode({ iss: ASC_ISSUER_ID, iat: now, exp: now + 300, aud: 'appstoreconnect-v1' });
+          const signingInput = header + '.' + payload;
+          const key = createPrivateKey(Buffer.from(ASC_KEY_P8_BASE64, 'base64'));
+          const signature = sign('sha256', Buffer.from(signingInput), { key, dsaEncoding: 'ieee-p1363' });
+          const bundleId = 'com.kaleidoswap.wallet.bfatest';
+          const url = new URL('https://api.appstoreconnect.apple.com/v1/apps');
+          url.search = new URLSearchParams({ 'filter[bundleId]': bundleId, 'fields[apps]': 'bundleId', limit: '1' });
+          const response = await fetch(url, {
+            headers: { Authorization: 'Bearer ' + signingInput + '.' + signature.toString('base64url') },
+            redirect: 'error',
+            signal: AbortSignal.timeout(20_000),
+          });
+          if (!response.ok) throw new Error('App Store Connect lookup returned HTTP ' + response.status);
+          const { data } = await response.json();
+          const found = data.some(({ attributes }) => attributes?.bundleId === bundleId);
+          const summary = found
+            ? 'The isolated bundle identifier has a record accessible to the release key.'
+            : 'The release key found no app record for the isolated bundle identifier.';
+          console.log(summary);
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary + '\n');
+          NODE
