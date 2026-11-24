@@ -145,7 +145,7 @@ android {
         }
         bfaTest {
             initWith release
-            signingConfig signingConfigs.debug
+            signingConfig findProperty('RELEASE_STORE_FILE') ? signingConfigs.release : signingConfigs.debug
             matchingFallbacks = ['release']
         }
     }

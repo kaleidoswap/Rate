@@ -3,13 +3,33 @@ name: BFA native test builds
 on:
   push:
     branches: [test/rgb-bfa8-native]
+  workflow_call:
+    inputs:
+      android_version:
+        type: string
+        required: true
+      ios_version:
+        type: string
+        required: true
+      build_code:
+        type: string
+        required: true
+    secrets:
+      ANDROID_KEYSTORE_BASE64:
+        required: true
+      ANDROID_KEYSTORE_PASSWORD:
+        required: true
+      ANDROID_KEY_ALIAS:
+        required: true
+      ANDROID_KEY_PASSWORD:
+        required: true
 
 permissions:
   contents: read
 
 concurrency:
-  group: rate-rgb-bfa-native-test
-  cancel-in-progress: true
+  group: rate-rgb-bfa-native-test-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
 
 env:
   EXPO_PUBLIC_CHANNEL: dev
@@ -51,16 +71,78 @@ jobs:
           yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "ndk;29.0.14206865" >/dev/null
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Build test APK
+      - name: Build debug-signed test APK
+        if: ${{ !inputs.android_version }}
         working-directory: android
         run: ./gradlew :app:assembleBfaTest --no-daemon
-      - name: Check app identity and BFA library
+      - name: Set the Android preview manifest version
+        if: ${{ inputs.android_version }}
+        env:
+          PREVIEW_VERSION: ${{ inputs.android_version }}
+          BUILD_CODE: ${{ inputs.build_code }}
         run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const app = require('./app.json');
+          app.expo.version = process.env.PREVIEW_VERSION;
+          app.expo.android.versionCode = Number(process.env.BUILD_CODE);
+          app.expo.ios.buildNumber = process.env.BUILD_CODE;
+          fs.writeFileSync('app.json', JSON.stringify(app, null, 2) + '\n');
+          NODE
+      - name: Prepare preview signing and expected certificate
+        if: ${{ inputs.android_version }}
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_TYPE" = tag
+          test -n "$ANDROID_KEYSTORE_BASE64"
+          test -n "$ANDROID_KEYSTORE_PASSWORD"
+          test -n "$ANDROID_KEY_ALIAS"
+          umask 077
+          keystore="$RUNNER_TEMP/bfa-preview-release.p12"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$keystore"
+          certificate="$(keytool -exportcert -keystore "$keystore" -alias "$ANDROID_KEY_ALIAS" \
+            -storepass:env ANDROID_KEYSTORE_PASSWORD | sha256sum | cut -d' ' -f1)"
+          printf 'BFA_PREVIEW_CERTIFICATE_SHA256=%s\n' "$certificate" >> "$GITHUB_ENV"
+      - name: Build release-signed preview APK
+        if: ${{ inputs.android_version }}
+        working-directory: android
+        env:
+          ORG_GRADLE_PROJECT_RELEASE_STORE_FILE: ${{ runner.temp }}/bfa-preview-release.p12
+          ORG_GRADLE_PROJECT_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ORG_GRADLE_PROJECT_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ORG_GRADLE_PROJECT_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ORG_GRADLE_PROJECT_VERSION_NAME: ${{ inputs.android_version }}
+          ORG_GRADLE_PROJECT_VERSION_CODE: ${{ inputs.build_code }}
+        run: |
+          test -n "$ORG_GRADLE_PROJECT_RELEASE_KEY_PASSWORD"
+          ./gradlew :app:assembleBfaTest --no-daemon
+      - name: Remove preview signing key
+        if: ${{ always() && inputs.android_version }}
+        run: rm -f "$RUNNER_TEMP/bfa-preview-release.p12"
+      - name: Check app identity, version and BFA library
+        env:
+          PREVIEW_VERSION: ${{ inputs.android_version }}
+          BUILD_CODE: ${{ inputs.build_code }}
+        run: |
+          set -euo pipefail
           apks=(android/app/build/outputs/apk/bfaTest/*.apk)
           test "${#apks[@]}" = 1
           apk="${apks[0]}"
           aapt="$(find "$ANDROID_SDK_ROOT/build-tools" -name aapt -type f | sort -V | tail -n1)"
-          "$aapt" dump badging "$apk" | grep "^package: name='com.kaleidoswap.wallet.bfatest' "
+          badging="$("$aapt" dump badging "$apk" | sed -n '1p')"
+          printf '%s\n' "$badging" | grep "^package: name='com.kaleidoswap.wallet.bfatest' "
+          if [[ -n "$PREVIEW_VERSION" ]]; then
+            printf '%s\n' "$badging" | grep -F "versionName='$PREVIEW_VERSION'"
+            printf '%s\n' "$badging" | grep -F "versionCode='$BUILD_CODE'"
+            apksigner="$(dirname "$aapt")/apksigner"
+            certificate="$("$apksigner" verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')"
+            test -n "$BFA_PREVIEW_CERTIFICATE_SHA256"
+            test "$certificate" = "$BFA_PREVIEW_CERTIFICATE_SHA256"
+          fi
           python - "$apk" <<'PY'
           import sys, zipfile
           with zipfile.ZipFile(sys.argv[1]) as apk:
@@ -109,6 +191,22 @@ jobs:
       - name: Install Pods
         working-directory: ios
         run: pod install
+      - name: Set the preview simulator version
+        if: ${{ inputs.ios_version }}
+        working-directory: ios
+        env:
+          PREVIEW_VERSION: ${{ inputs.ios_version }}
+          BUILD_CODE: ${{ inputs.build_code }}
+        run: |
+          agvtool new-marketing-version "$PREVIEW_VERSION"
+          agvtool new-version -all "$BUILD_CODE"
+          node <<'NODE'
+          const fs = require('node:fs');
+          const app = require('../app.json');
+          app.expo.version = process.env.PREVIEW_VERSION;
+          app.expo.ios.buildNumber = process.env.BUILD_CODE;
+          fs.writeFileSync('../app.json', JSON.stringify(app, null, 2) + '\n');
+          NODE
       - name: Build simulator app
         run: |
           xcodebuild build -quiet \
@@ -117,17 +215,18 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/rate-bfa-ios" \
             ARCHS=arm64 CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=
       - name: Check app identity and archive simulator bundle
+        env:
+          PREVIEW_VERSION: ${{ inputs.ios_version }}
+          BUILD_CODE: ${{ inputs.build_code }}
         run: |
           app="$RUNNER_TEMP/rate-bfa-ios/Build/Products/Release-iphonesimulator/KaleidoSwap.app"
           test "$(plutil -extract CFBundleIdentifier raw -o - "$app/Info.plist")" = com.kaleidoswap.wallet.bfatest
+          if [[ -n "$PREVIEW_VERSION" ]]; then
+            test "$(plutil -extract CFBundleShortVersionString raw -o - "$app/Info.plist")" = "$PREVIEW_VERSION"
+            test "$(plutil -extract CFBundleVersion raw -o - "$app/Info.plist")" = "$BUILD_CODE"
+          fi
           test -s "$app/main.jsbundle"
           ditto -c -k --keepParent "$app" "$RUNNER_TEMP/rate-bfa8-simulator.zip"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: rate-bfa8-ios-simulator
-          path: ${{ runner.temp }}/rate-bfa8-simulator.zip
-          if-no-files-found: error
-          retention-days: 14
       - name: Verify WASM invoice, BFA wallet reopen and encrypted restore offline
         timeout-minutes: 10
         run: |
@@ -142,3 +241,9 @@ jobs:
           app="$RUNNER_TEMP/rate-bfa-ios/Build/Products/Release-iphonesimulator/KaleidoSwap.app"
           xcrun simctl install "$SIMULATOR_UDID" "$app"
           xcrun simctl launch "$SIMULATOR_UDID" com.kaleidoswap.wallet.bfatest
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rate-bfa8-ios-simulator
+          path: ${{ runner.temp }}/rate-bfa8-simulator.zip
+          if-no-files-found: error
+          retention-days: 14

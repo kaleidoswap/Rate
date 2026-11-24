@@ -1,0 +1,90 @@
+name: BFA preview release
+
+on:
+  push:
+    tags: ['bfa-v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rate-bfa-preview-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: Validate preview tag and compute version
+    runs-on: ubuntu-latest
+    outputs:
+      android: ${{ steps.version.outputs.android }}
+      ios: ${{ steps.version.outputs.ios }}
+      code: ${{ steps.version.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: version
+        run: |
+          if [[ ! "$GITHUB_REF_NAME" =~ ^bfa-v([0-9]+\.[0-9]+\.[0-9]+)-preview\.[1-9][0-9]*$ ]]; then
+            echo "::error::Use the bfa-vX.Y.Z-preview.N tag format."
+            exit 1
+          fi
+          printf 'ios=%s\n' "${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+          printf 'android=%s\n' "${GITHUB_REF_NAME#bfa-v}" >> "$GITHUB_OUTPUT"
+          printf 'code=%s\n' "$(git rev-list --count HEAD)" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build and verify isolated BFA preview
+    needs: version
+    uses: ./.github/workflows/bfa-native-test.yml
+    with:
+      android_version: ${{ needs.version.outputs.android }}
+      ios_version: ${{ needs.version.outputs.ios }}
+      build_code: ${{ needs.version.outputs.code }}
+    secrets:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+  publish:
+    name: Publish GitHub prerelease
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: rate-bfa8-android
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: rate-bfa8-ios-simulator
+          path: dist
+      - name: Name the preview downloads
+        env:
+          PREVIEW_VERSION: ${{ needs.version.outputs.android }}
+        run: |
+          mv dist/rate-bfa8-test.apk "dist/rate-bfa-${PREVIEW_VERSION}-android-arm64.apk"
+          mv dist/rate-bfa8-simulator.zip "dist/rate-bfa-${PREVIEW_VERSION}-ios-simulator-arm64.zip"
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Rate BFA ${{ needs.version.outputs.android }}
+          prerelease: true
+          make_latest: false
+          fail_on_unmatched_files: true
+          files: |
+            dist/*.apk
+            dist/*.zip
+          body: |
+            Rate BFA Test runs on Mutinynet using the UTEXO bfa.8 native RGB library and proxy protocol 1.0. Use separate test wallets and test funds.
+
+            - **Android arm64** uses the official release signing key and installs under the separate Rate BFA Test app ID.
+            - **iOS arm64** runs on an Apple Silicon iOS Simulator. TestFlight on iPhone requires a separate App Store Connect app record for Rate BFA Test.
+
+            Android requires the same signing certificate for app updates. The earlier debug-signed BFA Test APK uses a different certificate. Back up your test wallet before replacing that APK.
+
+            The release checks include the native backup and restore probe and iOS Simulator launch. Live BFA transfer settlement with the browser extension remains to be verified.
