@@ -35,7 +35,8 @@ jobs:
           : "${ASC_KEY_ID:?App Store Connect key ID is missing}"
           : "${ASC_ISSUER_ID:?App Store Connect issuer ID is missing}"
           umask 077
-          export ASC_KEY_P8="$(mktemp "$RUNNER_TEMP/testflight-readiness.XXXXXX")"
+          ASC_KEY_P8="$(mktemp "$RUNNER_TEMP/testflight-readiness.XXXXXX")"
+          export ASC_KEY_P8
           trap 'rm -f -- "$ASC_KEY_P8"' EXIT
           printf '%s' "$ASC_KEY_P8_BASE64" | base64 -d > "$ASC_KEY_P8"
           unset ASC_KEY_P8_BASE64
@@ -64,8 +65,7 @@ jobs:
             }
           }
 
-          function isPublishedInvite(group) {
-            const attrs = group.attributes;
+          function isPublishedInvite(attrs) {
             return attrs.isInternalGroup === false &&
               (attrs.publicLink === publishedInvite || attrs.publicLinkId === 'ddrZT98T');
           }
@@ -86,8 +86,8 @@ jobs:
             'fields[betaGroups]': groupFields,
             limit: '200',
           }).data;
-          const invite = publicGroups.find(isPublishedInvite);
-          const inviteStatus = invite ? (invite.attributes.publicLinkEnabled ? 'enabled' : 'disabled') : 'not found';
+          const invite = publicGroups.map(group => group.attributes).find(isPublishedInvite);
+          const inviteStatus = invite ? (invite.publicLinkEnabled ? 'enabled' : 'disabled') : 'not found';
           const summary = [
             '## Production TestFlight build status',
             '',
@@ -101,35 +101,29 @@ jobs:
             const result = get('/v1/builds', {
               'filter[app]': app,
               'filter[preReleaseVersion.version]': version,
-              'fields[builds]': 'version,processingState,expired,preReleaseVersion,buildBetaDetail',
+              'fields[builds]': 'version,processingState,expired,preReleaseVersion,buildBetaDetail,betaGroups',
               'fields[preReleaseVersions]': 'version,platform',
               'fields[buildBetaDetails]': 'internalBuildState,externalBuildState',
-              include: 'preReleaseVersion,buildBetaDetail',
+              'fields[betaGroups]': groupFields,
+              'limit[betaGroups]': '200',
+              include: 'preReleaseVersion,buildBetaDetail,betaGroups',
               sort: '-uploadedDate',
               limit: '5',
             });
             const included = new Map((result.included ?? []).map(item => [item.type + ':' + item.id, item.attributes]));
-            const attributesOf = relation => {
-              const item = relation?.data;
-              return item && included.get(item.type + ':' + item.id);
-            };
+            const attributesOf = item => item && included.get(item.type + ':' + item.id);
             const builds = result.data.filter(build =>
-              attributesOf(build.relationships.preReleaseVersion)?.platform === 'IOS'
+              attributesOf(build.relationships.preReleaseVersion?.data)?.platform === 'IOS'
             );
             if (builds.length === 0) {
               summary.push('| ' + version + ' | — | No iOS build visible | — | — | — | — | — | — |');
               continue;
             }
             for (const build of builds) {
-              const groups = get('/v1/betaGroups', {
-                'filter[app]': app,
-                'filter[builds]': build.id,
-                'fields[betaGroups]': groupFields,
-                limit: '200',
-              }).data;
-              const external = groups.filter(group => group.attributes.isInternalGroup === false);
-              const enabledLinks = external.filter(group => group.attributes.publicLinkEnabled);
-              const details = attributesOf(build.relationships.buildBetaDetail);
+              const groups = (build.relationships.betaGroups?.data ?? []).map(attributesOf).filter(Boolean);
+              const external = groups.filter(group => group.isInternalGroup === false);
+              const enabledLinks = external.filter(group => group.publicLinkEnabled);
+              const details = attributesOf(build.relationships.buildBetaDetail?.data);
               const processing = build.attributes.processingState + (build.attributes.expired ? ' (expired)' : '');
               const row = [
                 version,
