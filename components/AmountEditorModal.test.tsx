@@ -48,6 +48,14 @@ test('dismissing edits leaves the request unchanged and reopening restores its v
   fireEvent.press(screen.getByText('Save request'));
   expect(p.onConfirm).toHaveBeenCalledWith(1000, { ...p.requestOptions, note: '' });
 });
+test('a proxy v1 Receive editor shows and saves 30 min for a previously chosen 10 min', () => {
+  const p = { ...props(), requestOptions: { expirySeconds: 600, showCountdown: false } };
+  const screen = render(<AmountEditorModal {...p} rgbProxyV1 />);
+  expect(screen.queryByLabelText('Expire after 10 min')).toBeNull();
+  expect(screen.getByLabelText('Expire after 30 min').props.accessibilityState.checked).toBe(true);
+  fireEvent.press(screen.getByText('Save request'));
+  expect(p.onConfirm).toHaveBeenCalledWith(1000, { expirySeconds: 1800, showCountdown: false, note: '' });
+});
 test('BTC entry preserves satoshi precision', () => {
   const p = { ...props(), initialSats: undefined, bitcoinUnit: 'BTC' as const }; const screen = render(<AmountEditorModal {...p} />);
   type(screen, ['0', '.', '0', '0', '0', '0', '0', '0', '0', '1']);

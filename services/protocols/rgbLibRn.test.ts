@@ -39,10 +39,12 @@ function fakeLib() {
     close: jest.fn(async () => undefined),
   };
   const lib = {
+    DEFAULT_SEND_SECONDS: KaleidoRgb.DEFAULT_SEND_SECONDS,
     restoreKeys: jest.fn(async (network: string, mnemonic: string) => ({ mnemonic, network, xpub: 'x', accountXpubVanilla: 'v', accountXpubColored: 'c', masterFingerprint: 'f' })),
     decodeInvoice: jest.fn(async () => ({ recipientId: 'their-rid', transportEndpoints: ['rpcs://their-proxy'], invoice: 'i', assignment: { type: 'ANY' }, network: 'SIGNET_CUSTOM', expirationTimestamp: null })),
     Wallet: jest.fn(() => wallet),
     supportsSubdir: jest.fn(() => true),
+    supportsBfa: jest.fn(() => false),
   };
   return { lib, wallet };
 }
@@ -86,6 +88,112 @@ test('send decodes the invoice and pays its recipient over the proxy it names', 
   expect(wallet.send).toHaveBeenCalledWith({
     'rgb:usdt': [{ recipientId: 'their-rid', assignment: { type: 'FUNGIBLE', amount: 1_000_000 }, transportEndpoints: ['rpcs://their-proxy'], witnessData: { amountSat: 1000 } }],
   }, false, 2, 1);
+});
+
+test('BFA is available through the engine on test networks and uses encrypted invoices', async () => {
+  const { lib, wallet } = fakeLib();
+  lib.supportsBfa.mockReturnValue(true);
+  const asset = {
+    assetId: 'rgb:bridged', ticker: 'USDT', name: 'Bridged token', precision: 6,
+    knownCirculatingSupply: 1_000_000_000, timestamp: 0, addedAt: 0,
+    balance: { settled: 12_000_000, future: 12_000_000, spendable: 12_000_000 },
+  };
+  wallet.listAssets.mockResolvedValue({ nia: [], uda: [], cfa: [], ifa: [], bfa: [asset] } as any);
+  const onlineOptions = { evmChains: { '11155111': { rpcUrl: 'https://sepolia.example', minMintLockBlocks: 12, maxMintLockBlocks: 120 } } };
+  registerWdkModule('@utexo/wdk-wallet-rgb', () => createRgbLibRnModule(() => lib as any, { onlineOptions }));
+  const adapter = new RgbLibWdkAdapter();
+  await adapter.connect({ protocol: 'RGB_L1', mnemonic: 'seed', dataDir: '.', ...options } as any);
+  expect(lib.Wallet).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({ supportedSchemas: ['NIA', 'CFA', 'UDA', 'IFA', 'BFA'] }));
+  expect(rgbLibSchemas('mainnet', true)).toEqual(['NIA', 'CFA', 'UDA']);
+  expect(wallet.goOnline).toHaveBeenCalledWith(options.indexerUrl, false, undefined, onlineOptions);
+  expect(await adapter.listAssets()).toEqual(expect.arrayContaining([expect.objectContaining({ id: asset.assetId, ticker: 'USDT' })]));
+  await adapter.createInvoice({ asset: asset.assetId, assetAmount: 1_000_000 } as any);
+  expect(wallet.witnessReceive).toHaveBeenCalledWith(asset.assetId, { type: 'FUNGIBLE', amount: 1_000_000 }, null, [options.transportEndpoint], 1, 'REQUIRED');
+  await adapter.disconnect();
+});
+
+test('proxy v1 only creates invoices with enough time left for a sender operation', async () => {
+  const { lib, wallet } = fakeLib();
+  lib.supportsBfa.mockReturnValue(true);
+  const account = await new (createRgbLibRnModule(() => lib as any).WalletManagerRgb)('seed', options).getAccount();
+
+  await expect(account.receiveAsset({ durationSeconds: 600 })).rejects.toMatchObject({ code: 'RGB_INVOICE_INVALID' });
+  await expect(account.receiveAsset({ duration_seconds: 900, witness: false })).rejects.toMatchObject({ code: 'RGB_INVOICE_INVALID' });
+  expect(wallet.witnessReceive).not.toHaveBeenCalled();
+  expect(wallet.blindReceive).not.toHaveBeenCalled();
+
+  await account.receiveAsset({ durationSeconds: 1800 });
+  expect(wallet.witnessReceive).toHaveBeenCalledWith(null, { type: 'ANY' }, 1800, [options.transportEndpoint], 1, 'REQUIRED');
+  await account.receiveAsset({ duration_seconds: 604_800, witness: false });
+  expect(wallet.blindReceive).toHaveBeenCalledWith(null, { type: 'ANY' }, 604_800, [options.transportEndpoint], 1, 'REQUIRED');
+});
+
+test('proxy v1 transfer uses the invoice encryption and a separate sender proxy deadline', async () => {
+  const { lib, wallet } = fakeLib();
+  lib.supportsBfa.mockReturnValue(true);
+  const nowSeconds = 1_800_000_000;
+  const now = jest.spyOn(Date, 'now').mockReturnValue(nowSeconds * 1000);
+  const publicKey = 'ab'.repeat(32);
+  const invoiceExpiry = nowSeconds + 1_800;
+  try {
+    lib.decodeInvoice.mockResolvedValue({
+      recipientId: 'sbc:utxob:fixture', network: 'SIGNET_CUSTOM', assignment: { type: 'FUNGIBLE', amount: 25 },
+      assetId: 'rgb:bridged', transportEndpoints: ['rpcs://recipient/1.0/json-rpc'],
+      publicKey, encryption: 'OPTIONAL', expirationTimestamp: invoiceExpiry,
+    } as any);
+    const account = await open(lib);
+    await account.transfer({ token: 'rgb:bridged', recipient: 'rgb:invoice', amount: 25 });
+    expect(wallet.send).toHaveBeenCalledWith({
+      'rgb:bridged': [{
+        recipientId: 'sbc:utxob:fixture', assignment: { type: 'FUNGIBLE', amount: 25 },
+        transportEndpoints: ['rpcs://recipient/1.0/json-rpc'], publicKey, encryption: 'OPTIONAL', expirationTimestamp: invoiceExpiry,
+      }],
+    }, false, 2, 1, nowSeconds + 1_200, options.transportEndpoint);
+    expect(await account.decodeRgbInvoice('rgb:invoice')).toEqual(expect.objectContaining({ public_key: publicKey, encryption: 'OPTIONAL' }));
+  } finally { now.mockRestore(); }
+});
+
+test.each(['NIA', 'CFA'] as const)('pays an open-amount %s proxy v1 invoice on mainnet', async (assetSchema) => {
+  const { lib, wallet } = fakeLib();
+  lib.supportsBfa.mockReturnValue(true);
+  const assetId = 'rgb:open-amount';
+  const transportEndpoints = ['rpcs://recipient/1.0/json-rpc'];
+  const recipientId = 'bc:utxob:fixture';
+  const publicKey = 'ab'.repeat(32);
+  const expirationTimestamp = Math.floor(Date.now() / 1000) + 3600;
+  lib.decodeInvoice.mockResolvedValue({
+    recipientId, network: 'MAINNET', assetId, assetSchema, transportEndpoints,
+    assignment: { type: 'FUNGIBLE', amount: 0 }, encryption: 'REQUIRED', publicKey, expirationTimestamp,
+  } as any);
+  const account = await open(lib, 'mainnet');
+
+  expect((await account.decodeRgbInvoice('rgb:invoice')).assignment).toEqual({ type: 'Any' });
+  await account.transfer({ token: assetId, recipient: 'rgb:invoice', amount: 25 });
+  expect(wallet.send).toHaveBeenCalledWith({
+    [assetId]: [{
+      recipientId, assignment: { type: 'FUNGIBLE', amount: 25 }, transportEndpoints,
+      publicKey, encryption: 'REQUIRED', expirationTimestamp,
+    }],
+  }, false, 2, 1, expect.any(Number), options.transportEndpoint);
+});
+
+test.each([
+  [{ publicKey: null }, /proxy v1/],
+  [{ transportEndpoints: [] }, /proxy v1/],
+  [{ expiresInSeconds: 600 }, /15 minutes/],
+  [{ assignment: { type: 'MINT_RIGHT' } }, /requests an asset right/],
+])('rejects a proxy invoice the mobile wallet cannot pay: %j', async (fields, error) => {
+  const { lib, wallet } = fakeLib();
+  lib.supportsBfa.mockReturnValue(true);
+  const { expiresInSeconds, ...invoiceFields } = fields as { expiresInSeconds?: number };
+  lib.decodeInvoice.mockResolvedValue({
+    recipientId: 'sbc:utxob:fixture', network: 'SIGNET_CUSTOM', assignment: { type: 'ANY' },
+    publicKey: 'ab'.repeat(32), encryption: 'REQUIRED', transportEndpoints: ['rpcs://recipient/1.0/json-rpc'],
+    expirationTimestamp: Math.floor(Date.now() / 1000) + (expiresInSeconds ?? 3600), ...invoiceFields,
+  } as any);
+  const account = await open(lib);
+  await expect(account.transfer({ token: 'rgb:bridged', recipient: 'rgb:invoice', amount: 25 })).rejects.toThrow(error);
+  expect(wallet.send).not.toHaveBeenCalled();
 });
 
 test('transfers read like the node’s, and refreshes are throttled', async () => {

@@ -7,7 +7,7 @@ import { Callout } from '../Callout';
 import { Button } from '../Button';
 import { feedback } from '../../utils/feedback';
 import {
-  RGB_CONFIRMATION_PRESETS, RGB_EXPIRY_PRESETS, isDefaultRgbOptions, utxoCounts,
+  RGB_CONFIRMATION_PRESETS, isDefaultRgbOptions, rgbExpiryPresets, rgbReceiveExpiry, utxoCounts,
   type RgbInvoiceKind, type RgbReceiveOptions, type RgbReceiveSupport, type RgbUtxo,
 } from '../../utils/rgb-receive';
 
@@ -17,27 +17,28 @@ export interface RgbUtxoState {
   list?: RgbUtxo[];
 }
 
-const expiryLabel = (seconds: number) =>
-  RGB_EXPIRY_PRESETS.find(p => p.seconds === seconds)?.label
+const expiryLabel = (seconds: number, proxyV1: boolean) =>
+  rgbExpiryPresets(proxyV1).find(p => p.seconds === seconds)?.label
   ?? (seconds % 86_400 === 0 ? `${seconds / 86_400} days` : seconds % 3600 === 0 ? `${seconds / 3600} hours` : `${Math.round(seconds / 60)} min`);
 
 /** The Advanced line's summary of what differs from the default invoice. */
-export function rgbAdvancedSummary(options: RgbReceiveOptions, support: RgbReceiveSupport): string {
+export function rgbAdvancedSummary(options: RgbReceiveOptions, support: RgbReceiveSupport, proxyV1 = false): string {
   if (isDefaultRgbOptions(options)) return 'Default';
   return [
     support.invoiceKind && options.kind === 'blinded' ? 'Private' : null,
-    support.expiry && options.durationSeconds ? expiryLabel(options.durationSeconds) : null,
+    support.expiry && options.durationSeconds ? expiryLabel(rgbReceiveExpiry(options.durationSeconds, proxyV1), proxyV1) : null,
     support.minConfirmations && options.minConfirmations !== 1 ? `${options.minConfirmations} confirmations` : null,
   ].filter(Boolean).join(' · ') || 'Default';
 }
 
 /** RGB invoice options the RGB account supports, collapsed by default; anything unsupported is not shown. */
-export function RgbReceiveAdvanced({ support, options, onChange, requestExpirySeconds, utxos, onLoadUtxos, onCreateUtxos }: {
+export function RgbReceiveAdvanced({ support, options, onChange, requestExpirySeconds, proxyV1 = false, utxos, onLoadUtxos, onCreateUtxos }: {
   support: RgbReceiveSupport;
   options: RgbReceiveOptions;
   onChange: (options: RgbReceiveOptions) => void;
   /** The expiry the invoice gets when none is picked here. */
   requestExpirySeconds: number;
+  proxyV1?: boolean;
   utxos: RgbUtxoState | null;
   onLoadUtxos: () => void;
   onCreateUtxos?: () => void;
@@ -53,7 +54,8 @@ export function RgbReceiveAdvanced({ support, options, onChange, requestExpirySe
     <Text style={{ color: warn ? t.colors.warning[500] : t.colors.text.secondary, fontSize: t.typography.fontSize.sm }}>{text}</Text>
   );
   const counts = utxos?.list ? utxoCounts(utxos.list) : null;
-  const expiry = options.durationSeconds ?? requestExpirySeconds;
+  const expiry = rgbReceiveExpiry(options.durationSeconds ?? requestExpirySeconds, proxyV1);
+  const summary = rgbAdvancedSummary(options, support, proxyV1);
   const toggle = () => {
     feedback.select();
     if (!open && support.listUtxos && !utxos) onLoadUtxos();
@@ -63,13 +65,13 @@ export function RgbReceiveAdvanced({ support, options, onChange, requestExpirySe
   return (
     <View style={{ width: '100%', marginTop: t.spacing[3], borderRadius: t.borderRadius.lg, borderWidth: 1, borderColor: t.colors.border.light, backgroundColor: t.colors.surface.primary }}>
       <TouchableOpacity accessibilityRole="button" accessibilityState={{ expanded: open }}
-        accessibilityLabel={`Advanced RGB options: ${rgbAdvancedSummary(options, support)}`}
+        accessibilityLabel={`Advanced RGB options: ${summary}`}
         onPress={toggle} activeOpacity={0.7}
         style={{ minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: t.spacing[2], paddingHorizontal: t.spacing[4] }}>
         <Ionicons name="options-outline" size={16} color={t.colors.text.secondary} />
         <Text style={{ color: t.colors.text.primary, fontWeight: '600' }}>Advanced</Text>
         <Text style={{ flex: 1, textAlign: 'right', color: t.colors.text.secondary, fontSize: t.typography.fontSize.sm }} numberOfLines={1}>
-          {rgbAdvancedSummary(options, support)}
+          {summary}
         </Text>
         <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={16} color={t.colors.text.secondary} />
       </TouchableOpacity>
@@ -92,9 +94,9 @@ export function RgbReceiveAdvanced({ support, options, onChange, requestExpirySe
         {support.expiry && <View style={{ gap: t.spacing[2] }}>
           {caption('Expires in')}
           <SegmentedTabs<string> scrollable={false} fill
-            options={RGB_EXPIRY_PRESETS.map(p => ({ key: String(p.seconds), label: p.label }))}
+            options={rgbExpiryPresets(proxyV1).map(p => ({ key: String(p.seconds), label: p.label }))}
             value={String(expiry)}
-            onChange={(key) => onChange({ ...options, durationSeconds: Number(key) === requestExpirySeconds ? null : Number(key) })} />
+            onChange={(key) => onChange({ ...options, durationSeconds: Number(key) === rgbReceiveExpiry(requestExpirySeconds, proxyV1) ? null : Number(key) })} />
         </View>}
 
         {support.minConfirmations && <View style={{ gap: t.spacing[2] }}>

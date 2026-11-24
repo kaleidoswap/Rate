@@ -106,6 +106,7 @@ enum Mappers {
     case "UDA": return .uda
     case "CFA": return .cfa
     case "IFA": return .ifa
+    case "BFA": return .bfa
     default: throw InvalidArgument(description: "Unknown asset schema: \(value)")
     }
   }
@@ -116,6 +117,7 @@ enum Mappers {
     case .uda: return "UDA"
     case .cfa: return "CFA"
     case .ifa: return "IFA"
+    case .bfa: return "BFA"
     }
   }
 
@@ -140,6 +142,8 @@ enum Mappers {
     case "FUNGIBLE": return .fungible(amount: try a.u64("amount"))
     case "NON_FUNGIBLE": return .nonFungible
     case "INFLATION_RIGHT": return .inflationRight(amount: try a.u64("amount"))
+    case "LINK_RIGHT": return .linkRight
+    case "MINT_RIGHT": return .mintRight
     case "ANY": return .any
     default: throw InvalidArgument(description: "Unknown assignment type: \(type)")
     }
@@ -151,7 +155,63 @@ enum Mappers {
       recipientId: try r.string("recipientId"),
       witnessData: witness,
       assignment: try assignment(try r.obj("assignment")),
-      transportEndpoints: try r.strings("transportEndpoints")
+      transportEndpoints: try r.strings("transportEndpoints"),
+      publicKey: r.stringOrNil("publicKey"),
+      encryption: try encryption(r.stringOrNil("encryption")) ?? .unsupported,
+      expirationTimestamp: try r.u64OrNil("expirationTimestamp")
+    )
+  }
+
+  static func encryption(_ value: String?) throws -> Encryption? {
+    switch value {
+    case nil: return nil
+    case "REQUIRED": return .required
+    case "UNSUPPORTED": return .unsupported
+    case "OPTIONAL": return .optional
+    default: throw InvalidArgument(description: "Unknown encryption setting")
+    }
+  }
+
+  static func encryptionName(_ value: Encryption) -> String {
+    switch value {
+    case .required: return "REQUIRED"
+    case .unsupported: return "UNSUPPORTED"
+    case .optional: return "OPTIONAL"
+    }
+  }
+
+  static func onlineOptions(_ a: Args) throws -> OnlineOptions {
+    let indexerUrl = try a.string("indexerUrl")
+    let scheme = URLComponents(string: indexerUrl)?.scheme?.lowercased()
+    let indexerConfig: IndexerConfig = scheme == "http" || scheme == "https"
+      ? .esplora(url: indexerUrl)
+      : .electrum(url: indexerUrl)
+    var evmChains: [UInt64: EvmChain] = [:]
+    if a.has("evmChains") {
+      for (key, value) in try a.raw("evmChains") {
+        guard let chainId = UInt64(key), let chain = value as? [String: Any] else {
+          throw InvalidArgument(description: "Invalid EVM chain configuration")
+        }
+        let config = Args(chain)
+        evmChains[chainId] = try EvmChain(
+          rpcUrl: config.string("rpcUrl"),
+          minMintLockBlocks: config.u64("minMintLockBlocks"),
+          maxMintLockBlocks: config.u64("maxMintLockBlocks")
+        )
+      }
+    }
+
+    let proxyAuthKeys = a.has("proxyAuthKeys") ? try a.raw("proxyAuthKeys") : [:]
+    guard let keys = proxyAuthKeys as? [String: String] else {
+      throw InvalidArgument(description: "proxyAuthKeys must contain string values")
+    }
+    return OnlineOptions(
+      indexerConfig: indexerConfig,
+      skipConsistencyCheck: a.bool("skipConsistencyCheck", false),
+      vanillaSyncLookback: try a.u32("vanillaSyncLookback"),
+      failedWitnessReceiveGraceSecs: try a.u32OrNil("failedWitnessReceiveGraceSecs") ?? 604_800,
+      proxyAuthKeys: keys,
+      evmChains: evmChains
     )
   }
 
@@ -189,6 +249,8 @@ enum Mappers {
     case .fungible(let amount): return ["type": "FUNGIBLE", "amount": Double(amount)]
     case .nonFungible: return ["type": "NON_FUNGIBLE"]
     case .inflationRight(let amount): return ["type": "INFLATION_RIGHT", "amount": Double(amount)]
+    case .linkRight: return ["type": "LINK_RIGHT"]
+    case .mintRight: return ["type": "MINT_RIGHT"]
     case .any: return ["type": "ANY"]
     }
   }
@@ -266,12 +328,21 @@ enum Mappers {
     ]
   }
 
+  static func js(_ a: AssetBfa) -> [String: Any?] {
+    return [
+      "assetId": a.assetId, "ticker": a.ticker, "name": a.name, "details": a.details, "precision": Int(a.precision),
+      "knownCirculatingSupply": Double(a.knownCirculatingSupply), "timestamp": Double(a.timestamp),
+      "addedAt": Double(a.addedAt), "balance": js(a.balance), "media": js(a.media), "rejectListUrl": a.rejectListUrl,
+    ]
+  }
+
   static func js(_ a: Assets) -> [String: Any?] {
     return [
       "nia": a.nia.map { $0.map { js($0) } },
       "uda": a.uda.map { $0.map { js($0) } },
       "cfa": a.cfa.map { $0.map { js($0) } },
       "ifa": a.ifa.map { $0.map { js($0) } },
+      "bfa": a.bfa.map { $0.map { js($0) } },
     ]
   }
 
@@ -280,11 +351,15 @@ enum Mappers {
       "assetSchema": schemaName(m.assetSchema), "initialSupply": Double(m.initialSupply), "maxSupply": Double(m.maxSupply),
       "knownCirculatingSupply": Double(m.knownCirculatingSupply), "timestamp": Double(m.timestamp), "name": m.name,
       "precision": Int(m.precision), "ticker": m.ticker, "details": m.details, "token": js(m.token), "rejectListUrl": m.rejectListUrl,
+      "linkedFromContract": m.linkedFromContract, "linkedToContract": m.linkedToContract,
     ]
   }
 
   static func js(_ r: ReceiveData) -> [String: Any?] {
-    return ["invoice": r.invoice, "recipientId": r.recipientId, "expirationTimestamp": Double(r.expirationTimestamp), "batchTransferIdx": Int(r.batchTransferIdx)]
+    return [
+      "invoice": r.invoice, "recipientId": r.recipientId, "expirationTimestamp": Double(r.expirationTimestamp),
+      "batchTransferIdx": Int(r.batchTransferIdx), "publicKey": r.publicKey,
+    ]
   }
 
   static func js(_ r: OperationResult) -> [String: Any?] {
@@ -296,7 +371,7 @@ enum Mappers {
       "recipientId": i.recipientId, "assetSchema": i.assetSchema.map { schemaName($0) }, "assetId": i.assetId,
       "assignment": js(i.assignment), "assignmentName": i.assignmentName, "network": networkName(i.network),
       "expirationTimestamp": i.expirationTimestamp.map { Double($0) }, "transportEndpoints": i.transportEndpoints,
-      "unknownQueryParams": i.unknownQueryParams,
+      "publicKey": i.publicKey, "encryption": encryptionName(i.encryption), "unknownQueryParams": i.unknownQueryParams,
     ]
   }
 
@@ -323,6 +398,8 @@ enum Mappers {
     case .send: return "SEND"
     case .inflation: return "INFLATION"
     case .burn: return "BURN"
+    case .link: return "LINK"
+    case .mint: return "MINT"
     }
   }
 
@@ -351,9 +428,9 @@ enum Mappers {
       "idx": Int(t.idx), "batchTransferIdx": Int(t.batchTransferIdx), "createdAt": Double(t.createdAt), "updatedAt": Double(t.updatedAt),
       "status": name(t.status), "requestedAssignment": t.requestedAssignment.map { js($0) },
       "assignments": t.assignments.map { js($0) }, "kind": name(t.kind), "txid": t.txid, "recipientId": t.recipientId,
-      "receiveUtxo": js(t.receiveUtxo), "changeUtxo": js(t.changeUtxo), "expirationTimestamp": t.expirationTimestamp.map { Double($0) },
+      "receiveUtxo": js(t.receiveUtxo), "changeUtxo": js(t.changeUtxos.first), "changeUtxos": t.changeUtxos.compactMap { js($0) }, "expirationTimestamp": t.expirationTimestamp.map { Double($0) },
       "transportEndpoints": t.transportEndpoints.map { ["endpoint": $0.endpoint, "transportType": "JSON_RPC", "used": $0.used] as [String: Any?] },
-      "invoiceString": t.invoiceString, "consignmentPath": t.consignmentPath, "psbtPath": t.psbtPath,
+      "senderTransportEndpoint": t.senderTransportEndpoint, "invoiceString": t.invoiceString, "consignmentPath": t.consignmentPath, "psbtPath": t.psbtPath,
     ]
   }
 

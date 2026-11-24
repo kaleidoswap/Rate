@@ -6,6 +6,7 @@ import { Sheet } from './Sheet';
 import { AmountPad, groupComposedAmount } from './AmountPad';
 import { OptionSheet } from './OptionSheet';
 import { receiveAmountSats } from '../utils/receive-request';
+import { rgbReceiveExpiry, rgbShortExpiryPreset } from '../utils/rgb-receive';
 import { feedback } from '../utils/feedback';
 
 /** The symbol for a fiat code, shown next to amounts and in the currency picker. */
@@ -40,6 +41,8 @@ interface Props {
   rates: Record<string, number>;
   bitcoinUnit?: 'BTC' | 'sats';
   requestOptions?: ReceiveRequestOptions;
+  /** Receive uses the 30-minute minimum while the native RGB wallet uses proxy v1. */
+  rgbProxyV1?: boolean;
   onConfirm: (sats: number, options?: ReceiveRequestOptions) => void;
   /** Asset mode: returns the chosen amount in display units. */
   onConfirmAssetUnits?: (units: number) => void;
@@ -51,7 +54,7 @@ interface Props {
  * it asks for the amount to send (required). The same one amount editor
  * serves bitcoin (sats/USD toggle) and Spark/RGB assets (Max, no fiat).
  */
-export function AmountEditorModal({ visible, onClose, initialSats, initialAssetValue, asset, maxSats, rates, bitcoinUnit = 'sats', requestOptions, onConfirm, onConfirmAssetUnits }: Props) {
+export function AmountEditorModal({ visible, onClose, initialSats, initialAssetValue, asset, maxSats, rates, bitcoinUnit = 'sats', requestOptions, rgbProxyV1 = false, onConfirm, onConfirmAssetUnits }: Props) {
   const t = useAppTheme();
   const [value, setValue] = useState('');
   const [fiat, setFiat] = useState(false);
@@ -65,6 +68,8 @@ export function AmountEditorModal({ visible, onClose, initialSats, initialAssetV
   const rate = rates[fiatCode] ?? rates.usd;
   const fiatSymbol = fiatSymbolFor(fiatCode);
   const sending = !requestOptions;
+  const effectiveExpiry = rgbReceiveExpiry(expirySeconds, rgbProxyV1);
+  const shortExpiry = rgbShortExpiryPreset(rgbProxyV1);
   const tokenValue = (sats: number) => bitcoinUnit === 'sats' ? String(sats) : (sats / 1e8).toFixed(8);
   useEffect(() => {
     if (!visible) return;
@@ -88,7 +93,7 @@ export function AmountEditorModal({ visible, onClose, initialSats, initialAssetV
     if (!valid) return;
     feedback.select();
     if (asset && onConfirmAssetUnits) onConfirmAssetUnits(units);
-    else onConfirm(empty ? 0 : sats, requestOptions ? { expirySeconds, showCountdown, note: note.trim() } : undefined);
+    else onConfirm(empty ? 0 : sats, requestOptions ? { expirySeconds: effectiveExpiry, showCountdown, note: note.trim() } : undefined);
     close();
   };
   const maxLabel = asset?.maxUnits !== undefined ? String(asset.maxUnits).replace(/\.?0+$/, '') : '';
@@ -168,10 +173,10 @@ export function AmountEditorModal({ visible, onClose, initialSats, initialAssetV
         <Text style={muted}>Shown to the payer in the Lightning invoice.</Text>
         <Text style={label}>Invoice expiry</Text>
         <View style={{ flexDirection: 'row', gap: t.spacing[2], flexWrap: 'wrap' }}>
-          {([[600, '10 min'], [3600, '1 hour'], [86400, '24 hours']] as const).map(([seconds, title]) => <TouchableOpacity key={seconds}
-            accessibilityRole="radio" accessibilityLabel={`Expire after ${title}`} accessibilityState={{ checked: expirySeconds === seconds }} onPress={() => setExpirySeconds(seconds)}
-            style={{ minHeight: 44, paddingHorizontal: t.spacing[4], justifyContent: 'center', borderRadius: t.borderRadius.md, backgroundColor: expirySeconds === seconds ? t.colors.primary[500] : t.colors.surface.secondary }}>
-            <Text style={{ color: expirySeconds === seconds ? t.colors.text.inverse : t.colors.text.primary }}>{title}</Text>
+          {([[shortExpiry.seconds, shortExpiry.label], [3600, '1 hour'], [86400, '24 hours']] as const).map(([seconds, title]) => <TouchableOpacity key={seconds}
+            accessibilityRole="radio" accessibilityLabel={`Expire after ${title}`} accessibilityState={{ checked: effectiveExpiry === seconds }} onPress={() => setExpirySeconds(seconds)}
+            style={{ minHeight: 44, paddingHorizontal: t.spacing[4], justifyContent: 'center', borderRadius: t.borderRadius.md, backgroundColor: effectiveExpiry === seconds ? t.colors.primary[500] : t.colors.surface.secondary }}>
+            <Text style={{ color: effectiveExpiry === seconds ? t.colors.text.inverse : t.colors.text.primary }}>{title}</Text>
           </TouchableOpacity>)}
         </View>
         <Text style={muted}>Applies to new invoices. The wallet may limit the duration; addresses do not expire.</Text>

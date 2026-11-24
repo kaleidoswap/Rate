@@ -105,6 +105,24 @@ test('Connect goes straight to the backup check, then saves mainnet and connects
   expect(mockReconcile).toHaveBeenLastCalledWith();
 });
 
+test('the TestFlight settings guide to an explicit Mutinynet opt-in', async () => {
+  const features = require('../services/features') as typeof import('../services/features');
+  const channel = jest.replaceProperty(features, 'CHANNEL', 'beta');
+  try {
+    const screen = render(<RgbOnDeviceSettings walletId={7} />);
+    await act(async () => {});
+    expect(screen.getByText('Choose Mutinynet to test BFA assets.')).toBeTruthy();
+    expect(mockSave).not.toHaveBeenCalled();
+    fireEvent.press(screen.getByText('Mutinynet'));
+    fireEvent.press(screen.getByText('Connect'));
+    await act(async () => {});
+    expect(mockFindBackup).toHaveBeenCalledWith('seed words', 'mutinynet');
+    expect(mockCalls).toEqual(['save:mutinynet', 'reconcile']);
+  } finally {
+    channel.restore();
+  }
+});
+
 test('before it starts, the network is picked; Mutinynet is saved on connect', async () => {
   const screen = render(<RgbOnDeviceSettings walletId={7} />);
   await act(async () => {});

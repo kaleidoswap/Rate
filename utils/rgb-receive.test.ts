@@ -1,6 +1,6 @@
 import {
   ANY_RGB_ASSET_ID, DEFAULT_RGB_RECEIVE_OPTIONS, NO_RGB_RECEIVE_SUPPORT, isDefaultRgbOptions, listRgbUtxos, normalizeUnspents,
-  parseRgbContractId, rgbInvoiceParams, rgbReceiveErrorMessage, rgbReceiveSupport, utxoCounts, classifyUtxo, summarizeUtxos,
+  parseRgbContractId, rgbInvoiceParams, rgbReceiveErrorMessage, rgbReceiveSupport, rgbReceiveUsesProxyV1, utxoCounts, classifyUtxo, summarizeUtxos,
 } from './rgb-receive';
 
 const onDevice = { protocolName: 'RGB_L1', listUnspents: jest.fn(), createRgbUtxos: jest.fn() };
@@ -26,6 +26,15 @@ describe('rgbReceiveSupport', () => {
   it('no adapter, no options', () => {
     expect(rgbReceiveSupport(null)).toEqual(NO_RGB_RECEIVE_SUPPORT);
   });
+  it('uses proxy v1 only for an active native bridge with BFA support', () => {
+    const nativeSupportsBfa = jest.fn(() => true);
+    expect(rgbReceiveUsesProxyV1(nwcNode, nativeSupportsBfa)).toBe(false);
+    expect(rgbReceiveUsesProxyV1(null, nativeSupportsBfa)).toBe(false);
+    expect(nativeSupportsBfa).not.toHaveBeenCalled();
+    expect(rgbReceiveUsesProxyV1(onDevice, nativeSupportsBfa)).toBe(true);
+    expect(rgbReceiveUsesProxyV1(onDevice, () => false)).toBe(false);
+    expect(rgbReceiveUsesProxyV1(onDevice, () => { throw new Error('Missing native module'); })).toBe(false);
+  });
 });
 
 describe('rgbInvoiceParams', () => {
@@ -47,6 +56,15 @@ describe('rgbInvoiceParams', () => {
       .toEqual({ min_confirmations: 6, duration_seconds: 600, witness: false });
     expect(rgbInvoiceParams({ assetId: ANY_RGB_ASSET_ID, expirySeconds: 3600, options }))
       .toEqual({ min_confirmations: 1, duration_seconds: 3600 });
+  });
+  it('raises both remembered and explicit short proxy v1 expiries to a usable duration', () => {
+    const request = { assetId: ANY_RGB_ASSET_ID, expirySeconds: 600, support: ALL };
+    const options = { kind: 'blinded' as const, durationSeconds: 600, minConfirmations: 3 };
+    expect(rgbInvoiceParams({ ...request, proxyV1: true })).toMatchObject({ duration_seconds: 1800 });
+    expect(rgbInvoiceParams({ ...request, options, proxyV1: true })).toEqual({
+      duration_seconds: 1800, min_confirmations: 3, witness: false,
+    });
+    expect(rgbInvoiceParams({ ...request, options })).toMatchObject({ duration_seconds: 600 });
   });
   it('knows the default options', () => {
     expect(isDefaultRgbOptions(DEFAULT_RGB_RECEIVE_OPTIONS)).toBe(true);

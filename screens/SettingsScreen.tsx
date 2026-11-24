@@ -1,7 +1,7 @@
 import { useAppLanguage } from '../localization/useAppLanguage';
 import { AccountSettings } from '../components/AccountSettings';
 import { BARK_ENABLED } from '../services/protocols/bark';
-import { loadRgbL1Network } from '../services/protocols/rgbL1';
+import { loadRgbL1Network, RGB_L1_ENABLED } from '../services/protocols/rgbL1';
 import { RgbAccountSettings, RGB_STATUS } from '../components/RgbAccountSettings';
 import { RgbWalletTools } from '../components/rgb/RgbWalletTools';
 import { rgbNetworkLabel } from '../services/protocols/rgbAccount';
@@ -325,7 +325,10 @@ export default function SettingsScreen({ navigation }: Props) {
   // either its node is paired or RGB on this phone is on.
   const [accountEnabled, setAccountEnabledState] = useState<Partial<Record<SettingsAccount, boolean>>>({});
   const [protocolErrors, setProtocolErrors] = useState<Partial<Record<SettingsAccount, string>>>({});
-  const showRgbDataBackup = feature.rgbOnDevice || !!protoNetworks.rgbL1
+  // TestFlight users can opt in here. The held onboarding feature keeps their
+  // default wallet Spark-only and leaves any saved RGB selection in place.
+  const allowNewPhoneSetup = feature.rgbOnDevice || (CHANNEL === 'beta' && RGB_L1_ENABLED);
+  const showRgbDataBackup = allowNewPhoneSetup || !!protoNetworks.rgbL1
     || !!protocolManager.getAdapterIfAvailable('RGB_L1')?.isConnected();
   const refreshProtocolStatus = useCallback(() => {
     setProtocolStatus({
@@ -904,7 +907,7 @@ export default function SettingsScreen({ navigation }: Props) {
 
         {account === 'RGB' && activeWallet?.id != null && (
           <RgbAccountSettings walletId={activeWallet.id}
-            allowNewPhoneSetup={feature.rgbOnDevice}
+            allowNewPhoneSetup={allowNewPhoneSetup}
             node={{ connected: rgbNodeConnected(), alias: selectedNwcConnection?.alias, network: selectedNwcConnection?.network ?? protoNetworks.rln }}
             onOpenNode={() => feature.rgbNode || (nostrState.nwcConnections ?? []).length > 0
               ? navigation.navigate('RgbNode')
@@ -933,7 +936,7 @@ export default function SettingsScreen({ navigation }: Props) {
           {([...WALLET_PROTOCOLS, ...(BARK_ENABLED ? ['BARK' as const] : [])] as SettingsAccount[]).filter(proto =>
             // Never hide money: an account this wallet already uses stays, whatever its feature state.
             proto === 'SPARK' || accountEnabled[proto] === true || protocolStatus[proto]
-            || (proto === 'ARKADE' ? feature.arkade : proto === 'BARK' ? feature.bark : feature.rgbOnDevice || feature.rgbNode)).map((proto, idx) => {
+            || (proto === 'ARKADE' ? feature.arkade : proto === 'BARK' ? feature.bark : allowNewPhoneSetup || feature.rgbNode)).map((proto, idx) => {
             const connected = protocolStatus[proto];
             const connecting = protocolConnecting[proto] ?? false;
             const error = protocolErrors[proto];

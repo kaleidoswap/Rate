@@ -6,8 +6,8 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.withContext
-import org.rgbtools.Online
-import org.rgbtools.Wallet
+import com.utexo.Online
+import com.utexo.Wallet
 
 class WalletNotFound(handle: Int) : IllegalStateException("No open RGB wallet with handle $handle")
 class NotOnline : IllegalStateException("The RGB wallet is not online: call goOnline first")

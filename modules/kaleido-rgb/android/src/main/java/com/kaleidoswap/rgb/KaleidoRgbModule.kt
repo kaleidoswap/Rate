@@ -9,18 +9,19 @@ import java.io.File
 import java.util.concurrent.Executors
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.withContext
-import org.rgbtools.DatabaseType
-import org.rgbtools.Invoice
-import org.rgbtools.OnlineOptions
-import org.rgbtools.RgbLibException
-import org.rgbtools.SinglesigKeys
-import org.rgbtools.Wallet
-import org.rgbtools.WalletData
+import com.utexo.AssetFilter
+import com.utexo.DatabaseType
+import com.utexo.Invoice
+import com.utexo.RgbLibException
+import com.utexo.SinglesigKeys
+import com.utexo.TransferScope
+import com.utexo.Wallet
+import com.utexo.WalletData
 
-const val RGB_LIB_VERSION = "0.3.0-beta.7"
+const val RGB_LIB_VERSION = "0.3.0-beta.7-upstream-dev-bfa.8-bfa"
 
 /**
- * rgb-lib (RGB-Tools' official Kotlin bindings) for the app. Every call takes a
+ * rgb-lib BFA (UTEXO's Kotlin bindings) for the app. Every call takes a
  * plain object of arguments; wallet calls take the handle `openWallet` returned
  * first and run on that wallet's own thread (see Session).
  */
@@ -39,14 +40,14 @@ class KaleidoRgbModule : Module() {
     AsyncFunction("generateKeys") Coroutine { args: Map<String, Any?> ->
       guarded {
         val a = Args(args)
-        Mappers.toJs(org.rgbtools.generateKeys(Mappers.network(a.string("network")), Mappers.witnessVersion(a.stringOrNull("witnessVersion"))))
+        Mappers.toJs(com.utexo.generateKeys(Mappers.network(a.string("network")), Mappers.witnessVersion(a.stringOrNull("witnessVersion"))))
       }
     }
 
     AsyncFunction("restoreKeys") Coroutine { args: Map<String, Any?> ->
       guarded {
         val a = Args(args)
-        Mappers.toJs(org.rgbtools.restoreKeys(Mappers.network(a.string("network")), a.string("mnemonic"), Mappers.witnessVersion(a.stringOrNull("witnessVersion"))))
+        Mappers.toJs(com.utexo.restoreKeys(Mappers.network(a.string("network")), a.string("mnemonic"), Mappers.witnessVersion(a.stringOrNull("witnessVersion"))))
       }
     }
 
@@ -80,7 +81,7 @@ class KaleidoRgbModule : Module() {
       withContext(files) {
         guarded {
           val a = Args(args)
-          org.rgbtools.restoreBackup(a.string("backupPath"), a.string("password"), DataDirs.dataDir(base(), a.stringOrNull("subdir")).absolutePath)
+          com.utexo.restoreBackup(a.string("backupPath"), a.string("password"), DataDirs.dataDir(base(), a.stringOrNull("subdir")).absolutePath)
         }
       }
     }
@@ -108,6 +109,7 @@ class KaleidoRgbModule : Module() {
             databaseType = DatabaseType.SQLITE,
             maxAllocationsPerUtxo = a.uInt("maxAllocationsPerUtxo"),
             supportedSchemas = a.strings("supportedSchemas").map { Mappers.schema(it) },
+            allowRecklessSchemas = false,
           )
           sessions.add(Wallet(data, keys), walletKey)
         }
@@ -128,7 +130,7 @@ class KaleidoRgbModule : Module() {
     }
 
     walletOp("goOnline") { s, a ->
-      s.online = s.wallet.goOnline(OnlineOptions(a.string("indexerUrl"), a.bool("skipConsistencyCheck", false), a.uInt("vanillaSyncLookback")))
+      s.online = s.wallet.goOnline(Mappers.onlineOptions(a))
       null
     }
     walletOp("getBtcBalance") { s, a -> Mappers.toJs(s.wallet.getBtcBalance(s.online, a.bool("skipSync", false))) }
@@ -143,20 +145,34 @@ class KaleidoRgbModule : Module() {
     walletOp("getMediaDir") { s, _ -> s.wallet.getMediaDir() }
     walletOp("getWalletDir") { s, _ -> s.wallet.getWalletDir() }
     walletOp("blindReceive") { s, a ->
-      Mappers.toJs(s.wallet.blindReceive(a.stringOrNull("assetId"), Mappers.assignment(a.obj("assignment")), a.uLong("expirationTimestamp"), a.strings("transportEndpoints"), a.uByte("minConfirmations")))
+      Mappers.toJs(s.wallet.blindReceive(
+        s.online, a.stringOrNull("assetId"), Mappers.assignment(a.obj("assignment")),
+        a.uLong("expirationTimestamp"), a.strings("transportEndpoints"), a.uByte("minConfirmations"),
+        Mappers.encryption(a.stringOrNull("encryption")),
+      ))
     }
     walletOp("witnessReceive") { s, a ->
-      Mappers.toJs(s.wallet.witnessReceive(a.stringOrNull("assetId"), Mappers.assignment(a.obj("assignment")), a.uLong("expirationTimestamp"), a.strings("transportEndpoints"), a.uByte("minConfirmations")))
+      Mappers.toJs(s.wallet.witnessReceive(
+        s.online, a.stringOrNull("assetId"), Mappers.assignment(a.obj("assignment")),
+        a.uLong("expirationTimestamp"), a.strings("transportEndpoints"), a.uByte("minConfirmations"),
+        Mappers.encryption(a.stringOrNull("encryption")),
+      ))
     }
     walletOp("send") { s, a ->
       val map = a.raw("recipientMap")
       val recipients = map.keys.associateWith { assetId -> Args(map).objects(assetId).map { Mappers.recipient(it) } }
-      Mappers.toJs(s.wallet.send(s.requireOnline(), recipients, a.bool("donation", false), a.uLong("feeRate"), a.uByte("minConfirmations"), a.uLong("expirationTimestamp")))
+      Mappers.toJs(s.wallet.send(
+        s.requireOnline(), recipients, a.bool("donation", false), a.uLong("feeRate"),
+        a.uByte("minConfirmations"), a.uLong("expirationTimestamp"), a.stringOrNull("senderTransportEndpoint"),
+      ))
     }
     walletOp("sendBtc") { s, a -> s.wallet.sendBtc(s.requireOnline(), a.string("address"), a.uLong("amount"), a.uLong("feeRate"), a.bool("skipSync", false)) }
     walletOp("drainTo") { s, a -> s.wallet.drainTo(s.requireOnline(), a.string("address"), a.uLong("feeRate")) }
     walletOp("listTransactions") { s, a -> s.wallet.listTransactions(s.online, a.bool("skipSync", false)).map { Mappers.toJs(it) } }
-    walletOp("listTransfers") { s, a -> s.wallet.listTransfers(a.stringOrNull("assetId")).map { Mappers.toJs(it) } }
+    walletOp("listTransfers") { s, a ->
+      val filter = a.stringOrNull("assetId")?.let { AssetFilter.Id(it) } ?: AssetFilter.AnyOrNone
+      s.wallet.listTransfers(filter, TransferScope.All).map { Mappers.toJs(it) }
+    }
     walletOp("listUnspents") { s, a -> s.wallet.listUnspents(s.online, a.bool("settledOnly", false), a.bool("skipSync", false)).map { Mappers.toJs(it) } }
     walletOp("createUtxos") { s, a ->
       val num = if (a.has("num")) a.uByte("num") else null
@@ -178,13 +194,27 @@ class KaleidoRgbModule : Module() {
       Mappers.toJs(s.wallet.issueAssetUda(a.string("ticker"), a.string("name"), a.stringOrNull("details"), a.uByte("precision"), a.stringOrNull("mediaFilePath"), a.strings("attachmentsFilePaths")))
     }
     walletOp("issueAssetIfa") { s, a ->
-      Mappers.toJs(s.wallet.issueAssetIfa(a.string("ticker"), a.string("name"), a.uByte("precision"), a.uLongs("amounts"), a.uLongs("inflationAmounts"), a.stringOrNull("rejectListUrl")))
+      Mappers.toJs(s.wallet.issueAssetIfa(
+        a.string("ticker"), a.string("name"), a.uByte("precision"), a.uLongs("amounts"),
+        a.uLongs("inflationAmounts"), a.stringOrNull("rejectListUrl"),
+        linkRight = false, linkedFromContract = null, skipContractChecks = false,
+      ))
+    }
+    walletOp("issueAssetBfa") { s, a ->
+      Mappers.toJs(s.wallet.issueAssetBfa(
+        a.string("ticker"), a.string("name"), a.uByte("precision"), a.uByte("mintRights"),
+        a.uLong("chainId"), a.string("contractAddress"), a.stringOrNull("rejectListAddress"),
+        a.bool("linkRight", false), a.stringOrNull("linkedFromContract"), skipContractChecks = false,
+      ))
     }
     walletOp("inflate") { s, a ->
       Mappers.toJs(s.wallet.inflate(s.requireOnline(), a.string("assetId"), a.uLongs("inflationAmounts"), a.uLong("feeRate"), a.uByte("minConfirmations")))
     }
     walletOp("burn") { s, a ->
-      Mappers.toJs(s.wallet.burn(s.requireOnline(), a.string("assetId"), a.uLong("amount"), a.uLong("feeRate"), a.uByte("minConfirmations")))
+      Mappers.toJs(s.wallet.burn(
+        s.requireOnline(), a.string("assetId"), a.uLong("amount"), a.stringOrNull("burnReason"),
+        a.uLong("feeRate"), a.uByte("minConfirmations"),
+      ))
     }
     walletOp("backup") { s, a -> s.wallet.backup(a.string("backupPath"), a.string("password")); null }
     walletOp("backupInfo") { s, _ -> s.wallet.backupInfo() }

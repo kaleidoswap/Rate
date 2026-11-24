@@ -3,7 +3,7 @@ const mockFeeRates = jest.fn(async () => ({ slow: 1, normal: 2, fast: 5, live: f
 jest.mock('../rgbWallet', () => ({ rgbFeeRates: () => mockFeeRates(), DEFAULT_RGB_FEE_RATES: { slow: 1, normal: 2, fast: 5, live: false } }));
 import { connectRgbL1PayAccounts, networkFeeRates, rgbL1FeeOptions, rgbL1PayAdapter, rgbL1TransferStatus, setRgbL1FeeSpeed } from './rgbL1Pay';
 import { connectRgbPayAccounts, currentRgbPayAdapter, registerRgbAssetPayment, rgbRequestAsset } from './rgbPay';
-import { checkPaymentStatus, executePaymentOffer, previewTarget, quotePaymentOffers } from './index';
+import { checkPaymentStatus, executePaymentOffer, previewInput, previewTarget, quotePaymentOffers } from './index';
 
 const USDT = { id: 'rgb:usdt', ticker: 'USDT', precision: 6 };
 
@@ -39,6 +39,31 @@ test('pays an RGB invoice from the phone wallet: decoded on the device, sent thr
     unregister();
   } finally { disconnect(); }
   expect(currentRgbPayAdapter()).toBeNull();
+});
+
+test('quotes an encrypted RGB invoice decoded as custom Signet from the Mutinynet account', async () => {
+  const wallet = l1();
+  const invoice = 'rgb:sbc:wvout:encrypted-fixture';
+  wallet.account.decodeRgbInvoice.mockImplementation(async () => ({
+    asset_id: USDT.id,
+    assignment: { type: 'Fungible', value: 2_500_000 },
+    network: 'SIGNET_CUSTOM',
+    encryption: 'REQUIRED',
+    expiration_timestamp: Math.floor(Date.now() / 1000) + 1800,
+  }));
+  const disconnect = connectRgbL1PayAccounts(wallet, 'mutinynet');
+  const unregister = registerRgbAssetPayment(USDT);
+  try {
+    const asset = await rgbRequestAsset(currentRgbPayAdapter()!, invoice);
+    const preview = await previewInput(invoice, undefined, 'proxy-v1', { asset });
+    expect(preview.code).toMatchObject({ kind: 'rgb', rgbInvoice: invoice });
+    const offer = (await quotePaymentOffers(preview)).find(o => o.route.sourceId === 'rgb-asset');
+    expect(offer?.quote).toBeDefined();
+    expect(offer?.unavailable).toBeUndefined();
+  } finally {
+    unregister();
+    disconnect();
+  }
 });
 
 test('no Lightning from the phone wallet; on-chain bitcoin goes through rgb-lib', async () => {

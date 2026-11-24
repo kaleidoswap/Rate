@@ -41,6 +41,16 @@ interface RgbAdapterLike {
   allowPrivilegedOps?: boolean;
 }
 
+/** Only the upgraded native RGB wallet creates invoices for a v1 proxy. */
+export function rgbReceiveUsesProxyV1(adapter: unknown, nativeSupportsBfa: () => boolean): boolean {
+  if ((adapter as RgbAdapterLike | undefined)?.protocolName !== 'RGB_L1') return false;
+  try {
+    return nativeSupportsBfa();
+  } catch {
+    return false;
+  }
+}
+
 /**
  * What the RGB account's adapter accepts. RGB on this phone takes everything. The
  * node through the engine takes the invoice options and lists UTXOs, but creates
@@ -67,16 +77,18 @@ export function rgbReceiveSupport(adapter: unknown): RgbReceiveSupport {
 }
 
 /** The createRgbInvoice params for an on-chain RGB receive. Defaults match the invoice Receive always made. */
-export function rgbInvoiceParams({ assetId, expirySeconds, options = DEFAULT_RGB_RECEIVE_OPTIONS, support = NO_RGB_RECEIVE_SUPPORT }: {
+export function rgbInvoiceParams({ assetId, expirySeconds, options = DEFAULT_RGB_RECEIVE_OPTIONS, support = NO_RGB_RECEIVE_SUPPORT, proxyV1 = false }: {
   assetId: string;
   expirySeconds: number;
   options?: RgbReceiveOptions;
   support?: RgbReceiveSupport;
+  proxyV1?: boolean;
 }): Record<string, unknown> {
+  const durationSeconds = support.expiry && options.durationSeconds ? options.durationSeconds : expirySeconds;
   return {
     ...(assetId === ANY_RGB_ASSET_ID ? {} : { asset_id: assetId }),
     min_confirmations: support.minConfirmations ? options.minConfirmations : 1,
-    duration_seconds: support.expiry && options.durationSeconds ? options.durationSeconds : expirySeconds,
+    duration_seconds: rgbReceiveExpiry(durationSeconds, proxyV1),
     ...(support.invoiceKind && options.kind === 'blinded' ? { witness: false } : {}),
   };
 }
@@ -177,6 +189,7 @@ export async function listRgbUtxos(adapter: unknown): Promise<RgbUtxo[]> {
 
 /** Plain wording for the errors an RGB receive can fail with. */
 export function rgbReceiveErrorMessage(message: string, { advanced, onDevice }: { advanced: boolean; onDevice: boolean }): string {
+  if (message.includes(RGB_PROXY_V1_RECEIVE_DURATION_ERROR)) return RGB_PROXY_V1_RECEIVE_DURATION_ERROR;
   if (/No uncolored UTXOs|InsufficientAllocationSlots|NoAvailableUtxos/i.test(message)) {
     const where = onDevice ? 'Your RGB wallet' : 'Your RGB Lightning node';
     return advanced
@@ -191,11 +204,25 @@ export function rgbReceiveErrorMessage(message: string, { advanced, onDevice }: 
   return rgbWalletErrorMessage(message, 'receive');
 }
 
-export const RGB_EXPIRY_PRESETS: Array<{ label: string; seconds: number }> = [
-  { label: '10 min', seconds: 600 },
-  { label: '1 hour', seconds: 3600 },
-  { label: '1 day', seconds: 86_400 },
-  { label: '7 days', seconds: 604_800 },
-];
+export const RGB_PROXY_V1_RECEIVE_DURATION_ERROR = 'Choose an RGB invoice expiry of 30 minutes or longer.';
+const PROXY_V1_SHORT_EXPIRY = { label: '30 min', seconds: 1800 };
+const STANDARD_SHORT_EXPIRY = { label: '10 min', seconds: 600 };
+
+export function rgbShortExpiryPreset(proxyV1: boolean) {
+  return proxyV1 ? PROXY_V1_SHORT_EXPIRY : STANDARD_SHORT_EXPIRY;
+}
+
+export function rgbReceiveExpiry(seconds: number, proxyV1: boolean): number {
+  return proxyV1 ? Math.max(seconds, PROXY_V1_SHORT_EXPIRY.seconds) : seconds;
+}
+
+export function rgbExpiryPresets(proxyV1: boolean) {
+  return [
+    rgbShortExpiryPreset(proxyV1),
+    { label: '1 hour', seconds: 3600 },
+    { label: '1 day', seconds: 86_400 },
+    { label: '7 days', seconds: 604_800 },
+  ];
+}
 
 export const RGB_CONFIRMATION_PRESETS = [1, 3, 6] as const;
