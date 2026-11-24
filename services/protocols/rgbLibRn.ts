@@ -13,6 +13,7 @@
  * for this wallet (see `rgbLibSubdir`), else rgb-lib's original folder.
  */
 import type * as RgbLib from '../../modules/kaleido-rgb'
+import { RGB_PROXY_V1_RECEIVE_DURATION_ERROR } from '../../utils/rgb-receive'
 
 type RgbModule = typeof RgbLib
 type LibNetwork = RgbLib.BitcoinNetwork
@@ -229,13 +230,18 @@ export class RgbLibRnAccount {
     minConfirmations?: number; min_confirmations?: number
   } = {}) {
     const assetId = params.assetId ?? params.asset_id ?? null
+    const duration = params.durationSeconds ?? params.duration_seconds ?? null
+    if (this.supportsBfa && duration !== null &&
+      (!Number.isSafeInteger(duration) || duration <= PROXY_CLOCK_SKEW_SECONDS + INVOICE_EXPIRATION_MARGIN_SECONDS)) {
+      throw invalidInvoice(RGB_PROXY_V1_RECEIVE_DURATION_ERROR)
+    }
     const assignment: RgbLib.Assignment = params.amount && params.amount > 0
       ? { type: 'FUNGIBLE', amount: params.amount }
       : { type: 'ANY' }
     const receive = params.witness === false ? this.wallet.blindReceive.bind(this.wallet) : this.wallet.witnessReceive.bind(this.wallet)
     const transportEndpoints = [this.transportEndpoint]
     const receiveArgs = [
-      assetId, assignment, params.durationSeconds ?? params.duration_seconds ?? null,
+      assetId, assignment, duration,
       transportEndpoints, params.minConfirmations ?? params.min_confirmations ?? 1,
     ] as const
     const data = await this.serial(() => this.supportsBfa ? receive(...receiveArgs, 'REQUIRED') : receive(...receiveArgs))

@@ -8,7 +8,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: bfa-native-test
+  group: rate-rgb-bfa-native-test
   cancel-in-progress: true
 
 env:
@@ -128,11 +128,17 @@ jobs:
           path: ${{ runner.temp }}/rate-bfa8-simulator.zip
           if-no-files-found: error
           retention-days: 14
-      - name: Verify BFA wallet reopen and encrypted restore offline
+      - name: Verify WASM invoice, BFA wallet reopen and encrypted restore offline
         timeout-minutes: 10
         run: |
           simulator="$(xcrun simctl list devices available -j | jq -er \
             '[.devices[][] | select(.isAvailable and (.name | startswith("iPhone"))) | .udid] | last')"
           xcrun simctl boot "$simulator" || true
           xcrun simctl bootstatus "$simulator" -b
+          echo "SIMULATOR_UDID=$simulator" >> "$GITHUB_ENV"
           SIMULATOR_UDID="$simulator" bash scripts/bfa-e2e/run-ios.sh
+      - name: Launch the isolated simulator build
+        run: |
+          app="$RUNNER_TEMP/rate-bfa-ios/Build/Products/Release-iphonesimulator/KaleidoSwap.app"
+          xcrun simctl install "$SIMULATOR_UDID" "$app"
+          xcrun simctl launch "$SIMULATOR_UDID" com.kaleidoswap.wallet.bfatest

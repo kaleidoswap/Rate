@@ -6,6 +6,8 @@ import { Sheet } from './Sheet';
 import { AmountPad, groupComposedAmount } from './AmountPad';
 import { OptionSheet } from './OptionSheet';
 import { receiveAmountSats } from '../utils/receive-request';
+import { RGB_SHORT_EXPIRY_PRESET } from '../utils/rgb-receive';
+import { BFA_TEST_BUILD } from '../services/buildVariant';
 import { feedback } from '../utils/feedback';
 
 /** The symbol for a fiat code, shown next to amounts and in the currency picker. */
@@ -70,7 +72,8 @@ export function AmountEditorModal({ visible, onClose, initialSats, initialAssetV
     if (!visible) return;
     setValue(asset ? (initialAssetValue ?? '') : initialSats ? tokenValue(initialSats) : '');
     setFiat(false);
-    setExpirySeconds(requestOptions?.expirySeconds ?? 3600);
+    const duration = requestOptions?.expirySeconds ?? 3600;
+    setExpirySeconds(BFA_TEST_BUILD ? Math.max(duration, RGB_SHORT_EXPIRY_PRESET.seconds) : duration);
     setShowCountdown(requestOptions?.showCountdown ?? false);
     setNote(requestOptions?.note ?? '');
   }, [visible]);
@@ -168,7 +171,7 @@ export function AmountEditorModal({ visible, onClose, initialSats, initialAssetV
         <Text style={muted}>Shown to the payer in the Lightning invoice.</Text>
         <Text style={label}>Invoice expiry</Text>
         <View style={{ flexDirection: 'row', gap: t.spacing[2], flexWrap: 'wrap' }}>
-          {([[600, '10 min'], [3600, '1 hour'], [86400, '24 hours']] as const).map(([seconds, title]) => <TouchableOpacity key={seconds}
+          {([[RGB_SHORT_EXPIRY_PRESET.seconds, RGB_SHORT_EXPIRY_PRESET.label], [3600, '1 hour'], [86400, '24 hours']] as const).map(([seconds, title]) => <TouchableOpacity key={seconds}
             accessibilityRole="radio" accessibilityLabel={`Expire after ${title}`} accessibilityState={{ checked: expirySeconds === seconds }} onPress={() => setExpirySeconds(seconds)}
             style={{ minHeight: 44, paddingHorizontal: t.spacing[4], justifyContent: 'center', borderRadius: t.borderRadius.md, backgroundColor: expirySeconds === seconds ? t.colors.primary[500] : t.colors.surface.secondary }}>
             <Text style={{ color: expirySeconds === seconds ? t.colors.text.inverse : t.colors.text.primary }}>{title}</Text>

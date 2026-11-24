@@ -3,6 +3,7 @@
  * they map to, and its UTXOs. Pure apart from the adapter calls in the UTXO helpers.
  */
 import { rgbWalletErrorMessage } from './rgb-wallet';
+import { BFA_TEST_BUILD } from '../services/buildVariant';
 
 /** Sentinel asset id for an invoice that accepts any RGB asset (no asset id). */
 export const ANY_RGB_ASSET_ID = 'RGB_NEW';
@@ -177,6 +178,7 @@ export async function listRgbUtxos(adapter: unknown): Promise<RgbUtxo[]> {
 
 /** Plain wording for the errors an RGB receive can fail with. */
 export function rgbReceiveErrorMessage(message: string, { advanced, onDevice }: { advanced: boolean; onDevice: boolean }): string {
+  if (message.includes(RGB_PROXY_V1_RECEIVE_DURATION_ERROR)) return RGB_PROXY_V1_RECEIVE_DURATION_ERROR;
   if (/No uncolored UTXOs|InsufficientAllocationSlots|NoAvailableUtxos/i.test(message)) {
     const where = onDevice ? 'Your RGB wallet' : 'Your RGB Lightning node';
     return advanced
@@ -191,8 +193,11 @@ export function rgbReceiveErrorMessage(message: string, { advanced, onDevice }: 
   return rgbWalletErrorMessage(message, 'receive');
 }
 
+export const RGB_PROXY_V1_RECEIVE_DURATION_ERROR = 'Choose an RGB invoice expiry of 30 minutes or longer.';
+export const RGB_SHORT_EXPIRY_PRESET = BFA_TEST_BUILD ? { label: '30 min', seconds: 1800 } : { label: '10 min', seconds: 600 };
+
 export const RGB_EXPIRY_PRESETS: Array<{ label: string; seconds: number }> = [
-  { label: '10 min', seconds: 600 },
+  RGB_SHORT_EXPIRY_PRESET,
   { label: '1 hour', seconds: 3600 },
   { label: '1 day', seconds: 86_400 },
   { label: '7 days', seconds: 604_800 },

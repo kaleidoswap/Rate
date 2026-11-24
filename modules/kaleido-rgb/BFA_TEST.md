@@ -24,8 +24,13 @@ commit `cafe66e49d58038a69dd05f8065e3fe96a9d1601`.
    balances and check the mobile apps on both platforms.
 4. Reopen each mobile test wallet and compare balances and transfer history.
    Import an encrypted backup from a copy of a legacy Mutinynet wallet into
-   the isolated app and compare network, asset IDs, balances and history
-   against that fixture.
+   the isolated app using **Restore from a backup file**, then compare the
+   network, asset IDs, balances and settled history against that fixture.
+   The proxy migration marks older outgoing transfers still in the
+   `initiated` or `waitingCounterparty` state as failed.
+
+The [iOS simulator probes](../../scripts/bfa-e2e/README.md) cover native
+backup and restore with fresh unfunded wallets.
 
 Record only public transaction IDs, contract IDs and observed states. The
 browser WASM release requires a new browser wallet when moving from beta.3

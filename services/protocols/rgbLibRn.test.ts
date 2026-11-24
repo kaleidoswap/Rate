@@ -112,6 +112,22 @@ test('BFA is available through the engine on test networks and uses encrypted in
   await adapter.disconnect();
 });
 
+test('proxy v1 only creates invoices with enough time left for a sender operation', async () => {
+  const { lib, wallet } = fakeLib();
+  lib.supportsBfa.mockReturnValue(true);
+  const account = await new (createRgbLibRnModule(() => lib as any).WalletManagerRgb)('seed', options).getAccount();
+
+  await expect(account.receiveAsset({ durationSeconds: 600 })).rejects.toMatchObject({ code: 'RGB_INVOICE_INVALID' });
+  await expect(account.receiveAsset({ duration_seconds: 900, witness: false })).rejects.toMatchObject({ code: 'RGB_INVOICE_INVALID' });
+  expect(wallet.witnessReceive).not.toHaveBeenCalled();
+  expect(wallet.blindReceive).not.toHaveBeenCalled();
+
+  await account.receiveAsset({ durationSeconds: 1800 });
+  expect(wallet.witnessReceive).toHaveBeenCalledWith(null, { type: 'ANY' }, 1800, [options.transportEndpoint], 1, 'REQUIRED');
+  await account.receiveAsset({ duration_seconds: 604_800, witness: false });
+  expect(wallet.blindReceive).toHaveBeenCalledWith(null, { type: 'ANY' }, 604_800, [options.transportEndpoint], 1, 'REQUIRED');
+});
+
 test('proxy v1 transfer uses the invoice encryption and a separate sender proxy deadline', async () => {
   const { lib, wallet } = fakeLib();
   lib.supportsBfa.mockReturnValue(true);
