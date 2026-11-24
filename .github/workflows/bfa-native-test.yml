@@ -107,19 +107,29 @@ jobs:
           certificate="$(keytool -exportcert -keystore "$keystore" -alias "$ANDROID_KEY_ALIAS" \
             -storepass:env ANDROID_KEYSTORE_PASSWORD | sha256sum | cut -d' ' -f1)"
           printf 'BFA_PREVIEW_CERTIFICATE_SHA256=%s\n' "$certificate" >> "$GITHUB_ENV"
-      - name: Build release-signed preview APK
+      - name: Build preview APK
         if: ${{ inputs.android_version }}
         working-directory: android
         env:
-          ORG_GRADLE_PROJECT_RELEASE_STORE_FILE: ${{ runner.temp }}/bfa-preview-release.p12
-          ORG_GRADLE_PROJECT_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ORG_GRADLE_PROJECT_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ORG_GRADLE_PROJECT_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           ORG_GRADLE_PROJECT_VERSION_NAME: ${{ inputs.android_version }}
           ORG_GRADLE_PROJECT_VERSION_CODE: ${{ inputs.build_code }}
+        run: ./gradlew :app:assembleBfaTest --no-daemon
+      - name: Sign the preview APK with the release key
+        if: ${{ inputs.android_version }}
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          test -n "$ORG_GRADLE_PROJECT_RELEASE_KEY_PASSWORD"
-          ./gradlew :app:assembleBfaTest --no-daemon
+          set -euo pipefail
+          apks=(android/app/build/outputs/apk/bfaTest/*.apk)
+          test "${#apks[@]}" = 1
+          test -n "$ANDROID_KEY_PASSWORD"
+          apksigner="$(find "$ANDROID_SDK_ROOT/build-tools" -name apksigner -type f | sort -V | tail -n1)"
+          "$apksigner" sign --ks "$RUNNER_TEMP/bfa-preview-release.p12" \
+            --ks-key-alias "$ANDROID_KEY_ALIAS" \
+            --ks-pass env:ANDROID_KEYSTORE_PASSWORD --key-pass env:ANDROID_KEY_PASSWORD \
+            --v4-signing-enabled false --out "$RUNNER_TEMP/rate-bfa8-signed.apk" "${apks[0]}"
       - name: Remove preview signing key
         if: ${{ always() && inputs.android_version }}
         run: rm -f "$RUNNER_TEMP/bfa-preview-release.p12"
@@ -132,6 +142,9 @@ jobs:
           apks=(android/app/build/outputs/apk/bfaTest/*.apk)
           test "${#apks[@]}" = 1
           apk="${apks[0]}"
+          if [[ -n "$PREVIEW_VERSION" ]]; then
+            apk="$RUNNER_TEMP/rate-bfa8-signed.apk"
+          fi
           aapt="$(find "$ANDROID_SDK_ROOT/build-tools" -name aapt -type f | sort -V | tail -n1)"
           badging="$("$aapt" dump badging "$apk" | sed -n '1p')"
           printf '%s\n' "$badging" | grep "^package: name='com.kaleidoswap.wallet.bfatest' "
@@ -139,9 +152,12 @@ jobs:
             printf '%s\n' "$badging" | grep -F "versionName='$PREVIEW_VERSION'"
             printf '%s\n' "$badging" | grep -F "versionCode='$BUILD_CODE'"
             apksigner="$(dirname "$aapt")/apksigner"
-            certificate="$("$apksigner" verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')"
-            test -n "$BFA_PREVIEW_CERTIFICATE_SHA256"
-            test "$certificate" = "$BFA_PREVIEW_CERTIFICATE_SHA256"
+            certificates="$("$apksigner" verify --print-certs "$apk" |
+              awk '/^Signer[[:space:]].* certificate SHA-256 digest:/ { print tolower($NF) }' | sort -u)"
+            if [[ -z "$BFA_PREVIEW_CERTIFICATE_SHA256" || "$certificates" != "$BFA_PREVIEW_CERTIFICATE_SHA256" ]]; then
+              echo "::error::The APK signer does not match the release certificate."
+              exit 1
+            fi
           fi
           python - "$apk" <<'PY'
           import sys, zipfile
