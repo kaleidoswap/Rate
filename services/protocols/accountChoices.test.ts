@@ -1,7 +1,7 @@
 const mockSaveBark = jest.fn(async () => undefined);
 const mockBarkOff = jest.fn(async () => undefined);
 const mockSaveRgb = jest.fn(async () => undefined);
-jest.mock('./bark', () => ({ BARK_ENABLED: true }));
+jest.mock('./bark', () => ({ BARK_ENABLED: true, isBarkNativeAvailable: () => true }));
 jest.mock('./barkPreferences', () => ({ saveBarkNetwork: (...a: any[]) => (mockSaveBark as any)(...a), setBarkOff: (...a: any[]) => (mockBarkOff as any)(...a) }));
 let mockPinned: string | null = null;
 jest.mock('./rgbL1', () => ({ RGB_L1_ENABLED: true, RGB_L1_DEFAULT_NETWORK: 'mainnet', pinnedRgbL1Network: async () => mockPinned, saveRgbL1Network: (...a: any[]) => (mockSaveRgb as any)(...a) }));

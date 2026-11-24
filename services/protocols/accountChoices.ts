@@ -10,7 +10,7 @@
  */
 import type { NetworkConfig } from '../DatabaseService';
 import { ARKADE_ENABLED, buildDefaultNetworkConfig } from './networkConfig';
-import { BARK_ENABLED } from './bark';
+import { BARK_ENABLED, isBarkNativeAvailable } from './bark';
 import { hasBarkPreference, saveBarkNetwork, setBarkOff } from './barkPreferences';
 import { RGB_L1_DEFAULT_NETWORK, RGB_L1_ENABLED, pinnedRgbL1Network, saveRgbL1Network } from './rgbL1';
 import { CHANNEL, isAvailable } from '../features';
@@ -23,14 +23,14 @@ export interface AccountChoice {
   rgbOnDevice: boolean;
 }
 
-const allowNewBarkAtSetup = CHANNEL === 'dev';
+const allowNewBarkAtSetup = CHANNEL === 'dev' && BARK_ENABLED && isBarkNativeAvailable();
 const allowNewRgbOnDevice = isAvailable('rgbOnDevice');
 
 export const SETUP_ACCOUNTS: { key: keyof AccountChoice; name: string; desc: string; icon: string }[] = [
   { key: 'spark', name: 'Spark', desc: 'Instant bitcoin, Lightning and tokens', icon: 'spark' },
   ...(RGB_L1_ENABLED && allowNewRgbOnDevice ? [{ key: 'rgbOnDevice' as const, name: 'RGB on-chain', desc: 'RGB assets on-chain, no node needed · beta', icon: 'rgb' }] : []),
   ...(ARKADE_ENABLED ? [{ key: 'arkade' as const, name: 'Arkade', desc: 'Low-fee bitcoin payments off-chain', icon: 'arkade' }] : []),
-  ...(BARK_ENABLED && allowNewBarkAtSetup ? [{ key: 'bark' as const, name: 'Bark', desc: 'Bitcoin on Second’s Ark network', icon: 'bark' }] : []),
+  ...(allowNewBarkAtSetup ? [{ key: 'bark' as const, name: 'Bark', desc: 'Bitcoin on Second’s Ark network', icon: 'bark' }] : []),
 ];
 
 export const DEFAULT_ACCOUNTS: AccountChoice = {

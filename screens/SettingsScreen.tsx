@@ -398,7 +398,7 @@ export default function SettingsScreen({ navigation }: Props) {
   };
 
   const changeProtocolNetwork = (proto: WalletProtocol, network: ProtocolNetwork, patch: Record<string, unknown> = {}) => {
-    if (protocolConnecting[proto]) return;
+    if (accountChangeInProgress.current || protocolConnecting[proto]) return;
     const id = (activeWallet as any)?.id;
     const type = PROTOCOL_TO_NETWORK_TYPE[proto];
     if (!id) return;
@@ -510,7 +510,7 @@ export default function SettingsScreen({ navigation }: Props) {
   };
 
   const changeBarkNetwork = async (network: 'mainnet' | 'signet') => {
-    if (protocolConnecting.BARK) return;
+    if (accountChangeInProgress.current || protocolConnecting.BARK) return;
     setProtocolConnecting(prev => ({ ...prev, BARK: true }));
     setProtocolErrors(prev => ({ ...prev, BARK: undefined }));
     let saved = false;
@@ -686,7 +686,7 @@ export default function SettingsScreen({ navigation }: Props) {
           <Group>
             {feature.map && <Row icon="map-outline" label="Places to pay" description="Nearby businesses accepting bitcoin" onPress={() => navigation.navigate('Map')} />}
             <Row icon="flask-outline" label="Labs" description="Experimental features you can turn on" onPress={() => openPage('labs')} />
-            <Row icon="construct-outline" label="Advanced" description="Wallet tools" onPress={() => openPage('advanced')} />
+            {(feature.lsp || !RGB_VIA_NWC || __DEV__) && <Row icon="construct-outline" label="Advanced" description="Wallet tools" onPress={() => openPage('advanced')} />}
             <Row icon="information-circle-outline" label="About" value={`v${expoVersion ?? '—'}`} onPress={() => Alert.alert('KaleidoSwap Wallet', `Version ${expoVersion ?? '—'}\nBuild ${expoBuildVersion ?? '—'}\n\nA non-custodial Bitcoin & RGB wallet.`)} />
 
           </Group>

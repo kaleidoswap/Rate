@@ -319,6 +319,29 @@ test('the account list turns Arkade on through the wallet config and synchronize
   expect(screen.getByLabelText('Use Arkade account').props.value).toBe(true);
 });
 
+test('turning Arkade off retains its configured network and drops its active payment routes', async () => {
+  const config = JSON.stringify({ network: 'signet' });
+  mockNetworks = [{ type: 'arkade', enabled: true, config }];
+  const { protocolManager } = require('../services/protocols');
+  protocolManager.getAdapterIfAvailable.mockImplementation((protocol: string) =>
+    protocol === 'ARKADE' ? { isConnected: () => true } : null);
+  protocolManager.disconnect.mockImplementationOnce(() => {
+    protocolManager.getAdapterIfAvailable.mockReturnValue(null);
+  });
+  try {
+    const screen = render(<SettingsScreen navigation={navigation} />);
+    await act(async () => {});
+    fireEvent.press(screen.getByLabelText('Accounts & networks'));
+    await act(async () => { fireEvent(screen.getByLabelText('Use Arkade account'), 'valueChange', false); });
+    expect(mockUpdateNetworkConfig).toHaveBeenCalledWith(1, 'arkade', { enabled: false, config });
+    expect(protocolManager.disconnect).toHaveBeenCalledWith('ARKADE');
+    expect(require('../services/kaleidoPay/connect').syncPayAccounts).toHaveBeenCalled();
+    expect(screen.getByLabelText('Use Arkade account').props.value).toBe(false);
+  } finally {
+    protocolManager.getAdapterIfAvailable.mockReturnValue(null);
+  }
+});
+
 test('turning Bark off from Accounts invokes its disconnect lifecycle and preserves the network display', async () => {
   const { initializeProtocols } = require('../services/protocols');
   initializeProtocols.mockResolvedValueOnce(new Map([['BARK', { success: false, error: 'skipped: Bark is off for this wallet' }]]));

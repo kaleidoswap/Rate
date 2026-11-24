@@ -12,7 +12,7 @@ const mockHasBarkPreference = jest.fn(async () => false);
 const mockSetBarkOff = jest.fn(async () => undefined);
 const mockSaveRgbL1Network = jest.fn(async () => undefined);
 jest.mock('../DatabaseService', () => ({ __esModule: true, default: { getInstance: () => ({}) } }));
-jest.mock('./bark', () => ({ BARK_ENABLED: true }));
+jest.mock('./bark', () => ({ BARK_ENABLED: true, isBarkNativeAvailable: () => true }));
 jest.mock('./barkPreferences', () => ({
   hasBarkPreference: mockHasBarkPreference,
   saveBarkNetwork: jest.fn(),
