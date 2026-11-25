@@ -24,3 +24,17 @@ The [simulator probes](../../scripts/bfa-e2e/README.md) cover cross-version file
 restore, address persistence, and decoding an encrypted v1 invoice generated
 by WASM beta.4. The fixtures are unfunded Regtest wallets. Live BFA transfers
 with an extension build and test asset on Mutinynet remain a separate check.
+
+## RGB backup compatibility
+
+When restoring an encrypted file, Rate verifies its wallet and Bitcoin network
+before moving it into place. Backups from beta.7 and BFA have a wallet
+manifest. To restore an earlier file without this metadata, export a newer
+backup from the original wallet.
+
+The app reads the existing cloud backup until its first successful upload to
+the versioned pointer. Older releases still read and write the legacy pointer.
+If an older device changes the legacy backup after this transition, Rate keeps
+both versions and pauses cloud backup and restore. Export files from the two
+wallets before choosing which copy to continue using. Update Rate on every
+device before using the same RGB wallet across devices.

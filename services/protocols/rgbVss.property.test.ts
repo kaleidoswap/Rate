@@ -31,6 +31,7 @@ function memoryStore(): { store: Map<string, Uint8Array>; client: VssClient } {
     client: {
       async put(items) { for (const item of items) store.set(item.key, item.value); },
       async get(key) { return store.get(key); },
+      async getVersioned(key) { const value = store.get(key); return value && { value, version: 1 }; },
     },
   };
 }
@@ -77,6 +78,7 @@ test('an upload interrupted at any point leaves the published backup readable', 
             for (const item of items) store.set(item.key, item.value);
           },
           async get(key) { return store.get(key); },
+          async getVersioned(key) { const value = store.get(key); return value && { value, version: 1 }; },
         };
         const original = patterned(VSS_CHUNK_SIZE + 1, seed);
         await uploadBackupFile(client, 'backup', original, 1);
@@ -107,6 +109,7 @@ test('a hostile manifest is refused with the guarded error, never parsed as a ba
     fc.asyncProperty(fc.uint8Array({ maxLength: 512 }), async (raw) => {
       const client: VssClient = {
         put: async () => {},
+        getVersioned: async () => undefined,
         get: async (key) => (key.endsWith('/manifest') ? raw : undefined),
       };
       try {

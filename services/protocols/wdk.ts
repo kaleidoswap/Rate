@@ -47,7 +47,9 @@ import {
   isRgbL1NetworkSwitchSupported, isRgbL1Ready, loadRgbL1Network, loadRgbL1Host, markRgbL1Ready, rgbL1Restorer, rgbLibModule, saveRgbL1Network, type RgbL1Network,
 } from './rgbL1'
 import { createRgbLibRnModule } from './rgbLibRn'
+import { rgbOnlineOptions } from './rgbOnlineOptions'
 import { findRgbCloudBackup, restoreRgbFromCloud, runRgbBackup, scheduleRgbBackup, setRgbBackupContext } from './rgbBackup'
+import { RgbBackupLegacyConflict } from './rgbVss'
 import { isRgbNode, rgbOnDeviceStep } from './rgbAccount'
 import { clearRgbConnectionError, describeRgbError, recordRgbConnectionError, recordRgbDiagnostic } from './rgbDiagnostics'
 import { clearStaleRgbRuntimeLock } from './rgbRuntimeLock'
@@ -111,6 +113,7 @@ function registerWdkModuleLoaders(): void {
       onChange: scheduleRgbBackup,
       onEvent: recordRgbDiagnostic,
       clearStaleLock: async (subdir, fingerprint) => clearStaleRgbRuntimeLock(await rgbLibModule().dataDir(subdir), fingerprint),
+      onlineOptions: rgbOnlineOptions,
     }))
   }
 }
@@ -474,7 +477,9 @@ async function connectRgbL1Once(
         restored = await restoreRgbFromCloud({ mnemonic, network, restore: rgbL1Restorer(mnemonic, network) })
         console.log(`[initializeWdkProtocols] RGB_L1 cloud restore: ${restored}`)
       } catch (e: unknown) {
-        const error = `Couldn't restore your RGB backup (${describeRgbError(e)}). Check your connection and try again.`
+        const error = e instanceof RgbBackupLegacyConflict
+          ? e.message
+          : `Couldn't restore your RGB backup (${describeRgbError(e)}). Check your connection and try again.`
         recordRgbConnectionError(network, error)
         results.set('RGB_L1', { success: false, error })
         return

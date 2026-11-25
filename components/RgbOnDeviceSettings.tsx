@@ -18,7 +18,7 @@ import { CHANNEL } from '../services/features';
 import { rgbWalletErrorMessage } from '../utils/rgb-wallet';
 import { protocolManager, reconcileRgbOnDevice, switchRgbOnDeviceNetwork } from '../services/protocols';
 import {
-  loadRgbL1Network, saveRgbL1Network, rgbBackupPassword, isRgbLibNativeAvailable, loadRgbL1Host, saveRgbL1Endpoints,
+  loadRgbL1Network, saveRgbL1Network, isRgbLibNativeAvailable, loadRgbL1Host, saveRgbL1Endpoints,
   lockedRgbL1Network, pinnedRgbL1Network, markRgbL1Ready, rgbL1Host, RGB_L1_DEFAULT_NETWORK, RGB_L1_NETWORKS, RGB_L1_NETWORK_LABEL,
   readyRgbL1Networks, rgbL1Restorer, isRgbL1NetworkSwitchSupported, RGB_L1_UPDATE_TO_SWITCH,
   type RgbL1Network,
@@ -29,8 +29,9 @@ import { Callout } from './Callout';
 import { toFilesystemPath } from '../services/protocols/bark';
 import ToastService from '../services/ToastService';
 import {
-  findRgbCloudBackup, onRgbBackupStatus, restoreRgbFromCloud, restoreRgbFromFile, rgbBackupStatus, runRgbBackup, type RgbBackupStatus,
+  exportRgbBackupFile, findRgbCloudBackup, onRgbBackupStatus, resetRgbBackupLineage, restoreRgbFromCloud, restoreRgbFromFile, rgbBackupStatus, runRgbBackup, type RgbBackupStatus,
 } from '../services/protocols/rgbBackup';
+import { RgbBackupLegacyConflict } from '../services/protocols/rgbVss';
 import { lastRgbConnectionError, onRgbConnectionError, rgbDiagnosticReport, type RgbConnectionError } from '../services/protocols/rgbDiagnostics';
 
 /** The rgb-lib account behind the RGB_L1 adapter, when connected. */
@@ -140,7 +141,7 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
   }, [phase]);
 
   /** Starts RGB on this phone on the chosen network, optionally from a backup first. */
-  const run = async (restore: Restore | null) => {
+  const run = async (restore: Restore | null, startEmpty = false) => {
     setPhase(restore ? 'restoring' : 'connecting');
     setError(null);
     const wasOn = enabled;
@@ -148,20 +149,23 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
     try {
       mnemonic = await activeMnemonic(walletId);
       if (serversEdited) await saveRgbL1Endpoints(mnemonic, network, { indexerUrl: indexer, transportEndpoint: proxy });
+      let restored = false;
       // Save the choice first: it refuses a network other than the one this wallet's data is on.
       await saveRgbL1Network(mnemonic, network);
+      if (startEmpty) await resetRgbBackupLineage(mnemonic, network);
       if (restore?.kind === 'cloud') {
         const result = await restoreRgbFromCloud({ mnemonic, network, restore: rgbL1Restorer(mnemonic, network) });
         if (result === 'no-backup') throw new Error(`There’s no RGB backup of this wallet on ${label}.`);
-        await markRgbL1Ready(mnemonic, network);
+        restored = result === 'restored';
       } else if (restore?.kind === 'file') {
-        await restoreRgbFromFile({ mnemonic, path: toFilesystemPath(restore.uri), restore: rgbL1Restorer(mnemonic, network) });
-        await markRgbL1Ready(mnemonic, network);
+        await restoreRgbFromFile({ mnemonic, network, path: toFilesystemPath(restore.uri), restore: rgbL1Restorer(mnemonic, network) });
+        restored = true;
       }
+      if (restored) await markRgbL1Ready(mnemonic, network);
       // The restore question was asked here: no automatic cloud restore on this start.
       const result = await reconcileRgbOnDevice({ skipCloudRestore: true });
       if (!result?.success) throw new Error(rgbStartError(result?.error));
-      ToastService.getInstance().success(restore ? 'RGB data restored.' : `RGB on this phone is connected on ${label}.`);
+      ToastService.getInstance().success(restored ? 'RGB data restored.' : `RGB on this phone is connected on ${label}.`);
     } catch (e: any) {
       // It didn't start: leave it off as it was. A network that never started stays changeable.
       if (!wasOn && mnemonic) await saveRgbL1Network(mnemonic, null).catch(() => undefined);
@@ -182,7 +186,9 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
       manifest = await findRgbCloudBackup(await activeMnemonic(walletId), network);
     } catch (e: any) {
       setPhase(null);
-      setError(`Couldn’t check for a cloud backup (${messageOf(e, 'no answer')}). Check your connection and try again.`);
+      setError(e instanceof RgbBackupLegacyConflict
+        ? e.message
+        : `Couldn’t check for a cloud backup (${messageOf(e, 'no answer')}). Check your connection and try again.`);
       return;
     }
     setPhase(null);
@@ -196,11 +202,12 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
     const when = new Date(manifest.createdAt).toLocaleString();
     Alert.alert(
       'Cloud backup found',
-      `This wallet has an RGB backup on ${label} from ${when}.`,
+      `This wallet has an RGB backup on ${label} from ${when}.`
+        + (mode === 'connect' ? ' Starting empty keeps the existing cloud backup separate. Export future backups from this new local wallet.' : ''),
       [
         { text: 'Cancel', style: 'cancel' },
         ...(mode === 'connect'
-          ? [{ text: 'Start empty', style: 'destructive' as const, onPress: () => run(null) }]
+          ? [{ text: 'Start empty', style: 'destructive' as const, onPress: () => run(null, true) }]
           : []),
         { text: 'Restore', onPress: () => run({ kind: 'cloud' }) },
       ],
@@ -321,12 +328,9 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
       const mnemonic = await activeMnemonic(walletId);
       const file = new File(Paths.cache, `kaleidoswap-rgb-${new Date().toISOString().slice(0, 10)}.rgbbackup`);
       if (file.exists) file.delete();
-      await account.backup(toFilesystemPath(file.uri), rgbBackupPassword(mnemonic));
-      setBackupNeeded(false);
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(file.uri, { dialogTitle: 'Save your RGB backup', mimeType: 'application/octet-stream' });
-      }
-      ToastService.getInstance().success('RGB backup file created. Keep it with your recovery phrase.');
+      if (!(await Sharing.isAvailableAsync())) throw new Error('Sharing is unavailable on this device.');
+      await exportRgbBackupFile(mnemonic, network, account, toFilesystemPath(file.uri));
+      await Sharing.shareAsync(file.uri, { dialogTitle: 'Save your RGB backup', mimeType: 'application/octet-stream' });
     } catch (e: any) {
       ToastService.getInstance().error(messageOf(e, 'Could not create the RGB backup.'));
     } finally {

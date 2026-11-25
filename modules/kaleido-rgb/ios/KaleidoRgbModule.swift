@@ -154,6 +154,19 @@ public class KaleidoRgbModule: Module {
       }
     }
 
+    AsyncFunction("restoreBackupForWallet") { (args: [String: Any], promise: Promise) in
+      self.onFiles(promise) {
+        let a = Args(args)
+        try DataDirs.restoreBackupForWallet(
+          path: a.string("backupPath"), password: a.string("password"), subdir: a.stringOrNil("subdir"),
+          fingerprint: a.string("masterFingerprint"), network: Mappers.network(a.string("network")),
+          vanillaXpub: a.string("accountXpubVanilla"), coloredXpub: a.string("accountXpubColored"),
+          witnessVersion: Mappers.witnessVersion(a.stringOrNil("witnessVersion"))
+        )
+        return nil
+      }
+    }
+
     AsyncFunction("openWallet") { (args: [String: Any], promise: Promise) in
       self.onFiles(promise) {
         let a = Args(args)

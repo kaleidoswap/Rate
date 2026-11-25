@@ -91,6 +91,22 @@ export function restoreBackup(backupPath: string, password: string, subdir?: str
   return call((m) => m.restoreBackup({ backupPath, password, subdir: folder }))
 }
 
+/** Restores only after native validation of the backup's network and wallet identity. */
+export function restoreBackupForWallet(
+  backupPath: string,
+  password: string,
+  subdir: string | null,
+  network: BitcoinNetwork,
+  keys: Pick<Keys, 'masterFingerprint' | 'accountXpubVanilla' | 'accountXpubColored' | 'witnessVersion'>,
+): Promise<void> {
+  const folder = checkSubdir(subdir)
+  const { masterFingerprint, accountXpubVanilla, accountXpubColored, witnessVersion } = keys
+  return call(m => {
+    if (!m.restoreBackupForWallet) throw new Error('Update the app before restoring an RGB backup.')
+    return m.restoreBackupForWallet({ backupPath, password, subdir: folder, network, masterFingerprint, accountXpubVanilla, accountXpubColored, witnessVersion })
+  })
+}
+
 export function decodeInvoice(invoice: string): Promise<InvoiceData> {
   return call((m) => m.decodeInvoice({ invoice }))
 }

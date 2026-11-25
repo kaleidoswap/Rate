@@ -4,7 +4,8 @@ const mockRestoreBackup = jest.fn(async (..._a: any[]) => undefined);
 jest.mock('../../modules/kaleido-rgb', () => ({
   isAvailable: () => true,
   supportsSubdir: () => mockNativeCanSwitch,
-  restoreBackup: (...a: any[]) => mockRestoreBackup(...a),
+  restoreBackupForWallet: (...a: any[]) => mockRestoreBackup(...a),
+  restoreKeys: () => ({ masterFingerprint: 'abc123de', accountXpubVanilla: 'vanilla', accountXpubColored: 'colored' }),
 }));
 jest.mock('../DatabaseService', () => ({
   __esModule: true,
@@ -173,13 +174,18 @@ describe('one RGB wallet per network', () => {
     expect(await claimRgbL1DataFolder('seed a', 'mainnet')).toBeNull();
   });
 
-  test('a restore claims the network’s folder right before writing it', async () => {
+  test('a restore validates wallet and network before claiming the folder', async () => {
     const { rgbL1Restorer, rgbL1HomeNetwork } = rgbL1();
     await rgbL1Restorer('seed a', 'mutinynet')('/cache/b.rgbbackup', 'pw');
-    expect(mockRestoreBackup).toHaveBeenLastCalledWith('/cache/b.rgbbackup', 'pw', 'rgb-mutinynet-signetcustom');
+    expect(mockRestoreBackup).toHaveBeenLastCalledWith('/cache/b.rgbbackup', 'pw', 'rgb-mutinynet-signetcustom', 'SIGNET_CUSTOM',
+      expect.objectContaining({ masterFingerprint: 'abc123de' }));
+    expect(await rgbL1HomeNetwork('seed a')).toBeNull();
+    mockRestoreBackup.mockRejectedValueOnce(new Error('Wrong network'));
+    await expect(rgbL1Restorer('seed a', 'mainnet')('/cache/wrong.rgbbackup', 'pw')).rejects.toThrow('Wrong network');
     expect(await rgbL1HomeNetwork('seed a')).toBeNull();
     await rgbL1Restorer('seed a', 'mainnet')('/cache/a.rgbbackup', 'pw');
-    expect(mockRestoreBackup).toHaveBeenLastCalledWith('/cache/a.rgbbackup', 'pw', null);
+    expect(mockRestoreBackup).toHaveBeenLastCalledWith('/cache/a.rgbbackup', 'pw', null, 'MAINNET',
+      expect.objectContaining({ masterFingerprint: 'abc123de' }));
     expect(await rgbL1HomeNetwork('seed a')).toBe('mainnet');
   });
 });

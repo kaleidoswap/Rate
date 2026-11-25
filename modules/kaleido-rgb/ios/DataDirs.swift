@@ -34,6 +34,61 @@ enum DataDirs {
     return try dataDir(subdir).appendingPathComponent(fingerprint, isDirectory: true)
   }
 
+  /// The decrypted backup stays in a temporary directory until its identity is verified.
+  static func restoreBackupForWallet(
+    path: String, password: String, subdir: String?, fingerprint: String, network: BitcoinNetwork,
+    vanillaXpub: String, coloredXpub: String, witnessVersion: WitnessVersion
+  ) throws {
+    let files = FileManager.default
+    let destination = try walletDir(subdir, fingerprint)
+    if files.fileExists(atPath: destination.path) {
+      throw RgbLibError.WalletDirAlreadyExists(path: destination.path)
+    }
+    let parent = destination.deletingLastPathComponent()
+    // The native files queue is serial, so a previous staging directory is orphaned.
+    let stagingPrefix = ".rgb-restore-"
+    let siblings = (try? files.contentsOfDirectory(at: parent, includingPropertiesForKeys: nil)) ?? []
+    for orphan in siblings where orphan.lastPathComponent.hasPrefix(stagingPrefix) {
+      if UUID(uuidString: String(orphan.lastPathComponent.dropFirst(stagingPrefix.count))) != nil {
+        try? files.removeItem(at: orphan)
+      }
+    }
+    var staging = parent.appendingPathComponent(".rgb-restore-\(UUID().uuidString)", isDirectory: true)
+    try files.createDirectory(at: staging, withIntermediateDirectories: false)
+    defer { try? files.removeItem(at: staging) }
+    var restoreResources = URLResourceValues()
+    restoreResources.isExcludedFromBackup = true
+    try staging.setResourceValues(restoreResources)
+    try restoreBackup(backupPath: path, password: password, dataDir: staging.path)
+    let source = staging.appendingPathComponent(fingerprint, isDirectory: true)
+    let manifestPath = source.appendingPathComponent(manifest)
+    guard files.fileExists(atPath: source.path) else {
+      throw InvalidArgument(description: "This RGB backup belongs to another wallet.")
+    }
+    guard let manifestData = try? Data(contentsOf: manifestPath),
+          let info = (try? JSONSerialization.jsonObject(with: manifestData)) as? [String: Any] else {
+      throw InvalidArgument(description: "This RGB backup has no readable wallet manifest. Export a newer backup from the original wallet.")
+    }
+    guard info["version"] as? Int == 1, info["database_type"] as? String == "Sqlite", exists(source.appendingPathComponent("rgb_lib_db"), directory: false) else {
+      throw InvalidArgument(description: "This RGB backup is missing supported wallet data.")
+    }
+    let networkName = Mappers.networkName(network).replacingOccurrences(of: "_", with: "").lowercased()
+    guard (info["bitcoin_network"] as? String)?.lowercased() == networkName else {
+      throw InvalidArgument(description: "This RGB backup belongs to a different Bitcoin network.")
+    }
+    let witness = Mappers.witnessVersionName(witnessVersion).replacingOccurrences(of: "_", with: "").lowercased()
+    guard (info["witness_version"] as? String)?.lowercased() == witness,
+          info["vanilla_keychain"] as? Int == 0 else {
+      throw InvalidArgument(description: "This RGB backup uses different wallet key settings.")
+    }
+    guard info["master_fingerprint"] as? String == fingerprint,
+          info["account_xpub_vanilla"] as? String == vanillaXpub,
+          info["account_xpub_colored"] as? String == coloredXpub else {
+      throw InvalidArgument(description: "This RGB backup belongs to another wallet.")
+    }
+    try files.moveItem(at: source, to: destination)
+  }
+
   private static func exists(_ url: URL, directory: Bool? = nil) -> Bool {
     var isDir: ObjCBool = false
     guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) else { return false }

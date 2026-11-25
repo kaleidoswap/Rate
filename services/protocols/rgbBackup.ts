@@ -18,7 +18,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { File, Paths } from 'expo-file-system';
 import { rgbBackupPassword, rgbL1DataId, rgbL1WalletKey, type RgbL1Network } from './rgbL1';
 import { toFilesystemPath } from './bark';
-import { createVssClient, downloadBackupFile, readBackupManifest, uploadBackupFile, vssSigningKey, type BackupManifest } from './rgbVss';
+import {
+  createVssClient, downloadBackupFile, readBackupManifest, readVersionedBackupManifest,
+  RGB_BACKUP_CONFLICT, uploadBackupFile, vssSigningKey, type BackupManifest,
+} from './rgbVss';
 import { describeRgbError, recordRgbDiagnostic } from './rgbDiagnostics';
 
 export const RGB_VSS_SERVER_URL = process.env.EXPO_PUBLIC_VSS_SERVER_URL || 'https://vss.kaleidoswap.com/vss';
@@ -43,6 +46,7 @@ let status: RgbBackupStatus = { state: 'idle' };
 let timer: ReturnType<typeof setTimeout> | null = null;
 let running: Promise<void> | null = null;
 let again = false;
+let localBackupQueue: Promise<unknown> = Promise.resolve();
 const listeners = new Set<(s: RgbBackupStatus) => void>();
 
 const setStatus = (next: RgbBackupStatus) => { status = next; listeners.forEach((l) => l(status)); };
@@ -56,7 +60,62 @@ export function onRgbBackupStatus(listener: (s: RgbBackupStatus) => void): () =>
 /** Per seed and wallet (`rgbL1DataId`), apart from the other wallets' VSS data under the same key. */
 export const rgbBackupStoreId = (mnemonic: string, network: string) => `rgb-l1-file-${rgbL1WalletKey(mnemonic)}-${network}`;
 
-const lastBackupKey = (ctx: Pick<BackupContext, 'mnemonic' | 'network'>) => `rgb-last-backup-${rgbBackupStoreId(ctx.mnemonic, rgbL1DataId(ctx.network))}`;
+type BackupWallet = Pick<BackupContext, 'mnemonic' | 'network'>;
+type BackupLineage = Pick<BackupManifest, 'createdAt' | 'sha256'>;
+
+const storeId = (ctx: BackupWallet) => rgbBackupStoreId(ctx.mnemonic, rgbL1DataId(ctx.network));
+const lastBackupKey = (ctx: BackupWallet) => `rgb-last-backup-${storeId(ctx)}`;
+const retryKey = (ctx: BackupWallet) => `rgb-backup-pending-${storeId(ctx)}`;
+
+async function localBackup(ctx: BackupWallet): Promise<Partial<BackupLineage>> {
+  const raw = await AsyncStorage.getItem(lastBackupKey(ctx));
+  if (!raw || raw === 'empty') return {};
+  const legacyTimestamp = Number(raw);
+  if (Number.isFinite(legacyTimestamp) && legacyTimestamp > 0) return { createdAt: legacyTimestamp };
+  try {
+    const value = JSON.parse(raw) as Partial<BackupLineage>;
+    if (typeof value?.sha256 === 'string' && Number.isFinite(value.createdAt)) return value;
+  } catch { /* there is no known cloud lineage */ }
+  return {};
+}
+
+function rememberBackup(ctx: BackupWallet, manifest: BackupManifest): Promise<void> {
+  return AsyncStorage.setItem(lastBackupKey(ctx), JSON.stringify({ sha256: manifest.sha256, createdAt: manifest.createdAt }));
+}
+
+function queueLocalBackup<T>(task: () => Promise<T>): Promise<T> {
+  const run = localBackupQueue.then(task);
+  localBackupQueue = run.catch(() => undefined);
+  return run;
+}
+
+/** A local wallet not restored from the cloud cannot replace a remote backup. */
+export function resetRgbBackupLineage(mnemonic: string, network: RgbL1Network): Promise<void> {
+  return queueLocalBackup(async () => {
+    const ctx = { mnemonic, network };
+    await AsyncStorage.setItem(lastBackupKey(ctx), 'empty');
+    await AsyncStorage.removeItem(retryKey(ctx));
+  });
+}
+
+/** Exporting a file also clears rgb-lib's dirty bit. Keep cloud backup owed until it publishes. */
+export async function exportRgbBackupFile(
+  mnemonic: string,
+  network: RgbL1Network,
+  account: { backup(path: string, password: string): Promise<void> },
+  path: string,
+): Promise<void> {
+  const ctx = { mnemonic, network };
+  try {
+    await queueLocalBackup(async () => {
+      const key = retryKey(ctx);
+      if (!(await AsyncStorage.getItem(key))) await AsyncStorage.setItem(key, '1');
+      await account.backup(path, rgbBackupPassword(mnemonic));
+    });
+  } finally {
+    if (context?.mnemonic === mnemonic && context.network === network) scheduleRgbBackup();
+  }
+}
 
 /** Set while RGB on this phone is connected (./wdk.ts), cleared when it disconnects. */
 export function setRgbBackupContext(next: BackupContext | null): void {
@@ -65,10 +124,9 @@ export function setRgbBackupContext(next: BackupContext | null): void {
   if (changed) {
     const revision = ++contextRevision;
     setStatus({ state: 'idle' });
-    if (next) void AsyncStorage.getItem(lastBackupKey(next)).then(value => {
-      const timestamp = Number(value);
-      if (revision === contextRevision && !status.lastBackupAt && Number.isFinite(timestamp) && timestamp > 0) {
-        setStatus({ ...status, lastBackupAt: timestamp });
+    if (next) void localBackup(next).then(({ createdAt }) => {
+      if (revision === contextRevision && !status.lastBackupAt && createdAt) {
+        setStatus({ ...status, lastBackupAt: createdAt });
       }
     }).catch(() => undefined);
   }
@@ -85,29 +143,50 @@ export function scheduleRgbBackup(): void {
 /** Back up now if the wallet changed since the last backup (or always with `force`). */
 export async function runRgbBackup(force = false): Promise<void> {
   if (running) { again = true; return running; }
-  running = Promise.resolve().then(async () => {
-    const ctx = context;
-    const revision = contextRevision;
+  const ctx = context;
+  const revision = contextRevision;
+  const account = ctx?.account();
+  running = queueLocalBackup(async () => {
     const update = (next: RgbBackupStatus) => {
       if (contextRevision === revision) setStatus(next);
     };
     try {
-      const account = ctx?.account();
-      if (!ctx || !account) return;
-      const retryKey = `rgb-backup-pending-${rgbBackupStoreId(ctx.mnemonic, rgbL1DataId(ctx.network))}`;
-      if (!force && await AsyncStorage.getItem(retryKey) !== '1' && !(await account.backupRequired())) return;
-      // rgb-lib clears its dirty flag when creating a file, before the cloud upload succeeds.
-      // Persist retry intent first so a failed upload is retried even after restarting.
-      await AsyncStorage.setItem(retryKey, '1');
+      if (!ctx || !account || contextRevision !== revision) return;
+      const retry = retryKey(ctx);
+      const pending = await AsyncStorage.getItem(retry);
+      if (!force && !pending && !(await account.backupRequired())) return;
+
+      const client = storeClient(ctx.mnemonic, ctx.network);
+      const previous = await readVersionedBackupManifest(client, PREFIX);
+      const known = await localBackup(ctx);
+      const remote = previous?.manifest;
+      if (remote && remote.sha256 !== known.sha256) {
+        const acknowledged = remote.sha256 === pending;
+        const legacyMatch = previous?.legacy && !known.sha256 && known.createdAt === remote.createdAt;
+        if (!acknowledged && !legacyMatch) throw new Error(RGB_BACKUP_CONFLICT);
+        // Adopt a legacy success once, or finish an upload whose reply was interrupted.
+        await rememberBackup(ctx, remote);
+        if (acknowledged && !force && !(await account.backupRequired())) {
+          await AsyncStorage.removeItem(retry);
+          update({ state: 'done', lastBackupAt: remote.createdAt });
+          return;
+        }
+      }
+
+      if (contextRevision !== revision) return;
+      // rgb-lib clears its dirty flag before the upload succeeds. Persist the retry first.
+      await AsyncStorage.setItem(retry, '1');
       update({ ...status, state: 'backing-up', error: undefined });
       const file = new File(Paths.cache, `rgb-backup-${Date.now()}.rgbbackup`);
       try {
         await account.backup(toFilesystemPath(file.uri), rgbBackupPassword(ctx.mnemonic));
         const data = await file.bytes();
-        const client = createVssClient(RGB_VSS_SERVER_URL, rgbBackupStoreId(ctx.mnemonic, rgbL1DataId(ctx.network)), vssSigningKey(ctx.mnemonic));
-        const manifest = await uploadBackupFile(client, PREFIX, data);
-        await AsyncStorage.setItem(lastBackupKey(ctx), String(manifest.createdAt));
-        await AsyncStorage.removeItem(retryKey);
+        const manifest = await uploadBackupFile(client, PREFIX, data, Date.now(), {
+          previous,
+          recordCandidate: (candidate) => AsyncStorage.setItem(retry, candidate.sha256),
+        });
+        await rememberBackup(ctx, manifest);
+        await AsyncStorage.removeItem(retry);
         update({ state: 'done', lastBackupAt: manifest.createdAt });
       } finally {
         try { if (file.exists) file.delete(); } catch { /* cache is cleared by the OS anyway */ }
@@ -160,7 +239,7 @@ export async function restoreRgbFromCloud(opts: {
   } finally {
     try { if (file.exists) file.delete(); } catch { /* cache is cleared by the OS anyway */ }
   }
-  await AsyncStorage.setItem(lastBackupKey(opts), String(backup.manifest.createdAt)).catch(() => undefined);
+  await rememberBackup(opts, backup.manifest).catch(() => undefined);
   if (context?.mnemonic === opts.mnemonic && context.network === opts.network) {
     setStatus({ state: 'done', lastBackupAt: backup.manifest.createdAt });
   }
@@ -174,11 +253,13 @@ export async function restoreRgbFromCloud(opts: {
  */
 export async function restoreRgbFromFile(opts: {
   mnemonic: string
+  network: RgbL1Network
   path: string
   restore: (path: string, password: string) => Promise<void>
 }): Promise<void> {
   try {
     await opts.restore(opts.path, rgbBackupPassword(opts.mnemonic));
+    await resetRgbBackupLineage(opts.mnemonic, opts.network);
   } catch (e: any) {
     const why = `${e?.code ?? ''} ${e?.message ?? ''}`;
     if (/WalletDirAlreadyExists|WALLET_DIR_ALREADY_EXISTS|already exists/i.test(why)) {

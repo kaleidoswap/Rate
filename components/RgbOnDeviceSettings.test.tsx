@@ -45,6 +45,7 @@ jest.mock('../services/protocols/rgbL1', () => ({
 }));
 const mockHost = { network: 'mutinynet', indexerUrl: 'https://default-indexer', transportEndpoint: 'rpcs://default-proxy' };
 const mockSaveEndpoints = jest.fn(async () => undefined);
+jest.mock('expo-sharing', () => ({ isAvailableAsync: async () => true, shareAsync: jest.fn(async () => undefined) }));
 jest.mock('expo-file-system', () => ({
   Paths: { cache: { uri: 'file:///cache' } },
   File: class { exists = false; uri: string; constructor(dir: any, name: string) { this.uri = `${dir.uri}/${name}`; } delete() {} },
@@ -54,6 +55,8 @@ jest.mock('../services/protocols/rgbBackup', () => ({
   rgbBackupStatus: () => ({ state: 'idle' }),
   onRgbBackupStatus: () => () => undefined,
   runRgbBackup: (...a: any[]) => (mockRunBackup as any)(...a),
+  resetRgbBackupLineage: async () => { mockCalls.push('reset-lineage'); },
+  exportRgbBackupFile: async (_seed: string, _network: string, account: any, path: string) => account.backup(path, 'derived-password'),
   restoreRgbFromFile: (...a: any[]) => { mockCalls.push('restore-file'); return (mockRestoreFile as any)(...a); },
   restoreRgbFromCloud: (...a: any[]) => { mockCalls.push('restore-cloud'); return (mockRestoreCloud as any)(...a); },
   findRgbCloudBackup: (...a: any[]) => (mockFindBackup as any)(...a),
@@ -146,7 +149,7 @@ test('a cloud backup found on Connect is restored only with consent, in one ask'
   expect(buttons.map((b: any) => b.text)).toEqual(['Cancel', 'Start empty', 'Restore']);
   expect(mockSave).not.toHaveBeenCalled();
   await act(async () => { await press(buttons, 'Restore'); });
-  // The choice is saved (refusing a locked network) before restoring; ready only once the data is here.
+  // A locked network is refused before restoring. Only verified restored data is marked ready.
   expect(mockCalls).toEqual(['save:mainnet', 'restore-cloud', 'ready', 'reconcile']);
   expect(mockReconcile).toHaveBeenCalledWith({ skipCloudRestore: true });
 });
@@ -157,10 +160,11 @@ test('starting empty over a cloud backup is one confirmation, not two', async ()
   await act(async () => {});
   fireEvent.press(screen.getByText('Connect'));
   await act(async () => {});
-  const [title, , buttons] = lastAlert();
+  const [title, body, buttons] = lastAlert();
   expect(title).toBe('Cloud backup found');
+  expect(body).toContain('keeps the existing cloud backup separate');
   await act(async () => { await press(buttons, 'Start empty'); });
-  expect(mockCalls).toEqual(['save:mainnet', 'reconcile']);
+  expect(mockCalls).toEqual(['save:mainnet', 'reset-lineage', 'reconcile']);
 });
 
 test('Restore from cloud with no backup says so and changes nothing', async () => {
@@ -206,7 +210,7 @@ test('RGB data can be restored from an exported file before it starts', async ()
   expect(title).toBe('Restore RGB data?');
   await act(async () => { await press(buttons, 'Restore'); });
   expect(mockRestoreFile).toHaveBeenCalledWith(expect.objectContaining({ mnemonic: 'seed words', path: '/cache/my.rgbbackup' }));
-  // Saved first (it refuses another network's data), then marked ready: no cloud restore over it on start.
+  // The native restore validates the data before reconciliation opens it.
   expect(mockCalls).toEqual(['save:mainnet', 'restore-file', 'ready', 'reconcile']);
 });
 

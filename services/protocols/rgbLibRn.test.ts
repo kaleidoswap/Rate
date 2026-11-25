@@ -4,6 +4,7 @@ jest.mock('../../modules/kaleido-rgb/src/native', () => ({ getNativeModule: () =
 import { RgbLibWdkAdapter, registerWdkModule } from '@kaleidorg/wallet-engine/adapters/wdk';
 import * as KaleidoRgb from '../../modules/kaleido-rgb';
 import { createRgbLibRnModule, libNetwork, rgbLibSchemas, rgbLibSubdir } from './rgbLibRn';
+import { rgbOnlineOptions } from './rgbOnlineOptions';
 
 // A stand-in for modules/kaleido-rgb: records calls, returns rgb-lib shapes.
 function fakeLib() {
@@ -50,6 +51,13 @@ function fakeLib() {
 }
 
 const options = { network: 'mutinynet', indexerUrl: 'https://mutinynet.example/api', transportEndpoint: 'rpcs://proxy.example/json-rpc' };
+const evmChains = { '11155111': { rpcUrl: 'https://sepolia.example/rpc', minMintLockBlocks: 12, maxMintLockBlocks: 120 } };
+const previousBridgeConfig = process.env.EXPO_PUBLIC_RGB_L1_MUTINYNET_EVM_CHAINS;
+
+afterEach(() => {
+  if (previousBridgeConfig === undefined) delete process.env.EXPO_PUBLIC_RGB_L1_MUTINYNET_EVM_CHAINS;
+  else process.env.EXPO_PUBLIC_RGB_L1_MUTINYNET_EVM_CHAINS = previousBridgeConfig;
+});
 
 test('maps app networks to rgb-lib networks; Mutinynet is a custom signet', () => {
   expect(libNetwork('mutinynet')).toBe('SIGNET_CUSTOM');
@@ -99,17 +107,55 @@ test('BFA is available through the engine on test networks and uses encrypted in
     balance: { settled: 12_000_000, future: 12_000_000, spendable: 12_000_000 },
   };
   wallet.listAssets.mockResolvedValue({ nia: [], uda: [], cfa: [], ifa: [], bfa: [asset] } as any);
-  const onlineOptions = { evmChains: { '11155111': { rpcUrl: 'https://sepolia.example', minMintLockBlocks: 12, maxMintLockBlocks: 120 } } };
-  registerWdkModule('@utexo/wdk-wallet-rgb', () => createRgbLibRnModule(() => lib as any, { onlineOptions }));
+  process.env.EXPO_PUBLIC_RGB_L1_MUTINYNET_EVM_CHAINS = JSON.stringify(evmChains);
+  registerWdkModule('@utexo/wdk-wallet-rgb', () => createRgbLibRnModule(() => lib as any, { onlineOptions: rgbOnlineOptions }));
   const adapter = new RgbLibWdkAdapter();
   await adapter.connect({ protocol: 'RGB_L1', mnemonic: 'seed', dataDir: '.', ...options } as any);
   expect(lib.Wallet).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({ supportedSchemas: ['NIA', 'CFA', 'UDA', 'IFA', 'BFA'] }));
   expect(rgbLibSchemas('mainnet', true)).toEqual(['NIA', 'CFA', 'UDA']);
-  expect(wallet.goOnline).toHaveBeenCalledWith(options.indexerUrl, false, undefined, onlineOptions);
+  expect(wallet.goOnline).toHaveBeenCalledWith(options.indexerUrl, false, undefined, { evmChains });
   expect(await adapter.listAssets()).toEqual(expect.arrayContaining([expect.objectContaining({ id: asset.assetId, ticker: 'USDT' })]));
   await adapter.createInvoice({ asset: asset.assetId, assetAmount: 1_000_000 } as any);
   expect(wallet.witnessReceive).toHaveBeenCalledWith(asset.assetId, { type: 'FUNGIBLE', amount: 1_000_000 }, null, [options.transportEndpoint], 1, 'REQUIRED');
   await adapter.disconnect();
+});
+
+test('bridge RPCs are used only on Mutinynet and only with a BFA native build', async () => {
+  process.env.EXPO_PUBLIC_RGB_L1_MUTINYNET_EVM_CHAINS = JSON.stringify(evmChains);
+  const { lib, wallet } = fakeLib();
+  const { WalletManagerRgb } = createRgbLibRnModule(() => lib as any, { onlineOptions: rgbOnlineOptions });
+  const legacyManager = new WalletManagerRgb('seed', options);
+  await legacyManager.getAccount();
+  expect(wallet.goOnline).toHaveBeenLastCalledWith(options.indexerUrl);
+  await legacyManager.dispose();
+
+  lib.supportsBfa.mockReturnValue(true);
+  const signetManager = new WalletManagerRgb('seed', { ...options, network: 'signet' });
+  await signetManager.getAccount();
+  expect(wallet.goOnline).toHaveBeenLastCalledWith(options.indexerUrl);
+  await signetManager.dispose();
+});
+
+test('Mutinynet can open without bridge RPC configuration', () => {
+  delete process.env.EXPO_PUBLIC_RGB_L1_MUTINYNET_EVM_CHAINS;
+  expect(rgbOnlineOptions('mutinynet')).toBeUndefined();
+});
+
+test.each([
+  '{',
+  '[]',
+  JSON.stringify({ '0': evmChains['11155111'] }),
+  JSON.stringify({ '18446744073709551616': evmChains['11155111'] }),
+  JSON.stringify({ '11155111': { ...evmChains['11155111'], rpcUrl: 'http://sepolia.example' } }),
+  JSON.stringify({ '11155111': { ...evmChains['11155111'], rpcUrl: 'https://user:secret@sepolia.example' } }),
+  JSON.stringify({ '11155111': { ...evmChains['11155111'], maxMintLockBlocks: 1 } }),
+])('invalid bridge configuration fails before opening a native wallet (%#)', async (config) => {
+  process.env.EXPO_PUBLIC_RGB_L1_MUTINYNET_EVM_CHAINS = config;
+  const { lib } = fakeLib();
+  lib.supportsBfa.mockReturnValue(true);
+  const { WalletManagerRgb } = createRgbLibRnModule(() => lib as any, { onlineOptions: rgbOnlineOptions });
+  await expect(new WalletManagerRgb('seed', options).getAccount()).rejects.toThrow('The Mutinynet RGB bridge configuration is invalid.');
+  expect(lib.Wallet).not.toHaveBeenCalled();
 });
 
 test('proxy v1 only creates invoices with enough time left for a sender operation', async () => {
