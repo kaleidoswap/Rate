@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const bundleId = 'com.kaleidoswap.wallet';
-const marketingVersion = '0.19.0';
+const marketingVersion = '0.19.3';
 const publishedInvite = 'https://testflight.apple.com/join/ddrZT98T';
 const inReviewOrApproved = new Set([
   'WAITING_FOR_BETA_REVIEW', 'IN_BETA_REVIEW', 'BETA_APPROVED',
