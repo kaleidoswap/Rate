@@ -22,6 +22,10 @@ on:
         description: 'Build & sign both platforms but skip TestFlight upload + GitHub Release'
         type: boolean
         default: true
+      android_shrink:
+        description: 'Build only Android with R8 and resource shrinking for comparison (dry run)'
+        type: boolean
+        default: false
 
 # Never run two releases for the same ref at once.
 concurrency:
@@ -57,7 +61,12 @@ jobs:
       - name: Check release channel
         env:
           DRY_RUN: ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '1' || '0' }}
+          ANDROID_SHRINK: ${{ (github.event_name == 'workflow_dispatch' && inputs.android_shrink) && '1' || '0' }}
         run: |
+          if [ "$ANDROID_SHRINK" = "1" ] && [ "$DRY_RUN" != "1" ]; then
+            echo '::error::Android shrinking can only be enabled in a dry run.'
+            exit 1
+          fi
           case "$EXPO_PUBLIC_CHANNEL" in
             beta|store) ;;
             dev)
@@ -163,7 +172,13 @@ jobs:
           ORG_GRADLE_PROJECT_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           ORG_GRADLE_PROJECT_VERSION_NAME: ${{ needs.version.outputs.name }}
           ORG_GRADLE_PROJECT_VERSION_CODE: ${{ needs.version.outputs.code }}
-        run: ./gradlew :app:assembleRelease --no-daemon
+          ANDROID_SHRINK: ${{ (github.event_name == 'workflow_dispatch' && inputs.android_shrink) && '1' || '0' }}
+        run: |
+          flags=()
+          if [ "$ANDROID_SHRINK" = "1" ]; then
+            flags+=(-Pandroid.enableMinifyInReleaseBuilds=true -Pandroid.enableShrinkResourcesInReleaseBuilds=true)
+          fi
+          ./gradlew :app:assembleRelease --no-daemon "${flags[@]}"
 
       - name: Rename APK
         env:
@@ -172,6 +187,9 @@ jobs:
           mkdir -p dist
           cp android/app/build/outputs/apk/release/app-release.apk \
              "dist/kaleidoswap-${VERSION_NAME}.apk"
+
+      - name: Report APK size
+        run: python3 scripts/report-apk-size.py dist/*.apk | tee -a "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -184,6 +202,7 @@ jobs:
     name: iOS TestFlight
     runs-on: macos-15
     needs: version
+    if: github.event_name != 'workflow_dispatch' || !inputs.android_shrink
     steps:
       - uses: actions/checkout@v4
         with:
