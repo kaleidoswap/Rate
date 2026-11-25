@@ -50,7 +50,7 @@ module.exports = {
     // @kaleidorg/mind/qvac — the QVAC adapter subpath; same import-only exports
     // map, so point Jest's CJS resolver straight at its dist.
     '^@kaleidorg/mind/qvac$': '<rootDir>/node_modules/@kaleidorg/mind/dist/qvac/index.js',
-    '\\.(jpg|jpeg|png|gif|svg|wav)$': '<rootDir>/__mocks__/fileMock.js',
+    '\\.(jpg|jpeg|png|gif|svg|wav|webp)$': '<rootDir>/__mocks__/fileMock.js',
   },
   globals: {
     __DEV__: true,

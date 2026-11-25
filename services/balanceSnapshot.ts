@@ -7,6 +7,8 @@
  * wallet's id never sees the old wallet's numbers.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import type { InventoryRecord } from '../utils/asset-inventory';
+import type { AccountId } from '../utils/account-routing';
 
 const PREFIX = 'rate.balanceSnapshot.v1.';
 
@@ -29,9 +31,11 @@ export interface BalanceSnapshot {
   savedAt: number;
   byProtocol: Record<string, SnapshotProtocolBalance>;
   /** Asset rows as the dashboard keeps them (ticker, precision, balance, protocol, icon). */
-  assets: any[];
+  assets: InventoryRecord[];
   channels: SnapshotChannel[];
   btcPriceUSD: number;
+  rgbBalanceIsLightning?: boolean;
+  testNetworks?: Partial<Record<AccountId | 'LN', string>>;
 }
 
 export function snapshotWalletKey(wallet: SnapshotWallet | null | undefined): string | null {
@@ -59,7 +63,16 @@ export function parseSnapshot(raw: string | null, walletKey: string): BalanceSna
   const channels = Array.isArray(s.channels)
     ? s.channels.filter((c: any) => c && isNum(c.local_balance_sat) && isNum(c.outbound_balance_msat))
     : [];
-  return { walletKey, savedAt: s.savedAt, byProtocol, assets, channels, btcPriceUSD: isNum(s.btcPriceUSD) ? s.btcPriceUSD : 0 };
+  const testNetworks: BalanceSnapshot['testNetworks'] = {};
+  for (const account of ['RGB', 'SPARK', 'ARKADE', 'BARK', 'LN'] as const) {
+    if (typeof s.testNetworks?.[account] === 'string') testNetworks[account] = s.testNetworks[account];
+  }
+  return {
+    walletKey, savedAt: s.savedAt, byProtocol, assets, channels,
+    btcPriceUSD: isNum(s.btcPriceUSD) ? s.btcPriceUSD : 0,
+    ...(typeof s.rgbBalanceIsLightning === 'boolean' && { rgbBalanceIsLightning: s.rgbBalanceIsLightning }),
+    ...(s.testNetworks && typeof s.testNetworks === 'object' && { testNetworks }),
+  };
 }
 
 export async function loadBalanceSnapshot(wallet: SnapshotWallet | null | undefined): Promise<BalanceSnapshot | null> {
@@ -72,12 +85,27 @@ export async function loadBalanceSnapshot(wallet: SnapshotWallet | null | undefi
   }
 }
 
+let prepared: { key: string; snapshot: Promise<BalanceSnapshot | null> } | undefined;
+
+/** Start the local read while navigation opens, and hand that same read to Home. */
+export function prepareBalanceSnapshot(wallet: SnapshotWallet): void {
+  const key = snapshotWalletKey(wallet);
+  if (key) prepared = { key, snapshot: loadBalanceSnapshot(wallet) };
+}
+
+export function takeBalanceSnapshot(wallet: SnapshotWallet | null | undefined): Promise<BalanceSnapshot | null> {
+  const entry = prepared;
+  prepared = undefined;
+  return entry && entry.key === snapshotWalletKey(wallet) ? entry.snapshot : loadBalanceSnapshot(wallet);
+}
+
 export async function saveBalanceSnapshot(
   wallet: SnapshotWallet | null | undefined,
   data: Omit<BalanceSnapshot, 'walletKey' | 'savedAt'>,
 ): Promise<void> {
   const key = snapshotWalletKey(wallet);
   if (!key) return;
+  if (prepared?.key === key) prepared = undefined;
   const snapshot: BalanceSnapshot = {
     walletKey: key,
     savedAt: Date.now(),
@@ -91,6 +119,8 @@ export async function saveBalanceSnapshot(
       is_usable: c.is_usable,
     })),
     btcPriceUSD: data.btcPriceUSD,
+    rgbBalanceIsLightning: data.rgbBalanceIsLightning,
+    testNetworks: data.testNetworks,
   };
   try {
     await AsyncStorage.setItem(PREFIX + key, JSON.stringify(snapshot));
@@ -99,12 +129,9 @@ export async function saveBalanceSnapshot(
   }
 }
 
-export async function hasBalanceSnapshot(wallet: SnapshotWallet | null | undefined): Promise<boolean> {
-  return (await loadBalanceSnapshot(wallet)) != null;
-}
-
 /** Forget every snapshot of a wallet id (on delete). */
 export async function clearBalanceSnapshots(walletId: number): Promise<void> {
+  if (prepared?.key.startsWith(`${walletId}:`)) prepared = undefined;
   try {
     const keys = await AsyncStorage.getAllKeys();
     const mine = keys.filter((k) => k.startsWith(`${PREFIX}${walletId}:`));

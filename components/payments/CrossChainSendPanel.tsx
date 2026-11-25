@@ -2,12 +2,12 @@
  * Send to an EVM or Solana address: USDB or BTC leaves Spark and arrives as
  * USDC/USDT on the chosen chain, through Flashnet Orchestra.
  *
- * Configure (source, chain, token, amount, live estimate) → review → slide to
+ * Configure (source, chain, token, amount, live estimate) → review → hold to
  * send → the order is followed until it completes. The transfer record is saved
  * before funds move (services/crosschainSend.ts), so reopening Send resumes it
  * and never pays twice.
  */
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Image, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Crypto from 'expo-crypto';
@@ -17,7 +17,7 @@ import { Callout } from '../Callout';
 import { AmountText } from '../AmountText';
 import { PressableScale } from '../PressableScale';
 import { SegmentedControl } from '../SegmentedControl';
-import { SlideToConfirm } from '../SlideToConfirm';
+import { HoldToConfirm } from '../HoldToConfirm';
 import { NetworkIcon } from '../NetworkIcon';
 import { feedback } from '../../utils/feedback';
 import { formatBitcoinAmount } from '../../utils/bitcoinUnits';
@@ -64,7 +64,7 @@ export function CrossChainSendPanel({ address, family, walletId, bitcoinUnit, he
   const [destToken, setDestToken] = useState('USDC');
   const [mode, setMode] = useState<OrchestraAmountMode>('exact_in');
   const [amount, setAmount] = useState('');
-  const [estimate, setEstimate] = useState<OrchestraEstimate | null>(null);
+  const [quoted, setQuoted] = useState<{ terms: string; estimate: OrchestraEstimate } | null>(null);
   const [estimating, setEstimating] = useState(false);
   const [estimateError, setEstimateError] = useState('');
   const [step, setStep] = useState<Step>('configure');
@@ -121,6 +121,13 @@ export function CrossChainSendPanel({ address, family, walletId, bitcoinUnit, he
   const amountRaw = parseAmountRaw(amount, inputDecimals);
   const spendableRaw = !spark ? '0' : source === 'BTC' ? String(spark.btcSat) : String(spark.usdb?.available ?? 0);
   const form: CrossChainForm = { source, destChain, destToken, recipient: address, family, mode, amountRaw: amountRaw ?? '0' };
+  const terms = JSON.stringify([walletId, destDecimals, form]);
+  const currentTerms = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    currentTerms.current = terms;
+    return () => { currentTerms.current = null; };
+  }, [terms]);
+  const estimate = quoted?.terms === terms ? quoted.estimate : null;
   const problem = spark ? formProblem({
     sparkConnected: spark.connected, mainnet: spark.mainnet, spendableRaw, form, typedAmount: amount, inputDecimals, routeKnown, estimate,
   }) : null;
@@ -130,20 +137,20 @@ export function CrossChainSendPanel({ address, family, walletId, bitcoinUnit, he
     ? JSON.stringify(orchestraParams(form)) : '';
   useEffect(() => {
     if (step === 'review') return;
-    setEstimate(null); setEstimateError('');
+    setQuoted(null); setEstimateError('');
     if (!estimateKey) { setEstimating(false); return; }
     if (mode === 'exact_in' && problem === 'exceeds-balance') { setEstimating(false); return; }
     let live = true;
     setEstimating(true);
     const timer = setTimeout(() => {
       getEstimate(JSON.parse(estimateKey))
-        .then(e => { if (live) setEstimate(e); })
+        .then(e => { if (live) setQuoted({ terms, estimate: e }); })
         .catch(e => { if (live) setEstimateError(e instanceof Error && /unsupported_amount_mode/.test(e.message) ? "This route can't target an exact amount received." : 'Could not get a price for this transfer.'); })
         .finally(() => { if (live) setEstimating(false); });
     }, 400);
     return () => { live = false; clearTimeout(timer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [estimateKey]);
+  }, [estimateKey, step, terms]);
 
   // ---- formatting ----------------------------------------------------------
   const fmtSource = (raw: string, key: CrossChainSourceKey = source) => key === 'BTC'
@@ -162,11 +169,12 @@ export function CrossChainSendPanel({ address, family, walletId, bitcoinUnit, he
   const review = () => { if (canReview) { feedback.select(); setError(''); setStep('review'); } };
 
   async function send() {
-    if (working.current || !walletId || !estimate) return;
+    if (working.current || currentTerms.current !== terms || step !== 'review' || !canReview || !walletId || !estimate) return;
     working.current = true; setBusy(true); setError(''); setStage('quoting'); setStep('sending');
     try {
       const result = await sendCrossChain({
         walletId, form, reviewed: estimate, destDecimals, id: Crypto.randomUUID(),
+        isApprovalCurrent: () => currentTerms.current === terms,
         onProgress: p => { setStage(p.stage); if (p.session) setSession(p.session); },
       });
       resumed.current = result.id; // sendCrossChain already tried the submit
@@ -175,7 +183,7 @@ export function CrossChainSendPanel({ address, family, walletId, bitcoinUnit, he
     } catch (e) {
       if (e instanceof QuoteChangedError) {
         const q = e.quote;
-        setEstimate({ ...estimate, estimatedOut: q.estimatedOut, requiredAmountIn: q.requiredAmountIn ?? q.amountIn, feeAmount: q.feeAmount, totalFeeAmount: q.totalFeeAmount, feeAsset: q.feeAsset, feeBps: q.feeBps });
+        setQuoted({ terms, estimate: { ...estimate, estimatedOut: q.estimatedOut, requiredAmountIn: q.requiredAmountIn ?? q.amountIn, feeAmount: q.feeAmount, totalFeeAmount: q.totalFeeAmount, feeAsset: q.feeAsset, feeBps: q.feeBps } });
         setError(e.message); setStep('review');
       } else {
         setError(`${e instanceof Error ? e.message : 'The transfer could not start.'}${e instanceof CrossChainNotSentError ? '' : ' Nothing was sent.'}`);
@@ -390,6 +398,7 @@ export function CrossChainSendPanel({ address, family, walletId, bitcoinUnit, he
   </>;
 
   const renderReview = () => <>
+    {!estimate && <Callout tone="warning" message="The transfer details changed. Edit the transfer to get a new price." />}
     <View style={{ alignItems: 'center', gap: 2, paddingTop: t.spacing[2], paddingBottom: t.spacing[4] }}>
       <Text style={muted}>They receive {mode === 'exact_in' ? 'about' : 'exactly'}</Text>
       <AmountText style={{ ...text, fontSize: t.typography.fontSize['4xl'], fontWeight: '700' }}>{receiveRaw ? fmtDest(receiveRaw) : '—'}</AmountText>
@@ -467,7 +476,7 @@ export function CrossChainSendPanel({ address, family, walletId, bitcoinUnit, he
   const footer = () => {
     if (step === 'configure') return configured ? <Button title={estimating ? 'Getting a price…' : 'Review'} disabled={!canReview} onPress={review} /> : null;
     if (step === 'review') return <>
-      <SlideToConfirm label={sendLabel} loading={busy} disabled={busy || !estimate} onConfirm={() => void send()} />
+      <HoldToConfirm label={sendLabel} loading={busy} disabled={!canReview} confirmationKey={JSON.stringify([terms, estimate])} onConfirm={send} />
       <Button title="Edit" variant="secondary" disabled={busy} onPress={() => { setError(''); setStep('configure'); }} />
     </>;
     if (step !== 'status' || !session) return null;

@@ -1,11 +1,11 @@
-import React from 'react';
+import React, { memo, useMemo, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { formatBitcoinAmount } from '../utils/bitcoinUnits';
 import { formatUsd } from '../utils/portfolio';
 import { feedback } from '../utils/feedback';
-import { btcNetworkLabel, formatTokenAmount, networkLabel, type AssetListItem } from '../utils/asset-list-model';
+import { btcNetworkLabel, formatTokenAmount, liteUsdHoldings, LITE_USD_KEY, networkLabel, type AssetListItem } from '../utils/asset-list-model';
 import { AmountText } from './AmountText';
 import { AssetIcon } from './AssetIcon';
 import { EmptyState } from './EmptyState';
@@ -16,6 +16,7 @@ export { formatUsd };
 
 interface Props {
   items: readonly AssetListItem[];
+  walletKey?: string | null;
   bitcoinUnit: 'BTC' | 'sats';
   showNetworks: boolean;
   hideBalances?: boolean;
@@ -51,76 +52,102 @@ export function AssetListSettingsButton({ onPress, filtered = false }: { onPress
 }
 
 /** Group the portfolio rows within the owning screen's vertical scroll. */
-export function AssetList({ items, bitcoinUnit, showNetworks, hideBalances = false, emptyReason, onOpenSettings, onAssetPress }: Props) {
+export function AssetList({ items, walletKey, bitcoinUnit, showNetworks, hideBalances = false, emptyReason, onOpenSettings, onAssetPress }: Props) {
   const theme = useAppTheme();
-  const styles = makeStyles(theme);
-
-  const amountText = (item: AssetListItem): { amount: string; unit: string } => {
-    if (item.isBtc) return { amount: formatBitcoinAmount(item.amount, bitcoinUnit), unit: bitcoinUnit };
-    return { amount: formatTokenAmount(item.amount, item.precision), unit: item.ticker };
-  };
-
-  // "Spark", or "3 networks" when it lives on several (the icons say which).
-  const whereLabel = (item: AssetListItem): string =>
-    item.networks.length === 1 ? locationLabel(item, item.networks[0]) : `${item.networks.length} networks`;
-
-  const locationLabel = (item: AssetListItem, network: AssetListItem['networks'][number]) => {
-    const chain = item.isBtc ? item.holdings.find(holding => holding.network === network)?.chain : undefined;
-    return chain ? btcNetworkLabel(network, chain) : networkLabel(network);
-  };
-
-  const renderRow = (item: AssetListItem, index: number) => {
-    const { amount, unit } = amountText(item);
-    const fiat = !hideBalances && item.usdValue !== undefined && item.usdValue > 0 ? formatUsd(item.usdValue) : null;
-    const empty = !hideBalances && item.amount <= 0;
-    const ticker = item.ticker !== item.name ? item.ticker : '';
-    const location = showNetworks && item.networks.length ? `, on ${item.networks.map(network => locationLabel(item, network)).join(', ')}` : '';
-    const identifier = item.assetIdLabel ? `, asset ID ${item.holdings[0].token?.asset_id}` : '';
-    return (
-      <PressableScale
-        key={item.key}
-        scaleTo={0.98}
-        onPress={() => { feedback.select(); onAssetPress(item); }}
-        accessibilityRole="button"
-        accessibilityLabel={hideBalances
-          ? `${item.name}${location}, balance hidden${identifier}`
-          : `${item.name}, ${amount} ${unit}${fiat ? `, about ${fiat}` : ''}${location}${identifier}`}
-        style={[styles.row, index < items.length - 1 && styles.rowDivider]}
-      >
-        <AssetIcon ticker={item.ticker} logoUri={item.icon} size={40} showBadge={false} />
-        <View style={styles.info}>
-          <Text style={styles.name} numberOfLines={1}>{item.name}</Text>
-          {showNetworks && item.networks.length > 0 ? (
-            <View style={styles.subtitleRow}>
-              {!!ticker && <Text style={styles.subtitle}>{ticker}</Text>}
-              {!!ticker && <Text style={styles.subtitle}>·</Text>}
-              <NetworkStack networks={item.networks} label={whereLabel(item)} />
-            </View>
-          ) : (
-            !!ticker && <Text style={styles.subtitle} numberOfLines={1}>{ticker}</Text>
-          )}
-          {item.assetIdLabel && <Text style={styles.subtitle} numberOfLines={1}>{item.assetIdLabel}</Text>}
-        </View>
-        <View style={styles.amounts}>
-          <AmountText
-            style={[styles.amount, empty && styles.amountEmpty]}
-            numberOfLines={1}
-            adjustsFontSizeToFit
-            minimumFontScale={0.75}
-          >
-            {hideBalances ? HIDDEN : amount}{!hideBalances && <Text style={styles.unit}>{` ${unit}`}</Text>}
-          </AmountText>
-          {fiat && <AmountText style={styles.fiat} numberOfLines={1}>{`≈ ${fiat}`}</AmountText>}
-        </View>
-        <Ionicons name="chevron-forward" size={16} color={theme.colors.text.tertiary} />
-      </PressableScale>
-    );
-  };
-
-  if (items.length) return <View style={styles.group}>{items.map(renderRow)}</View>;
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  if (items.length) return (
+    <View style={styles.group}>
+      {items.map((item, index) => {
+        const row = { item, bitcoinUnit, showNetworks, hideBalances, divider: index < items.length - 1, onAssetPress, styles, theme };
+        return item.key === LITE_USD_KEY
+          ? <LiteUsdRow key={`${item.key}:${walletKey ?? ''}`} {...row} />
+          : <AssetRow key={item.key} {...row} />;
+      })}
+    </View>
+  );
   const empty = EMPTY_STATES[emptyReason ?? 'default'];
   return <EmptyState {...empty} actionLabel={emptyReason ? 'Edit asset settings' : undefined} onAction={onOpenSettings} />;
 }
+
+interface AssetRowProps extends Required<Pick<Props, 'bitcoinUnit' | 'showNetworks' | 'hideBalances' | 'onAssetPress'>> {
+  item: AssetListItem;
+  divider: boolean;
+  styles: ReturnType<typeof makeStyles>;
+  theme: ReturnType<typeof useAppTheme>;
+  nested?: boolean;
+  expanded?: boolean;
+}
+
+function LiteUsdRow(props: AssetRowProps) {
+  const [expanded, setExpanded] = useState(false);
+  const { item, divider } = props;
+  const holdings = useMemo(() => expanded ? liteUsdHoldings(item) : [], [expanded, item]);
+  return (
+    <>
+      <AssetRow {...props} expanded={expanded} divider={expanded || divider}
+        onAssetPress={() => setExpanded(value => !value)} />
+      {holdings.map((holding, index) => (
+        <AssetRow {...props} key={holding.key} item={holding} nested
+          divider={divider || index < holdings.length - 1} />
+      ))}
+    </>
+  );
+}
+
+const AssetRow = memo(function AssetRow({ item, bitcoinUnit, showNetworks, hideBalances, onAssetPress, divider, styles, theme, nested, expanded }: AssetRowProps) {
+  const unit = item.isBtc ? bitcoinUnit : item.ticker;
+  const amount = item.isBtc ? formatBitcoinAmount(item.amount, bitcoinUnit) : formatTokenAmount(item.amount, item.precision);
+  const fiat = !hideBalances && item.usdValue !== undefined && item.usdValue > 0 ? formatUsd(item.usdValue) : null;
+  const empty = !hideBalances && item.amount <= 0;
+  const ticker = item.ticker !== item.name ? item.ticker : '';
+  const networkNames = showNetworks ? item.networks.map(network => {
+    const chain = item.isBtc ? item.holdings.find(holding => holding.network === network)?.chain : undefined;
+    return chain ? btcNetworkLabel(network, chain) : networkLabel(network);
+  }) : [];
+  const location = networkNames.length ? `, on ${networkNames.join(', ')}` : '';
+  const where = networkNames.length === 1 ? networkNames[0] : `${networkNames.length} networks`;
+  const identifier = item.assetIdLabel ? `, asset ID ${item.holdings[0].token?.asset_id}` : '';
+  const chevron = expanded === undefined ? 'chevron-forward' : expanded ? 'chevron-up' : 'chevron-down';
+  return (
+    <PressableScale
+      scaleTo={0.98}
+      onPress={() => { feedback.select(); onAssetPress(item); }}
+      accessibilityRole="button"
+      accessibilityLabel={hideBalances
+        ? `${item.name}${location}, balance hidden${identifier}`
+        : `${item.name}, ${amount} ${unit}${fiat ? `, about ${fiat}` : ''}${location}${identifier}`}
+      accessibilityState={expanded === undefined ? undefined : { expanded }}
+      style={[styles.row, nested && styles.nestedRow, divider && styles.rowDivider]}
+    >
+      <AssetIcon ticker={item.ticker} logoUri={item.icon} size={nested ? 32 : 40} showBadge={false} />
+      <View style={styles.info}>
+        <Text style={styles.name} numberOfLines={1}>{item.name}</Text>
+        {networkNames.length ? (
+          <View style={styles.subtitleRow}>
+            {!!ticker && <Text style={styles.subtitle}>{ticker}</Text>}
+            {!!ticker && <Text style={styles.subtitle}>·</Text>}
+            <NetworkStack networks={item.networks} label={where} />
+          </View>
+        ) : (
+          !!ticker && <Text style={styles.subtitle} numberOfLines={1}>{ticker}</Text>
+        )}
+        {item.assetIdLabel && <Text style={styles.subtitle} numberOfLines={1}>{item.assetIdLabel}</Text>}
+      </View>
+      <View style={styles.amounts}>
+        <AmountText
+          style={[styles.amount, empty && styles.amountEmpty]}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.75}
+        >
+          {hideBalances ? HIDDEN : amount}{!hideBalances && <Text style={styles.unit}>{` ${unit}`}</Text>}
+        </AmountText>
+        {fiat && <AmountText style={styles.fiat} numberOfLines={1}>{`≈ ${fiat}`}</AmountText>}
+      </View>
+      <Ionicons name={chevron} size={16} color={theme.colors.text.tertiary} />
+    </PressableScale>
+  );
+});
 
 const makeStyles = (theme: ReturnType<typeof useAppTheme>) => StyleSheet.create({
   settingsButton: {
@@ -149,6 +176,10 @@ const makeStyles = (theme: ReturnType<typeof useAppTheme>) => StyleSheet.create(
     minHeight: 64,
     paddingVertical: theme.spacing[3],
     paddingHorizontal: theme.spacing[4],
+  },
+  nestedRow: {
+    paddingLeft: theme.spacing[6],
+    backgroundColor: theme.colors.surface.secondary,
   },
   rowDivider: {
     borderBottomWidth: StyleSheet.hairlineWidth,

@@ -10,7 +10,7 @@ const mockDatabase = {
   setActiveWallet: jest.fn(),
 };
 const mockDispatch = jest.fn();
-const mockInitializeProtocols = jest.fn();
+const mockPrepareBalanceSnapshot = jest.fn();
 
 jest.mock('react-redux', () => ({ useDispatch: () => mockDispatch }));
 jest.mock('../services/DatabaseService', () => ({ __esModule: true, default: { getInstance: () => mockDatabase } }));
@@ -20,10 +20,9 @@ jest.mock('../store/slices/walletSlice', () => ({
   setUnlocked: (value: boolean) => ({ type: 'wallet/setUnlocked', payload: value }),
 }));
 jest.mock('../services/initializeServices', () => ({
-  initializeProtocolServices: () => mockInitializeProtocols(),
   autoRestoreNostrConnection: async () => {},
 }));
-jest.mock('../services/balanceSnapshot', () => ({ hasBalanceSnapshot: async () => false }));
+jest.mock('../services/balanceSnapshot', () => ({ prepareBalanceSnapshot: (wallet: unknown) => mockPrepareBalanceSnapshot(wallet) }));
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -31,7 +30,6 @@ beforeEach(() => {
   mockDatabase.getActiveWallet.mockResolvedValue(mockWallet);
   mockDatabase.getAllWallets.mockResolvedValue([]);
   mockDatabase.setActiveWallet.mockResolvedValue(undefined);
-  mockInitializeProtocols.mockResolvedValue(undefined);
 });
 
 it('offers a retry after a database failure and opens the saved wallet after it recovers', async () => {
@@ -46,7 +44,8 @@ it('offers a retry after a database failure and opens the saved wallet after it 
   fireEvent.press(retry);
   await waitFor(() => expect(navigation.replace).toHaveBeenCalledWith('Dashboard'));
   expect(mockDispatch).toHaveBeenCalledWith({ type: 'wallet/setActiveWallet', payload: mockWallet });
-  expect(mockInitializeProtocols).toHaveBeenCalledTimes(1);
+  expect(mockPrepareBalanceSnapshot).toHaveBeenCalledTimes(1);
+  expect(mockPrepareBalanceSnapshot).toHaveBeenCalledWith(mockWallet);
 });
 
 it('opens setup only after successfully reading an empty wallet list', async () => {
@@ -60,7 +59,7 @@ it('opens setup only after successfully reading an empty wallet list', async () 
   fireEvent.press(retry);
   await waitFor(() => expect(navigation.replace).toHaveBeenCalledWith('WalletSetup'));
   expect(mockDatabase.getAllWallets).toHaveBeenCalledTimes(2);
-  expect(mockInitializeProtocols).not.toHaveBeenCalled();
+  expect(mockPrepareBalanceSnapshot).not.toHaveBeenCalled();
 });
 
 it.each([
@@ -76,5 +75,5 @@ it.each([
   expect(mockDatabase.setActiveWallet).toHaveBeenCalledWith(mockWallet.id);
   expect(navigation.replace).not.toHaveBeenCalled();
   expect(mockDispatch).not.toHaveBeenCalled();
-  expect(mockInitializeProtocols).not.toHaveBeenCalled();
+  expect(mockPrepareBalanceSnapshot).not.toHaveBeenCalled();
 });

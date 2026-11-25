@@ -35,6 +35,7 @@ jest.mock('../components/ActivityDetailSheet', () => ({ ActivityDetailSheet: () 
 const { AmountPad } = require('../components/AmountPad');
 const { AmountEditorModal } = require('../components/AmountEditorModal');
 const { ActionButtons } = require('../components/ActionButtons');
+const { HoldToConfirm } = require('../components/HoldToConfirm');
 const { Input } = require('../components/Input');
 const { RgbAssetSheet } = require('../components/receive/RgbAssetSheet');
 const { RgbInvoiceOptions } = require('../components/receive/RgbInvoiceOptions');
@@ -201,6 +202,14 @@ test('renders the UI gallery to output/ui-preview.html', () => {
       html: sceneToHtml(<PaymentSuccessOverlay visible title="Sent" amountLabel="2,100 sats" subtitle="to Mario"
         rows={[{ label: 'From', value: 'Account Spark' }, { label: 'Total', value: '2,101 sats' }, { label: 'Fee', value: '1 sat' }]}
         onDone={() => {}} secondary={{ label: 'See receipt', onPress: () => {} }} />),
+    },
+    {
+      title: 'Confirm a payment',
+      caption: 'Hold to confirm, or open the alternate confirmation dialog. The spinner stays inside the button icon during submission.',
+      html: sceneToHtml(<View style={{ padding: 20, gap: 20 }}>
+        <HoldToConfirm label="Pay 2,101 sats" onConfirm={() => {}} />
+        <HoldToConfirm label="Pay 2,101 sats" loading onConfirm={() => {}} />
+      </View>, 'justify-content:center'),
     },
     {
       title: 'Payment received — the same overlay',

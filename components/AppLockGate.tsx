@@ -22,6 +22,7 @@ import SecurityService from '../services/SecurityService';
 import { setAppUnlocked } from '../services/appLockState';
 import { useAppSelector } from '../store/hooks';
 import { BrandLoading } from './brand/BrandLoading';
+import { markWalletStartup, markWalletUnlocked } from '../utils/walletPerformance';
 
 const PIN_LENGTH = 6;
 // Wrong-PIN cooldowns are counted and enforced by SecurityService, which keeps
@@ -56,6 +57,7 @@ export function AppLockGate() {
   // Publish the lock state for services (e.g. NWC payment approval).
   useEffect(() => {
     setAppUnlocked(mode === 'unlocked');
+    if (mode === 'unlocked') markWalletUnlocked();
   }, [mode]);
   const [methods, setMethods] = useState<LockMethods>({ pin: false, biometric: false });
   const [pin, setPin] = useState('');
@@ -189,7 +191,9 @@ export function AppLockGate() {
 
   return (
     <Modal visible animationType="none" transparent={false} onRequestClose={() => {}}>
-      {mode === 'checking' ? <BrandLoading accessibilityLabel="Checking wallet security" /> : <SafeAreaView style={styles.container}>
+      {mode === 'checking' ? <BrandLoading accessibilityLabel="Checking wallet security" /> : <SafeAreaView
+        style={styles.container}
+        onLayout={mode === 'locked' && methods.pin ? () => markWalletStartup('pin-visible') : undefined}>
         {mode === 'error' && (
           <View style={styles.header}>
             <Text style={styles.title}>Wallet locked</Text>

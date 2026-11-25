@@ -5,6 +5,8 @@ import { decodeBolt11 } from '../../utils/decodeInvoice';
 import { resolveLightningAddressToInvoice } from '../../utils/lnurl';
 import { decodeTarget, targetOfferRails, TEST_NETWORKS } from './target';
 import type { ChainNetwork, PayTarget } from './target';
+import { PaymentNotSentError, PaymentUncertainError } from './errors';
+export { PaymentNotSentError };
 export { decodeTarget, offerAmountSat } from './target';
 export type { ChainNetwork, PayTarget, TargetKind } from './target';
 
@@ -234,6 +236,11 @@ function getAccount(preview: Preview, route: Route) {
   return account;
 }
 function validateQuote(quote: Quote, preview: Preview, account: PayAccount) {
+  const now = Date.now();
+  if (preview.code.kind === 'bolt11' && preview.code.invoiceExpiresAt !== undefined && preview.code.invoiceExpiresAt <= now) {
+    if (preview.code.lnurl) throw new PaymentNotSentError('The Lightning address returned an expired invoice. Refresh the price to try again.', 'retry-price');
+    throw new PaymentNotSentError('The Lightning invoice has expired. Ask for a fresh invoice.', 'replace-invoice');
+  }
   const spend = quoteSpend(quote);
   const asset = account.spendAsset ?? { id: 'BTC', ticker: 'sats', precision: 0 };
   const requested = preview.request.asset;
@@ -245,8 +252,10 @@ function validateQuote(quote: Quote, preview: Preview, account: PayAccount) {
     || quote.recipientSat !== preview.request.amountSat || spend.amount <= 0 || spend.fee < 0
     || spend.total !== spend.amount + spend.fee || !Number.isSafeInteger(spend.amount + spend.fee)
     || spend.asset.id !== asset.id || spend.asset.ticker !== asset.ticker || spend.asset.precision !== asset.precision
-    || !Number.isInteger(asset.precision) || asset.precision < 0 || asset.precision > 18
-    || quote.expiresAt <= Math.floor(Date.now() / 1000)) throw new Error('The payment quote is invalid or expired.');
+    || !Number.isInteger(asset.precision) || asset.precision < 0 || asset.precision > 18) throw new Error('The payment quote is invalid.');
+  if (quote.expiresAt <= Math.floor(now / 1000)) {
+    throw new PaymentNotSentError('The price expired. Refresh the price before paying.', 'retry-price');
+  }
   if (!quote.spend && quote.totalSat! > 2100000000000000) throw new Error('The payment quote is invalid.');
 }
 export async function quotePayment(preview: Preview, selectedRoute?: Route): Promise<Quote> {
@@ -319,8 +328,6 @@ export function bestOffer(offers: PaymentOffer[]): PaymentOffer | undefined {
 }
 const executions = new Map<string, Promise<PaymentResult>>();
 const normalizeResult = (value: PaymentResult): PaymentResult => value && ['completed', 'pending', 'unknown', 'failed'].includes(value.status) ? value : { status: 'unknown' };
-import { PaymentNotSentError, PaymentUncertainError } from './errors';
-export { PaymentNotSentError };
 export async function executePaymentOffer(preview: Preview, offer: PaymentOffer, attemptId: string): Promise<PaymentResult> {
   try {
   const owner = owners.get(offer);

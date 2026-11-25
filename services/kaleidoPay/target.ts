@@ -86,6 +86,7 @@ function fromInvoice(invoice: string, raw: string): PayTarget {
     kind: 'bolt11', raw, invoice,
     networks: bolt11Networks(invoice),
     amountSat: decoded.amountSats || undefined,
+    invoiceExpiresAt: expiresAt ?? undefined,
     description: decoded.description,
   };
 }

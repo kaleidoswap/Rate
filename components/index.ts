@@ -9,7 +9,7 @@ export * from './CopyButton';
 export * from './SectionHeader';
 export * from './Divider';
 export * from './Sheet';
-export * from './SlideToConfirm';
+export * from './HoldToConfirm';
 export * from './PressableScale';
 export * from './Callout';
 export * from './AmountText';

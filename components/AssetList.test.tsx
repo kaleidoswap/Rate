@@ -1,7 +1,7 @@
 import React from 'react';
 import { fireEvent, render } from '@testing-library/react-native';
 import { AssetList, formatUsd } from './AssetList';
-import { buildAssetListItems, type BuildAssetListArgs } from '../utils/asset-list-model';
+import { buildAssetListItems, LITE_USD_KEY, type AssetListItem, type BuildAssetListArgs } from '../utils/asset-list-model';
 
 const token = (id: string) => ({
   asset_id: id,
@@ -48,4 +48,31 @@ test('masks asset balances and fiat values visually and in accessibility labels'
   expect(screen.queryByText(/42/)).toBeNull();
   fireEvent.press(row);
   expect(onAssetPress).toHaveBeenCalledWith(expect.objectContaining({ ticker: 'USDT' }));
+});
+
+test('expands the USD total in place and opens the selected token and network', () => {
+  const holdings = items({ showBtc: false, assets: [
+    { ...token('rgb:usd'), ticker: 'USDT', name: 'RGB Dollars', balance: 400 },
+    { ...token('btkn1usd'), ticker: 'USDB', name: 'Spark Dollars', protocol: 'SPARK', balance: 10 },
+  ] });
+  const total: AssetListItem = {
+    key: LITE_USD_KEY, ticker: 'USD', name: 'US Dollar', precision: 2, amount: 410,
+    networks: ['rgb', 'spark'], holdings: holdings.flatMap(item => item.holdings), isBtc: false,
+  };
+  const onAssetPress = jest.fn();
+  const props = { items: [total], bitcoinUnit: 'sats' as const, showNetworks: true, onAssetPress };
+  const screen = render(<AssetList {...props} walletKey="first" />);
+  const aggregate = () => screen.getByLabelText(/^US Dollar, 410 USD/);
+  expect(aggregate().props.accessibilityState.expanded).toBe(false);
+  expect(screen.queryByLabelText(/^Spark Dollars/)).toBeNull();
+
+  fireEvent.press(aggregate());
+  expect(aggregate().props.accessibilityState.expanded).toBe(true);
+  expect(onAssetPress).not.toHaveBeenCalled();
+  expect(screen.getByLabelText('RGB Dollars, 400 USDT, on RGB')).toBeTruthy();
+  fireEvent.press(screen.getByLabelText('Spark Dollars, 10 USDB, on Spark'));
+  expect(onAssetPress).toHaveBeenCalledWith(expect.objectContaining({ key: 'asset:spark:btkn1usd', networks: ['spark'] }));
+
+  screen.rerender(<AssetList {...props} walletKey="second" />);
+  expect(screen.queryByLabelText(/^Spark Dollars/)).toBeNull();
 });

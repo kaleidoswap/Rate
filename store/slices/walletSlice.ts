@@ -3,8 +3,9 @@ import { toEngineProtocol } from '../../utils/protocol-bridge'
 import { createSlice, PayloadAction, createAsyncThunk } from '@reduxjs/toolkit';
 import { WalletRecord, NetworkConfig, NetworkType } from '../../services/DatabaseService';
 import DatabaseService from '../../services/DatabaseService';
-import { clearBalanceSnapshots } from '../../services/balanceSnapshot';
+import { clearBalanceSnapshots, snapshotWalletKey } from '../../services/balanceSnapshot';
 import type { BtcNetwork } from '../../utils/wallet-balance-summary';
+import type { InventoryRecord } from '../../utils/asset-inventory';
 import { protocolManager, rgbAccountAdapter, initializeProtocols } from '../../services/protocols';
 import type { ProtocolType } from '../../services/protocols';
 
@@ -40,6 +41,16 @@ export interface BtcBalance {
   networkChains?: Partial<Record<BtcNetwork, string>>;
 }
 
+/** Display data only. Cached holdings must not enter the spendable inventory. */
+export interface WalletPortfolio {
+  walletKey: string;
+  btcBalance: BtcBalance | null;
+  assets: InventoryRecord[];
+  btcPriceUSD: number;
+  updatedAt?: number;
+  status: 'cached' | 'partial' | 'current';
+}
+
 interface WalletState {
   // Wallet info
   activeWallet: WalletRecord | null;
@@ -52,6 +63,7 @@ interface WalletState {
 
   // Balances
   btcBalance: BtcBalance | null;
+  portfolio: WalletPortfolio | null;
   btcPriceUSD: number;
 
   // Loading states
@@ -74,6 +86,7 @@ const initialState: WalletState = {
   isInitialized: false,
   activeProtocol: null,
   btcBalance: null,
+  portfolio: null,
   btcPriceUSD: 0,
   isLoading: false,
   isBalanceLoading: false,
@@ -81,6 +94,14 @@ const initialState: WalletState = {
   error: null,
   lastSyncTime: null,
 };
+
+function replaceActiveWallet(state: WalletState, wallet: WalletRecord | null) {
+  if (snapshotWalletKey(state.activeWallet) !== snapshotWalletKey(wallet)) {
+    state.btcBalance = null;
+    state.portfolio = null;
+  }
+  state.activeWallet = wallet;
+}
 
 // Async thunks
 export const loadWallets = createAsyncThunk(
@@ -266,8 +287,9 @@ export const unlockWallet = createAsyncThunk(
 
 export const loadBtcBalance = createAsyncThunk(
   'wallet/loadBtcBalance',
-  async (_, { rejectWithValue }) => {
+  async (_, { getState, rejectWithValue }) => {
     try {
+      const walletKey = snapshotWalletKey((getState() as { wallet: WalletState }).wallet?.activeWallet);
       let totalConfirmed = 0, totalUnconfirmed = 0;
       const byProtocol: Record<string, { confirmed: number; unconfirmed: number; total: number }> = {};
       const protocols: Array<'RGB' | 'SPARK' | 'ARKADE' | 'BARK'> = ['RGB', 'SPARK', 'ARKADE', 'BARK'];
@@ -283,11 +305,11 @@ export const loadBtcBalance = createAsyncThunk(
           } catch { /* skip */ }
         }
       }
-      return {
+      return { walletKey, balance: {
         vanilla: { settled: totalConfirmed, future: totalConfirmed + totalUnconfirmed, spendable: totalConfirmed },
         colored: { settled: 0, future: 0, spendable: 0 },
         byProtocol,
-      };
+      } };
     } catch (error: any) {
       return rejectWithValue(error.message);
     }
@@ -331,7 +353,7 @@ const walletSlice = createSlice({
   initialState,
   reducers: {
     setActiveWallet: (state, action: PayloadAction<WalletRecord>) => {
-      state.activeWallet = action.payload;
+      replaceActiveWallet(state, action.payload);
     },
     setWallets: (state, action: PayloadAction<WalletRecord[]>) => {
       state.wallets = action.payload;
@@ -345,8 +367,11 @@ const walletSlice = createSlice({
     setActiveProtocol: (state, action: PayloadAction<ProtocolType | null>) => {
       state.activeProtocol = action.payload;
     },
-    setBtcBalance: (state, action: PayloadAction<BtcBalance>) => {
-      state.btcBalance = action.payload;
+    setBtcBalance: (state, action: PayloadAction<{ walletKey: string; balance: BtcBalance }>) => {
+      if (snapshotWalletKey(state.activeWallet) === action.payload.walletKey) state.btcBalance = action.payload.balance;
+    },
+    setWalletPortfolio: (state, action: PayloadAction<WalletPortfolio>) => {
+      if (snapshotWalletKey(state.activeWallet) === action.payload.walletKey) state.portfolio = action.payload;
     },
     setBtcPriceUSD: (state, action: PayloadAction<number>) => {
       state.btcPriceUSD = action.payload;
@@ -370,7 +395,7 @@ const walletSlice = createSlice({
     builder
       .addCase(loadWallets.fulfilled, (state, action) => {
         state.wallets = action.payload.wallets;
-        state.activeWallet = action.payload.activeWallet;
+        replaceActiveWallet(state, action.payload.activeWallet);
         if (action.payload.activeWallet) {
           state.isInitialized = true;
         }
@@ -379,13 +404,13 @@ const walletSlice = createSlice({
     // Switch wallet
     builder
       .addCase(switchWallet.fulfilled, (state, action) => {
-        state.activeWallet = action.payload;
+        replaceActiveWallet(state, action.payload);
       });
 
     // Create new wallet
     builder
       .addCase(createNewWallet.fulfilled, (state, action) => {
-        state.activeWallet = action.payload;
+        replaceActiveWallet(state, action.payload);
         if (action.payload) {
           state.wallets = [action.payload, ...state.wallets];
         }
@@ -396,7 +421,7 @@ const walletSlice = createSlice({
       .addCase(deleteWallet.fulfilled, (state, action) => {
         state.wallets = state.wallets.filter(w => w.id !== action.payload);
         if (state.activeWallet?.id === action.payload) {
-          state.activeWallet = state.wallets[0] || null;
+          replaceActiveWallet(state, state.wallets[0] || null);
         }
       });
 
@@ -421,7 +446,7 @@ const walletSlice = createSlice({
       })
       .addCase(unlockWallet.fulfilled, (state, action) => {
         state.isLoading = false;
-        state.activeWallet = action.payload;
+        replaceActiveWallet(state, action.payload);
         state.isUnlocked = true;
       })
       .addCase(unlockWallet.rejected, (state, action) => {
@@ -436,7 +461,7 @@ const walletSlice = createSlice({
       })
       .addCase(loadBtcBalance.fulfilled, (state, action) => {
         state.isBalanceLoading = false;
-        state.btcBalance = action.payload;
+        if (action.payload.walletKey === snapshotWalletKey(state.activeWallet)) state.btcBalance = action.payload.balance;
       })
       .addCase(loadBtcBalance.rejected, (state, action) => {
         state.isBalanceLoading = false;
@@ -472,6 +497,7 @@ export const {
   setUnlocked,
   setInitialized,
   setBtcBalance,
+  setWalletPortfolio,
   setBtcPriceUSD,
   setLoading,
   setBalanceLoading,

@@ -29,19 +29,19 @@ export type { MindMood } from './mindMood';
 type Pose = 'idle' | 'listening' | 'thinking' | 'speaking' | 'success' | 'asleep';
 
 const ART: Record<Pose, number> = {
-  idle: require('../../assets/prismo/idle.png'),
-  listening: require('../../assets/prismo/listening.png'),
-  thinking: require('../../assets/prismo/thinking.png'),
-  speaking: require('../../assets/prismo/speaking.png'),
-  success: require('../../assets/prismo/success.png'),
-  asleep: require('../../assets/prismo/idle-blink.png'),
+  idle: require('../../assets/prismo/idle.webp'),
+  listening: require('../../assets/prismo/listening.webp'),
+  thinking: require('../../assets/prismo/thinking.webp'),
+  speaking: require('../../assets/prismo/speaking.webp'),
+  success: require('../../assets/prismo/success.webp'),
+  asleep: require('../../assets/prismo/idle-blink.webp'),
 };
 /** The same poses with eyes (and for speaking, mouth) closed, patched over the still. */
 const CLOSED: Partial<Record<Pose, number>> = {
-  idle: require('../../assets/prismo/idle-blink.png'),
-  listening: require('../../assets/prismo/listening-blink.png'),
-  thinking: require('../../assets/prismo/thinking-blink.png'),
-  speaking: require('../../assets/prismo/speaking-blink.png'),
+  idle: require('../../assets/prismo/idle-blink.webp'),
+  listening: require('../../assets/prismo/listening-blink.webp'),
+  thinking: require('../../assets/prismo/thinking-blink.webp'),
+  speaking: require('../../assets/prismo/speaking-blink.webp'),
 };
 const POSES = Object.keys(ART) as Pose[];
 

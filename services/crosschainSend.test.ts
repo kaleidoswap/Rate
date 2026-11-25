@@ -87,6 +87,33 @@ test('a quote above the balance is not paid', async () => {
   expect(mockWallet.adapter.sendAsset).not.toHaveBeenCalled();
 });
 
+test('a wallet switch while loading the journal never charges the newly connected Spark wallet', async () => {
+  const reviewedWallet = mockWallet.adapter;
+  const otherWallet = adapter();
+  const started = sendCrossChain({ walletId: 1, form: form(), reviewed, destDecimals: 6, id: 's1' });
+  mockWallet = { adapter: otherWallet, network: 'mainnet' };
+  await expect(started).rejects.toThrow(/wallet or transfer details changed/);
+  expect(createQuote).not.toHaveBeenCalled();
+  expect(reviewedWallet.sendAsset).not.toHaveBeenCalled();
+  expect(otherWallet.sendAsset).not.toHaveBeenCalled();
+  expect(await loadCrossChainSession(1)).toBeNull();
+});
+
+test('a hold invalidated during journal persistence clears the reservation before any funding', async () => {
+  let current = true;
+  const setItem = jest.mocked(AsyncStorage.setItem);
+  const write = setItem.getMockImplementation()!;
+  setItem.mockImplementationOnce(async (key, value) => {
+    await write(key, value);
+    current = false;
+  });
+  await expect(sendCrossChain({ walletId: 1, form: form(), reviewed, destDecimals: 6, id: 's1', isApprovalCurrent: () => current }))
+    .rejects.toThrow(/wallet or transfer details changed/);
+  expect(mockWallet.adapter.sendAsset).not.toHaveBeenCalled();
+  expect(submitOrder).not.toHaveBeenCalled();
+  expect(await loadCrossChainSession(1)).toBeNull();
+});
+
 test('Spark must be connected and on mainnet', async () => {
   mockWallet = null;
   await expect(sendCrossChain({ walletId: 1, form: form(), reviewed, destDecimals: 6, id: 's1' })).rejects.toThrow(/Connect your Spark/);

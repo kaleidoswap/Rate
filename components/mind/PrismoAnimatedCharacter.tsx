@@ -8,12 +8,12 @@ import { prismoAnimationHtml } from './prismoAnimationHtml';
 
 export interface PrismoAnimationRef { setLevel: (level: number) => void }
 interface Props { phase: 'idle' | 'listening' | 'thinking' | 'speaking'; size?: number; onPress?: () => void; accessibilityLabel: string }
-const original = require('../../assets/prismo/idle.png');
+const original = require('../../assets/prismo/idle.webp');
 let imagesPromise: Promise<string[]> | undefined;
 function loadImages() {
-  return imagesPromise ??= Promise.all([original, require('../../assets/prismo/idle-blink.png')].map(async module => {
+  return imagesPromise ??= Promise.all([original, require('../../assets/prismo/idle-blink.webp')].map(async module => {
     const asset = await Asset.fromModule(module).downloadAsync();
-    return `data:image/png;base64,${await new File(asset.localUri!).base64()}`;
+    return `data:image/webp;base64,${await new File(asset.localUri!).base64()}`;
   })).catch(error => { imagesPromise = undefined; throw error; });
 }
 

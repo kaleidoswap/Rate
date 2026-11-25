@@ -141,6 +141,7 @@ test('switches from a generated Any RGB QR to an exact held asset on the same sc
   expect(mockRgbInvoice.mock.calls[0][0]).not.toHaveProperty('amount');
   expect(ui.getByText(mockRgbCode)).toBeTruthy();
   expect(ui.queryByPlaceholderText('Any amount')).toBeNull();
+  expect(ui.getByText('Any amount')).toBeTruthy();
 
   fireEvent.press(ui.getByLabelText('Change RGB asset, Any RGB asset'));
   expect(ui.getByRole('radio', { name: /Any RGB asset/, checked: true })).toBeTruthy();
@@ -149,7 +150,7 @@ test('switches from a generated Any RGB QR to an exact held asset on the same sc
   expect(ui.queryByLabelText('Share RGB invoice')).toBeNull();
   await generate();
   expect(mockRgbInvoice).toHaveBeenLastCalledWith(expect.objectContaining({ asset_id: rgbToken.asset_id }));
-  expect(ui.getByLabelText('Change RGB asset, USD')).toBeTruthy();
+  expect(ui.getByLabelText('Change RGB asset, USD RGB')).toBeTruthy();
   expect(ui.getByLabelText('Amount (USD)')).toBeTruthy();
 });
 
@@ -161,7 +162,14 @@ test('applies the exact RGB amount and inline settings together, clearing stale 
   const ui = render(<ReceiveScreen navigation={navigation} route={{ params: { selectedAsset: rgbToken } }} />);
   await generate();
   expect(ui.getByLabelText('Copy RGB invoice')).toBeTruthy();
-  expect(ui.getByText('Invoice options')).toBeTruthy();
+  expect(ui.getByRole('button', { name: 'Invoice options, Standard, 1 hour, 1 confirmation', expanded: false })).toBeTruthy();
+  expect(ui.getAllByLabelText('Payment network: Mutinynet')).toHaveLength(1);
+
+  const viewOrder = JSON.stringify(ui.toJSON());
+  const elementPositions = ['Change RGB asset, USD RGB', 'Payment network: Mutinynet', 'Amount (USD)', 'receive-qr',
+    'Share RGB invoice', 'Copy RGB invoice', 'Invoice options'].map(label => viewOrder.indexOf(label));
+  expect(elementPositions.every(position => position >= 0)).toBe(true);
+  expect(elementPositions).toEqual([...elementPositions].sort((a, b) => a - b));
 
   const input = ui.getByLabelText('Amount (USD)');
   fireEvent.changeText(input, '1.0000001');
@@ -173,6 +181,7 @@ test('applies the exact RGB amount and inline settings together, clearing stale 
   expect(mockRgbInvoice).toHaveBeenCalledTimes(1);
 
   fireEvent.changeText(input, '1,250001');
+  fireEvent.press(ui.getByRole('button', { name: /Invoice options/ }));
   fireEvent.press(ui.getByLabelText('Private'));
   fireEvent.press(ui.getByLabelText('1 day'));
   fireEvent.press(ui.getByLabelText('3 blocks'));
@@ -181,6 +190,7 @@ test('applies the exact RGB amount and inline settings together, clearing stale 
   expect(mockRgbInvoice).toHaveBeenLastCalledWith({ asset_id: rgbToken.asset_id,
     amount: 1_250_001, witness: false, duration_seconds: 86_400, min_confirmations: 3 });
   expect(ui.getByText(updated)).toBeTruthy();
+  expect(ui.getByText('Private · 1 day · 3 confirmations')).toBeTruthy();
 });
 
 test('a late RGB invoice never replaces a different asset request', async () => {
@@ -192,7 +202,7 @@ test('a late RGB invoice never replaces a different asset request', async () => 
   await generate();
   expect(mockRgbInvoice).toHaveBeenLastCalledWith(expect.objectContaining({ asset_id: rgbToken.asset_id }));
 
-  fireEvent.press(ui.getByLabelText('Change RGB asset, USD'));
+  fireEvent.press(ui.getByLabelText('Change RGB asset, USD RGB'));
   fireEvent.press(ui.getByRole('radio', { name: /Any RGB asset/ }));
   await generate();
   await act(async () => { finishOldInvoice({ invoice: 'rgb:stale-invoice-from-old-asset' }); });
@@ -209,6 +219,8 @@ test('an RGB Lightning request uses asset units and keeps expiry inline without 
   fireEvent.press(ui.getByLabelText(/Change receive network/));
   fireEvent.press(ui.getByText('Choose RGB Lightning'));
   await generate();
+  expect(ui.getByRole('button', { name: 'Invoice options, 1 hour', expanded: false })).toBeTruthy();
+  fireEvent.press(ui.getByRole('button', { name: /Invoice options/ }));
   expect(ui.queryByText('Invoice type')).toBeNull();
   expect(ui.queryByText('Confirmations')).toBeNull();
   fireEvent.changeText(ui.getByLabelText('Amount (USD)'), '0.000001');

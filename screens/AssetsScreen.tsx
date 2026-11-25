@@ -1,5 +1,5 @@
 // screens/AssetsScreen.tsx — every asset, one clear list.
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -7,9 +7,9 @@ import {
   TouchableOpacity,
   RefreshControl,
   ScrollView,
-  DeviceEventEmitter,
 } from 'react-native';
 import { useSelector } from 'react-redux';
+import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { RootState } from '../store';
@@ -24,29 +24,33 @@ import { rgbWalletSupport } from '../utils/rgb-wallet';
 import { usePolicy } from '../hooks/usePolicy';
 import { useBitcoinPrice, useDisplayAmount } from '../utils/bitcoinUnits';
 import { tokenValueSats } from '../utils/portfolio';
-import { inventoryBtc, inventoryTokens, liteUsdAssetIds as liteUsdIdsOf } from '../utils/asset-inventory';
+import { btcInputFromWallet, buildAssetInventory, inventoryBtc, inventoryTokens, liteUsdAssetIds as liteUsdIdsOf } from '../utils/asset-inventory';
 import { useAssetInventory } from '../hooks/useAssetInventory';
 import { assetDetailForItem } from '../utils/asset-list-model';
 import { useAssetListView } from '../hooks/useAssetListView';
 import { snapshotWalletKey } from '../services/balanceSnapshot';
+import { requestBalanceRefresh, type BalanceRefreshResult } from '../services/balanceRefresh';
 
 interface Props {
   navigation: any;
   route?: { params?: { issue?: boolean } };
 }
 
-const REFRESH_TIMEOUT_MS = 15000;
-
 export default function AssetsScreen({ navigation, route }: Props) {
-  // The shared asset inventory: the dashboard's refresh writes it.
-  const btcBalance = useSelector((state: RootState) => state.wallet.btcBalance);
   const walletKey = useSelector((state: RootState) => snapshotWalletKey(state.wallet.activeWallet));
-  const inventory = useAssetInventory();
+  const recordedPortfolio = useSelector((state: RootState) => state.wallet.portfolio);
+  const portfolio = recordedPortfolio?.walletKey === walletKey ? recordedPortfolio : null;
+  const liveBalance = useSelector((state: RootState) => recordedPortfolio && !portfolio ? null : state.wallet.btcBalance);
+  const liveInventory = useAssetInventory();
+  const btcBalance = portfolio ? portfolio.btcBalance : liveBalance;
+  const inventory = useMemo(() => portfolio
+    ? buildAssetInventory({ btc: btcInputFromWallet(portfolio.btcBalance), assets: portfolio.assets })
+    : liveBalance ? liveInventory : [], [portfolio, liveBalance, liveInventory]);
   const btc = inventoryBtc(inventory);
   const tokens = useMemo(() => inventoryTokens(inventory), [inventory]);
   const bitcoinUnit = useSelector((state: RootState) => state.settings.bitcoinUnit);
   const hideBalances = useSelector((state: RootState) => state.settings.hideBalances);
-  const btcPriceUSD = useBitcoinPrice();
+  const btcPriceUSD = useBitcoinPrice() || portfolio?.btcPriceUSD || 0;
   const { format: formatDisplayAmount, cycle: cycleDenomination } = useDisplayAmount();
   const policy = usePolicy();
   const isLite = policy.level === 'lite';
@@ -63,14 +67,26 @@ export default function AssetsScreen({ navigation, route }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route?.params?.issue]);
   const [refreshing, setRefreshing] = useState(false);
-  const refreshTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const [refreshResult, setRefreshResult] = useState<BalanceRefreshResult>();
+  const refreshRequest = useRef<Promise<BalanceRefreshResult> | undefined>(undefined);
+  useEffect(() => {
+    setRefreshing(false);
+    setRefreshResult(undefined);
+    return () => { refreshRequest.current = undefined; };
+  }, [walletKey]);
+  useFocusEffect(useCallback(() => {
+    if (walletKey) void requestBalanceRefresh(walletKey).catch(() => undefined);
+  }, [walletKey]));
+  useEffect(() => {
+    if (portfolio?.status === 'current') setRefreshResult(undefined);
+  }, [portfolio?.status, portfolio?.updatedAt]);
 
   // Lite folds its dollar assets into one USD line on the dashboard; do the same here.
   const liteUsdAssetIds = useMemo(() => (isLite ? liteUsdIdsOf(tokens) : undefined), [tokens, isLite]);
   const testProtocols = useMemo(() => {
-    const { onchain, lightning, spark, arkade, bark } = btcBalance?.networkChains ?? {};
+    const { onchain, spark, arkade, bark } = btcBalance?.networkChains ?? {};
     return new Set([
-      ...(onchain || lightning ? ['RGB'] : []),
+      ...(onchain ? ['RGB'] : []),
       ...(spark ? ['SPARK'] : []),
       ...(arkade ? ['ARKADE'] : []),
       ...(bark ? ['BARK'] : []),
@@ -94,21 +110,23 @@ export default function AssetsScreen({ navigation, route }: Props) {
   const totalSats = (btcBalance?.summary?.total ?? btcBalance?.vanilla?.spendable ?? 0)
     + tokenValueSats(tokens, btcPriceUSD, testProtocols);
   const total = formatDisplayAmount(totalSats);
+  const hasHoldings = btcBalance != null || tokens.length > 0;
+  const balanceStatus = refreshResult === 'unavailable' ? 'Could not refresh your balances.'
+    : portfolio?.status === 'cached' ? 'Showing the last known balances.'
+    : portfolio?.status === 'partial' || (!portfolio && refreshResult === 'partial') ? 'Some balances could not be refreshed.' : null;
 
-  // A refresh ends when the dashboard writes new balances (or after a while).
-  useEffect(() => {
-    if (!refreshing) return;
-    setRefreshing(false);
-    if (refreshTimer.current) clearTimeout(refreshTimer.current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [btcBalance, inventory]);
-  useEffect(() => () => { if (refreshTimer.current) clearTimeout(refreshTimer.current); }, []);
-
-  const refresh = () => {
+  const refresh = async () => {
+    if (refreshRequest.current) return;
     setRefreshing(true);
-    DeviceEventEmitter.emit('rate.refreshBalance');
-    if (refreshTimer.current) clearTimeout(refreshTimer.current);
-    refreshTimer.current = setTimeout(() => setRefreshing(false), REFRESH_TIMEOUT_MS);
+    setRefreshResult(undefined);
+    const request = requestBalanceRefresh(walletKey);
+    refreshRequest.current = request;
+    const result = await request.catch((): BalanceRefreshResult => 'unavailable');
+    if (refreshRequest.current === request) {
+      refreshRequest.current = undefined;
+      setRefreshing(false);
+      setRefreshResult(result);
+    }
   };
 
   return (
@@ -140,15 +158,19 @@ export default function AssetsScreen({ navigation, route }: Props) {
         }
       >
         <TouchableOpacity style={styles.totalBlock} onPress={cycleDenomination} accessibilityRole="button"
-          accessibilityLabel={`Total balance ${total.primary} ${total.unitLabel}. Tap to change unit.`}>
+          disabled={!hasHoldings}
+          accessibilityLabel={hasHoldings ? `Total balance ${total.primary} ${total.unitLabel}. Tap to change unit.` : 'Total balance unavailable'}>
           <Text style={styles.totalLabel}>Total balance</Text>
           <View style={styles.totalRow}>
-            <AmountText style={styles.totalAmount} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{total.primary}</AmountText>
-            {!total.hidden && (total.unitLabel === 'sats' || total.unitLabel === 'BTC') && (
+            <AmountText style={styles.totalAmount} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{hasHoldings ? total.primary : '—'}</AmountText>
+            {hasHoldings && !total.hidden && (total.unitLabel === 'sats' || total.unitLabel === 'BTC') && (
               <Text style={styles.totalUnit}>{total.unitLabel}</Text>
             )}
           </View>
-          {!!total.secondary && <AmountText style={styles.totalSecondary}>{total.secondary}</AmountText>}
+          {hasHoldings && !!total.secondary && <AmountText style={styles.totalSecondary}>{total.secondary}</AmountText>}
+          {balanceStatus && <Text style={styles.balanceStatus} accessibilityLiveRegion="polite">
+            {balanceStatus}{portfolio?.updatedAt ? ` Last updated ${new Date(portfolio.updatedAt).toLocaleString()}.` : ''}
+          </Text>}
         </TouchableOpacity>
 
         <AssetList
@@ -220,5 +242,11 @@ const styles = StyleSheet.create({
     fontSize: theme.typography.fontSize.sm,
     color: theme.colors.text.tertiary,
     marginTop: theme.spacing[0.5],
+  },
+  balanceStatus: {
+    color: theme.colors.text.secondary,
+    fontSize: theme.typography.fontSize.sm,
+    marginTop: theme.spacing[2],
+    textAlign: 'center',
   },
 });

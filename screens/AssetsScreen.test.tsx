@@ -1,14 +1,15 @@
 import React from 'react';
-import { DeviceEventEmitter } from 'react-native';
-import { fireEvent, render } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import AssetsScreen from './AssetsScreen';
 import { USDB_TOKEN_ADDRESS } from '../utils/flashnet';
 import settingsReducer from '../store/slices/settingsSlice';
+import { registerBalanceRefresh, type BalanceRefreshResult } from '../services/balanceRefresh';
 
 let mockState: any;
 let mockLevel: 'lite' | 'advanced' = 'advanced';
 const mockDispatch = jest.fn(action => { mockState.settings = settingsReducer(mockState.settings, action); });
 jest.mock('react-redux', () => ({ useSelector: (fn: any) => fn(mockState), useDispatch: () => mockDispatch }));
+jest.mock('@react-navigation/native', () => ({ useFocusEffect: jest.fn() }));
 jest.mock('../hooks/usePolicy', () => ({
   usePolicy: () => require('@kaleidorg/wallet-engine').policyFor(mockLevel),
 }));
@@ -165,16 +166,39 @@ test('every row can be hidden and the empty state still opens settings', () => {
   expect(screen.getByLabelText('Show asset Bitcoin, Bitcoin, Spark').props.value).toBe(false);
 });
 
-test('one add button in Advanced; pull to refresh asks the dashboard for fresh balances', () => {
-  const emit = jest.fn();
-  (DeviceEventEmitter as any).emit = emit;
+test('one add button in Advanced; pull to refresh waits for the actual result', async () => {
+  let finish!: (result: BalanceRefreshResult) => void;
+  const refresh = jest.fn(() => new Promise<BalanceRefreshResult>(resolve => { finish = resolve; }));
+  const off = registerBalanceRefresh('3:1', refresh);
   const screen = render(<AssetsScreen navigation={navigation()} />);
   expect(screen.getAllByLabelText('Issue a new asset')).toHaveLength(1);
   fireEvent.press(screen.getByLabelText('Issue a new asset'));
   expect(mockOpenIssue).toHaveBeenCalled();
-  const scroll = screen.UNSAFE_getAllByType(require('react-native').ScrollView)[0];
-  scroll.props.refreshControl.props.onRefresh();
-  expect(emit).toHaveBeenCalledWith('rate.refreshBalance');
+  const control = () => screen.UNSAFE_getAllByType(require('react-native').ScrollView)[0].props.refreshControl.props;
+  act(() => { void control().onRefresh(); });
+  expect(refresh).toHaveBeenCalledTimes(1);
+  expect(control().refreshing).toBe(true);
+  await act(async () => finish('partial'));
+  await waitFor(() => expect(control().refreshing).toBe(false));
+  expect(screen.getByText('Some balances could not be refreshed.')).toBeTruthy();
+  off();
+});
+
+test('shows the same cached portfolio with its status, and never shows it after a wallet switch', () => {
+  mockState.wallet.portfolio = {
+    walletKey: '3:1', btcBalance: mockState.wallet.btcBalance,
+    assets: mockState.assets.rgbAssets, btcPriceUSD: 100_000, updatedAt: 1000, status: 'cached',
+  };
+  mockState.wallet.btcBalance = null;
+  mockState.assets.rgbAssets = [];
+  const nav = navigation();
+  const screen = render(<AssetsScreen navigation={nav} />);
+  expect(screen.getByLabelText(/^Tether USD, 30 USDT/)).toBeTruthy();
+  expect(screen.getByText(/^Showing the last known balances\. Last updated/)).toBeTruthy();
+  mockState.wallet.activeWallet = { id: 5, created_at: 1 };
+  screen.rerender(<AssetsScreen navigation={nav} />);
+  expect(screen.queryByLabelText(/^Tether USD/)).toBeNull();
+  expect(screen.getByLabelText('Total balance unavailable')).toBeTruthy();
 });
 
 test('no issue button when the RGB account can’t issue (the node over NWC)', () => {
