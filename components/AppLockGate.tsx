@@ -21,6 +21,7 @@ import { theme } from '../theme';
 import SecurityService from '../services/SecurityService';
 import { setAppUnlocked } from '../services/appLockState';
 import { useAppSelector } from '../store/hooks';
+import { BrandLoading } from './brand/BrandLoading';
 
 const PIN_LENGTH = 6;
 // Wrong-PIN cooldowns are counted and enforced by SecurityService, which keeps
@@ -188,7 +189,7 @@ export function AppLockGate() {
 
   return (
     <Modal visible animationType="none" transparent={false} onRequestClose={() => {}}>
-      <SafeAreaView style={styles.container}>
+      {mode === 'checking' ? <BrandLoading accessibilityLabel="Checking wallet security" /> : <SafeAreaView style={styles.container}>
         {mode === 'error' && (
           <View style={styles.header}>
             <Text style={styles.title}>Wallet locked</Text>
@@ -274,7 +275,7 @@ export function AppLockGate() {
             )}
           </>
         )}
-      </SafeAreaView>
+      </SafeAreaView>}
     </Modal>
   );
 }

@@ -23,17 +23,15 @@ test('a row shows the amount with its unit and its dollar value', () => {
   expect(onAssetPress).toHaveBeenCalledWith(expect.objectContaining({ key: 'BTC' }));
 });
 
-test('renders the full portfolio and clears a search without leaving the list', () => {
+test('renders the full portfolio without default search or network controls', () => {
   const assets = ['ALPHA', 'BRAVO', 'CHARLIE', 'DELTA', 'ECHO', 'FOXTROT'].map(token);
   const screen = render(
     <AssetList items={items({ assets })} bitcoinUnit="sats" showNetworks={false} onAssetPress={jest.fn()} />
   );
   expect(screen.getByLabelText(/^FOXTROT,/)).toBeTruthy();
-  fireEvent.changeText(screen.getByLabelText('Search assets'), 'echo');
   expect(screen.getByLabelText(/^ECHO,/)).toBeTruthy();
-  expect(screen.queryByLabelText(/^FOXTROT,/)).toBeNull();
-  fireEvent.press(screen.getByLabelText('Clear search'));
-  expect(screen.getByLabelText(/^FOXTROT,/)).toBeTruthy();
+  expect(screen.queryByLabelText('Search assets')).toBeNull();
+  expect(screen.queryByLabelText('RGB')).toBeNull();
 });
 
 test('dollar formatting keeps cents and small values readable', () => {

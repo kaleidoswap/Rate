@@ -48,6 +48,8 @@ import {
   MainHeader
 } from '../components';
 import { Sheet } from '../components/Sheet';
+import { AssetListSettingsButton } from '../components/AssetList';
+import { AssetListSettingsSheet } from '../components/AssetListSettingsSheet';
 import { RecentActivityWidget } from '../components/RecentActivityWidget';
 import { InsightCards } from '../components/mind/InsightCards';
 import { ProfileChip } from '../components/ProfileChip';
@@ -59,7 +61,8 @@ import {
 } from '../utils/asset-inventory';
 import { breakdownAssetRows, tokenValueSats as priceTokensInSats } from '../utils/portfolio';
 
-import { assetDetailForItem, buildAssetListItems, LITE_USD_KEY } from '../utils/asset-list-model';
+import { assetDetailForItem, LITE_USD_KEY } from '../utils/asset-list-model';
+import { useAssetListView } from '../hooks/useAssetListView';
 import { readBarkRecovery, syncBarkForUpdates } from '../services/BarkService';
 import { getStoredHandle } from '../services/kaleidoswapMe';
 
@@ -740,7 +743,7 @@ export default function DashboardScreen({ navigation }: Props) {
   const showBtcAsset = balanceUpdatedAt !== undefined || Object.keys(protocolBalances ?? {}).length > 0
     || (!balanceRefreshing && !connectionError && !balanceWarning);
   const showAssets = showBtcAsset || tokens.length > 0;
-  const assetItems = buildAssetListItems({
+  const assetList = useAssetListView({
     btcNetworks: btcEntry.networks,
     btcMainnetNetworks: mainnetBitcoinByNetwork(protocolBalances ?? {}, summaryChannels, rgbBalanceIsLightning, testProtocols),
     btcNetworkChains: btcNetworkChains(testNetworks),
@@ -752,7 +755,7 @@ export default function DashboardScreen({ navigation }: Props) {
     btcPriceUSD,
     liteUsdAssetIds: isLite ? liteUsdAssetIds : undefined,
     testProtocols,
-  });
+  }, walletKey);
 
   const renderChannelModal = () => (
     <Sheet
@@ -1016,12 +1019,15 @@ export default function DashboardScreen({ navigation }: Props) {
 
         {showAssets && (
           <View style={styles.assetsSection}>
-            <SectionHeader title="Assets" actionLabel="Open Assets" onAction={() => navigation.getParent()?.navigate('Assets')} />
+            <SectionHeader
+              title="Assets"
+              actionLabel="Open Assets"
+              onAction={() => navigation.getParent()?.navigate('Assets')}
+              trailingAction={<AssetListSettingsButton onPress={assetList.openSettings} filtered={assetList.filtered} />}
+            />
             <AssetList
-              key={walletKey ?? undefined}
-              items={assetItems}
+              {...assetList.listProps}
               bitcoinUnit={bitcoinUnit}
-              showNetworks={policy.showNetworks}
               hideBalances={denominatedTotal.hidden}
               onAssetPress={(item) => {
                 if (item.key === LITE_USD_KEY) {
@@ -1067,6 +1073,7 @@ export default function DashboardScreen({ navigation }: Props) {
         )}
       </ScrollView>
 
+      <AssetListSettingsSheet {...assetList.settingsProps} />
       {renderChannelModal()}
     </View>
   );

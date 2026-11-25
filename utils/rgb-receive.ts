@@ -77,35 +77,26 @@ export function rgbReceiveSupport(adapter: unknown): RgbReceiveSupport {
 }
 
 /** The createRgbInvoice params for an on-chain RGB receive. Defaults match the invoice Receive always made. */
-export function rgbInvoiceParams({ assetId, expirySeconds, options = DEFAULT_RGB_RECEIVE_OPTIONS, support = NO_RGB_RECEIVE_SUPPORT, proxyV1 = false }: {
+export function rgbInvoiceParams({ assetId, amount, expirySeconds, options = DEFAULT_RGB_RECEIVE_OPTIONS, support = NO_RGB_RECEIVE_SUPPORT, proxyV1 = false }: {
   assetId: string;
+  /** Exact amount in the asset's smallest units. Omit for an open invoice. */
+  amount?: number;
   expirySeconds: number;
   options?: RgbReceiveOptions;
   support?: RgbReceiveSupport;
   proxyV1?: boolean;
 }): Record<string, unknown> {
+  const specificAsset = assetId !== ANY_RGB_ASSET_ID;
+  if (specificAsset && amount !== undefined && (!Number.isSafeInteger(amount) || amount <= 0)) {
+    throw new Error('The RGB invoice amount must be a positive integer in asset units.');
+  }
   const durationSeconds = support.expiry && options.durationSeconds ? options.durationSeconds : expirySeconds;
   return {
-    ...(assetId === ANY_RGB_ASSET_ID ? {} : { asset_id: assetId }),
+    ...(specificAsset ? { asset_id: assetId, ...(amount !== undefined ? { amount } : {}) } : {}),
     min_confirmations: support.minConfirmations ? options.minConfirmations : 1,
     duration_seconds: rgbReceiveExpiry(durationSeconds, proxyV1),
     ...(support.invoiceKind && options.kind === 'blinded' ? { witness: false } : {}),
   };
-}
-
-/** True when nothing differs from the default invoice (the Advanced summary says "Default"). */
-export function isDefaultRgbOptions(options: RgbReceiveOptions): boolean {
-  return options.kind === DEFAULT_RGB_RECEIVE_OPTIONS.kind
-    && options.durationSeconds === DEFAULT_RGB_RECEIVE_OPTIONS.durationSeconds
-    && options.minConfirmations === DEFAULT_RGB_RECEIVE_OPTIONS.minConfirmations;
-}
-
-/** A contract id typed or pasted by the user, normalised; null when it isn't one. */
-export function parseRgbContractId(input: string): string | null {
-  const id = input.trim().replace(/^rgb:\/\//i, 'rgb:').split('#')[0];
-  if (/^rgb:[A-Za-z0-9~_!$.-]{20,}$/.test(id)) return `rgb:${id.slice(4)}`;
-  if (/^rgb1[a-z0-9]{20,}$/i.test(id)) return id.toLowerCase();
-  return null;
 }
 
 /** A short form of a contract id for labels: rgb:CJkb4YZw…wTfvRZ8. */
@@ -190,10 +181,11 @@ export async function listRgbUtxos(adapter: unknown): Promise<RgbUtxo[]> {
 /** Plain wording for the errors an RGB receive can fail with. */
 export function rgbReceiveErrorMessage(message: string, { advanced, onDevice }: { advanced: boolean; onDevice: boolean }): string {
   if (message.includes(RGB_PROXY_V1_RECEIVE_DURATION_ERROR)) return RGB_PROXY_V1_RECEIVE_DURATION_ERROR;
+  if (message.includes(RGB_COLLECTIBLE_RECEIVE_AMOUNT_ERROR)) return RGB_COLLECTIBLE_RECEIVE_AMOUNT_ERROR;
   if (/No uncolored UTXOs|InsufficientAllocationSlots|NoAvailableUtxos/i.test(message)) {
     const where = onDevice ? 'Your RGB wallet' : 'Your RGB Lightning node';
     return advanced
-      ? `${where} has no free receive slot for this asset. Create slots under Advanced, or switch to a Standard invoice.`
+      ? `${where} has no free receive slot for this asset. Create receive slots, or switch to a Standard invoice.`
       : `${where} has no free bitcoin output to receive this asset into. Send a small amount of bitcoin to it on-chain first${onDevice ? '.' : ', or receive over Lightning.'}`;
   }
   // Unmapped adapter errors never reach the user raw: they keep the code for
@@ -205,6 +197,7 @@ export function rgbReceiveErrorMessage(message: string, { advanced, onDevice }: 
 }
 
 export const RGB_PROXY_V1_RECEIVE_DURATION_ERROR = 'Choose an RGB invoice expiry of 30 minutes or longer.';
+export const RGB_COLLECTIBLE_RECEIVE_AMOUNT_ERROR = 'Enter 1 unit to request this collectible.';
 const PROXY_V1_SHORT_EXPIRY = { label: '30 min', seconds: 1800 };
 const STANDARD_SHORT_EXPIRY = { label: '10 min', seconds: 600 };
 

@@ -24,11 +24,11 @@
  *   import './theme/satoshiText'
  *
  * Faces must be registered via `expo-font` (App.tsx `useFonts(kaleidoFonts)`)
- * before text paints; the app render is gated on that, so by first paint the
- * faces are loaded.
+ * before application text paints. If a face fails to load, use the system font.
  */
 import * as React from 'react';
 import { StyleSheet, type TextStyle } from 'react-native';
+import { isLoaded } from 'expo-font';
 import { satoshiFamilyForWeight, satoshiFontFamily } from '@kaleidorg/kaleido-ui/native/fonts';
 
 type AnyComponent = React.ComponentType<{ style?: unknown }> & {
@@ -65,6 +65,11 @@ function createFontWrapper(Original: AnyComponent, label: string): AnyComponent 
       explicit && SATOSHI_FAMILIES.has(explicit)
         ? explicit
         : satoshiFamilyForWeight(flat.fontWeight);
+
+    if (!isLoaded(family)) {
+      const fallback = explicit ? [props.style, { fontFamily: undefined }] : props.style;
+      return React.createElement(Original, { ...props, style: fallback });
+    }
 
     // Override (append) so the face + neutral weight win over the incoming
     // style. fontWeight:'normal' is essential: the weight is baked into the

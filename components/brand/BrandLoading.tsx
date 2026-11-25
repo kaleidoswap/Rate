@@ -3,21 +3,18 @@ import { StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Circle, Defs, RadialGradient, Stop } from 'react-native-svg';
 import Animated, {
+  cancelAnimation,
   Easing,
   interpolate,
   useAnimatedStyle,
+  useReducedMotion,
   useSharedValue,
   withRepeat,
   withTiming,
 } from 'react-native-reanimated';
 import { BrandMark } from './BrandMark';
 
-// Shared with BrandIntro so the intro's final frame and this steady-state
-// loader are visually identical — the intro overlay fades out onto this with
-// no jarring white flash.
-// Navy (matches the app's dark background family #0A1326) rather than the old
-// dark-forest green, so the loader reads as the same surface as the wallet.
-export const BRAND_BG = ['#13213B', '#0A1326', '#06101F'] as [string, string, string];
+const BRAND_BG = ['#13213B', '#0A1326', '#06101F'] as const;
 
 interface BrandLoadingProps {
   /** Size of the kaleidoscope mark (px). */
@@ -26,6 +23,7 @@ interface BrandLoadingProps {
   message?: string;
   /** Show the KaleidoSwap wordmark + tagline (default true). */
   showWordmark?: boolean;
+  accessibilityLabel?: string;
 }
 
 const DOTS = [0, 1, 2];
@@ -33,8 +31,7 @@ const GLOW = 320; // diameter of the soft radial halo behind the mark
 
 /**
  * Steady-state branded loading screen: dark kaleidoscope background, the mark
- * over a breathing glow, and three softly pulsing dots. Designed to sit
- * directly behind <BrandIntro/> so the launch feels like one continuous moment.
+ * over a breathing glow, and three softly pulsing dots.
  */
 export const BrandLoading: React.FC<BrandLoadingProps> = ({
   markSize = 132,
@@ -43,18 +40,25 @@ export const BrandLoading: React.FC<BrandLoadingProps> = ({
   // under the mark, and the hand-typed name rendered incompletely — so skip the
   // letters and show just the (correct) kaleidoscope-K mark.
   showWordmark = false,
+  accessibilityLabel = message ?? 'Opening Rate',
 }) => {
   const glow = useSharedValue(0);
   const t = useSharedValue(0);
+  const reduceMotion = useReducedMotion();
 
   useEffect(() => {
+    if (reduceMotion) return;
     glow.value = withRepeat(
       withTiming(1, { duration: 1300, easing: Easing.inOut(Easing.quad) }),
       -1,
       true
     );
     t.value = withRepeat(withTiming(1, { duration: 1080, easing: Easing.linear }), -1, false);
-  }, []);
+    return () => {
+      cancelAnimation(glow);
+      cancelAnimation(t);
+    };
+  }, [glow, reduceMotion, t]);
 
   const glowStyle = useAnimatedStyle(() => ({
     opacity: interpolate(glow.value, [0, 1], [0.22, 0.5]),
@@ -66,6 +70,7 @@ export const BrandLoading: React.FC<BrandLoadingProps> = ({
   const useDotStyle = (i: number) =>
     useAnimatedStyle(() => {
       'worklet';
+      if (reduceMotion) return { opacity: 0.55 };
       const phase = (t.value + i * 0.18) % 1;
       const tri = phase < 0.5 ? phase * 2 : (1 - phase) * 2; // 0→1→0
       return {
@@ -80,7 +85,7 @@ export const BrandLoading: React.FC<BrandLoadingProps> = ({
   const dotStyles = [dot0, dot1, dot2];
 
   return (
-    <View style={styles.root}>
+    <View style={styles.root} accessible accessibilityRole="progressbar" accessibilityLabel={accessibilityLabel} accessibilityState={{ busy: true }}>
       <LinearGradient colors={BRAND_BG} start={{ x: 0.2, y: 0 }} end={{ x: 0.85, y: 1 }} style={StyleSheet.absoluteFill} />
       <View style={styles.center}>
         <View style={styles.markWrap}>

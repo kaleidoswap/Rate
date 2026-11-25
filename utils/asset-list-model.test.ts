@@ -73,7 +73,7 @@ test('exact RGB contract searches open the requested holding even with the same 
 });
 
 test('Lite folds its dollar assets into one USD row, like the dashboard', () => {
-  const assets = [token(LIQUID_USDT_ASSET_ID, 'USDt', 'LIQUID', 30_000_000), ...base.assets];
+  const assets = [token(LIQUID_USDT_ASSET_ID, 'USDt', 'LIQUID', 30_000_000, 6, 'Liquid Tether'), ...base.assets];
   const items = buildAssetListItems({ ...base, assets, liteUsdAssetIds: new Set([LIQUID_USDT_ASSET_ID, 'rgb-usdt']) });
   const usd = items.find((i) => i.key === LITE_USD_KEY)!;
   expect(usd).toMatchObject({ ticker: 'USD', amount: 30, usdValue: 30 });
@@ -81,6 +81,24 @@ test('Lite folds its dollar assets into one USD row, like the dashboard', () => 
   expect(items.find((i) => i.key === 'asset:rgb:rgb-usdt')?.amount).toBe(30);
   const [exact] = filterAssetItems(items, 'all', LIQUID_USDT_ASSET_ID);
   expect(assetDetailForItem(exact, 'sats')).toMatchObject({ asset_id: LIQUID_USDT_ASSET_ID });
+  expect(filterAssetItems(items, 'all', 'Liquid Tether').map(item => item.key)).toEqual([LITE_USD_KEY]);
+});
+
+test('visibility applies to the exact holding before Lite aggregation', () => {
+  const assets = [token(LIQUID_USDT_ASSET_ID, 'USDt', 'LIQUID', 30_000_000), ...base.assets];
+  const items = buildAssetListItems({ ...base, assets, liteUsdAssetIds: new Set([LIQUID_USDT_ASSET_ID]),
+    hiddenAssetKeys: new Set([`asset:rgb:${LIQUID_USDT_ASSET_ID}`, 'asset:rgb:rgb-usdt']) });
+  expect(items.map(item => item.key)).toEqual(['BTC', 'asset:spark:spark-usdt', 'asset:rgb:xaut']);
+});
+
+test('search on a selected network checks only its holdings in folded Lite USD', () => {
+  const spark = USDB_TOKEN_ADDRESS.mainnet;
+  const assets = [token(LIQUID_USDT_ASSET_ID, 'USDt', 'LIQUID', 30_000_000, 6, 'Liquid Tether'),
+    token(spark, 'USDB', 'SPARK', 20_000_000, 6, 'Spark USD Balance')];
+  const items = buildAssetListItems({ ...base, showBtc: false, assets, liteUsdAssetIds: new Set([LIQUID_USDT_ASSET_ID, spark]) });
+  expect(filterAssetItems(items, 'spark', 'liquid tether')).toEqual([]);
+  expect(filterAssetItems(items, 'spark', LIQUID_USDT_ASSET_ID)).toEqual([]);
+  expect(filterAssetItems(items, 'spark', 'spark usd')).toMatchObject([{ amount: 20, networks: ['spark'] }]);
 });
 
 test('the header total adds up every priced row', () => {

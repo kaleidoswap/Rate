@@ -8,7 +8,8 @@ const mockRgbCode = 'rgb:invoice-for-selected-contract';
 const mockSparkCode = 'spark1addressfixtureforselectedasset';
 const mockArkadeCode = 'tark1addressfixtureforarkade';
 const mockLightningCode = 'lntb1arkadeholdinvoicefixture';
-const mockRgbInvoice = jest.fn(async () => ({ invoice: mockRgbCode }));
+const mockRgbInvoice = jest.fn(async (_params: object): Promise<{ invoice: string; expiration_timestamp?: number }> => ({ invoice: mockRgbCode }));
+const mockRgbLightningInvoice = jest.fn(async () => ({ invoice: 'lntb1-rgb-asset-invoice-fixture' }));
 const mockSparkAddress = jest.fn(async () => ({ address: mockSparkCode }));
 const mockSparkInvoice = jest.fn();
 const mockArkadeAddress = jest.fn(async (): Promise<{ address?: string }> => ({ address: mockArkadeCode }));
@@ -22,6 +23,7 @@ const mockDetection = jest.fn();
 const mockDispatch = jest.fn();
 let mockConnected: Record<'RGB' | 'SPARK' | 'ARKADE', boolean>;
 let mockAssets: InventoryAsset[];
+let mockRemoteRgb: boolean;
 
 jest.mock('@react-navigation/native', () => ({ useIsFocused: () => true }));
 jest.mock('../store/hooks', () => ({
@@ -38,11 +40,12 @@ jest.mock('../hooks/useDepositDetection', () => ({ useDepositDetection: (options
 jest.mock('../hooks/useSparkAutoClaim', () => ({ useSparkAutoClaim: jest.fn() }));
 jest.mock('../services/protocols', () => ({
   rgbAccountAdapter: () => ({ protocolName: 'RGB_L1', isConnected: () => mockConnected.RGB, createRgbInvoice: mockRgbInvoice }),
-  rgbAccountIsOnDevice: () => mockConnected.RGB,
+  rgbAccountIsOnDevice: () => mockConnected.RGB && !mockRemoteRgb,
   protocolManager: { getAdapterIfAvailable: (key: string) => ({
     SPARK: { isConnected: () => mockConnected.SPARK, getReceiveAddress: mockSparkAddress, createInvoice: mockSparkInvoice },
     ARKADE: { isConnected: () => mockConnected.ARKADE, getReceiveAddress: mockArkadeAddress, getBoardingAddress: mockBoardingAddress },
-  })[key as 'SPARK' | 'ARKADE'] },
+    RGB_LN: { isConnected: () => mockConnected.RGB && mockRemoteRgb, createInvoice: mockRgbLightningInvoice, listChannels: async () => [{ is_usable: true }] },
+  })[key as 'SPARK' | 'ARKADE' | 'RGB_LN'] },
 }));
 jest.mock('../services/protocols/wdk', () => ({ isRgbConnecting: () => false, subscribeRgbConnecting: () => () => {} }));
 jest.mock('../services/protocols/rgbL1', () => ({ rgbLibModule: () => ({ supportsBfa: () => false }) }));
@@ -68,9 +71,12 @@ jest.mock('../components/receive/ReceiveQr', () => ({
   },
 }));
 jest.mock('../components/receive/ReceiveRoutePicker', () => ({
-  ReceiveRoutePicker: ({ onLightningDestination }: { onLightningDestination: (account: string) => void }) => {
+  ReceiveRoutePicker: ({ onLightningDestination, onMethod }: { onLightningDestination: (account: string) => void; onMethod: (method: string) => void }) => {
     const { Text } = require('react-native');
-    return <Text onPress={() => onLightningDestination('ARKADE')}>Choose Arkade Lightning</Text>;
+    return <>
+      <Text onPress={() => onLightningDestination('ARKADE')}>Choose Arkade Lightning</Text>
+      <Text onPress={() => onMethod('lightning')}>Choose RGB Lightning</Text>
+    </>;
   },
 }));
 jest.mock('../components/rgb/RgbUtxoSheet', () => ({ RgbUtxoSheet: () => null }));
@@ -86,8 +92,10 @@ const generate = () => act(async () => { await jest.advanceTimersByTimeAsync(450
 beforeEach(() => {
   jest.useFakeTimers();
   jest.clearAllMocks();
+  mockRgbInvoice.mockReset().mockResolvedValue({ invoice: mockRgbCode });
   mockConnected = { RGB: false, SPARK: false, ARKADE: false };
   mockAssets = [];
+  mockRemoteRgb = false;
   require('react-native').AppState = { currentState: 'active', addEventListener: () => ({ remove: jest.fn() }) };
 });
 afterEach(() => jest.useRealTimers());
@@ -120,6 +128,106 @@ test('an offline token route does not create a Bitcoin request with a different 
   expect(mockRgbInvoice).not.toHaveBeenCalled();
   expect(mockSparkAddress).not.toHaveBeenCalled();
   expect(ui.getByText('Connect the RGB account to receive this asset.')).toBeTruthy();
+});
+
+test('switches from a generated Any RGB QR to an exact held asset on the same screen', async () => {
+  mockConnected.RGB = true;
+  mockAssets = [{ ...rgbToken, ...tokenBalance }, { ...sparkToken, ...tokenBalance }];
+  const ui = render(<ReceiveScreen navigation={navigation} />);
+  fireEvent.press(ui.getByLabelText('Choose an RGB asset'));
+  fireEvent.press(ui.getByRole('radio', { name: /Any RGB asset/ }));
+  await generate();
+  expect(mockRgbInvoice.mock.calls[0][0]).not.toHaveProperty('asset_id');
+  expect(mockRgbInvoice.mock.calls[0][0]).not.toHaveProperty('amount');
+  expect(ui.getByText(mockRgbCode)).toBeTruthy();
+  expect(ui.queryByPlaceholderText('Any amount')).toBeNull();
+
+  fireEvent.press(ui.getByLabelText('Change RGB asset, Any RGB asset'));
+  expect(ui.getByRole('radio', { name: /Any RGB asset/, checked: true })).toBeTruthy();
+  fireEvent.press(ui.getByRole('radio', { name: /USD.*USD RGB/ }));
+  expect(ui.queryByText(mockRgbCode)).toBeNull();
+  expect(ui.queryByLabelText('Share RGB invoice')).toBeNull();
+  await generate();
+  expect(mockRgbInvoice).toHaveBeenLastCalledWith(expect.objectContaining({ asset_id: rgbToken.asset_id }));
+  expect(ui.getByLabelText('Change RGB asset, USD')).toBeTruthy();
+  expect(ui.getByLabelText('Amount (USD)')).toBeTruthy();
+});
+
+test('applies the exact RGB amount and inline settings together, clearing stale QR and actions first', async () => {
+  mockConnected.RGB = true;
+  mockAssets = [{ ...rgbToken, ...tokenBalance }];
+  const updated = 'rgb:invoice-updated-with-options';
+  mockRgbInvoice.mockResolvedValueOnce({ invoice: mockRgbCode }).mockResolvedValueOnce({ invoice: updated });
+  const ui = render(<ReceiveScreen navigation={navigation} route={{ params: { selectedAsset: rgbToken } }} />);
+  await generate();
+  expect(ui.getByLabelText('Copy RGB invoice')).toBeTruthy();
+  expect(ui.getByText('Invoice options')).toBeTruthy();
+
+  const input = ui.getByLabelText('Amount (USD)');
+  fireEvent.changeText(input, '1.0000001');
+  expect(ui.queryByTestId('receive-qr')).toBeNull();
+  expect(ui.queryByLabelText('Copy RGB invoice')).toBeNull();
+  expect(ui.queryByLabelText('Share RGB invoice')).toBeNull();
+  expect(ui.getByLabelText('Update invoice').props.accessibilityState.disabled).toBe(true);
+  await generate();
+  expect(mockRgbInvoice).toHaveBeenCalledTimes(1);
+
+  fireEvent.changeText(input, '1,250001');
+  fireEvent.press(ui.getByLabelText('Private'));
+  fireEvent.press(ui.getByLabelText('1 day'));
+  fireEvent.press(ui.getByLabelText('3 blocks'));
+  fireEvent.press(ui.getByLabelText('Update invoice'));
+  await generate();
+  expect(mockRgbInvoice).toHaveBeenLastCalledWith({ asset_id: rgbToken.asset_id,
+    amount: 1_250_001, witness: false, duration_seconds: 86_400, min_confirmations: 3 });
+  expect(ui.getByText(updated)).toBeTruthy();
+});
+
+test('a late RGB invoice never replaces a different asset request', async () => {
+  mockConnected.RGB = true;
+  mockAssets = [{ ...rgbToken, ...tokenBalance }];
+  let finishOldInvoice: (invoice: { invoice: string }) => void = () => {};
+  mockRgbInvoice.mockImplementationOnce(() => new Promise(resolve => { finishOldInvoice = resolve; }));
+  const ui = render(<ReceiveScreen navigation={navigation} route={{ params: { selectedAsset: rgbToken } }} />);
+  await generate();
+  expect(mockRgbInvoice).toHaveBeenLastCalledWith(expect.objectContaining({ asset_id: rgbToken.asset_id }));
+
+  fireEvent.press(ui.getByLabelText('Change RGB asset, USD'));
+  fireEvent.press(ui.getByRole('radio', { name: /Any RGB asset/ }));
+  await generate();
+  await act(async () => { finishOldInvoice({ invoice: 'rgb:stale-invoice-from-old-asset' }); });
+  expect(ui.getByText(mockRgbCode)).toBeTruthy();
+  expect(ui.queryByText('rgb:stale-invoice-from-old-asset')).toBeNull();
+});
+
+test('an RGB Lightning request uses asset units and keeps expiry inline without on-chain settings', async () => {
+  mockConnected.RGB = true;
+  mockRemoteRgb = true;
+  mockAssets = [{ ...rgbToken, ...tokenBalance }];
+  const ui = render(<ReceiveScreen navigation={navigation} route={{ params: { selectedAsset: rgbToken } }} />);
+  await generate();
+  fireEvent.press(ui.getByLabelText(/Change receive network/));
+  fireEvent.press(ui.getByText('Choose RGB Lightning'));
+  await generate();
+  expect(ui.queryByText('Invoice type')).toBeNull();
+  expect(ui.queryByText('Confirmations')).toBeNull();
+  fireEvent.changeText(ui.getByLabelText('Amount (USD)'), '0.000001');
+  fireEvent.press(ui.getByLabelText('10 min'));
+  fireEvent.press(ui.getByLabelText('Update invoice'));
+  await generate();
+  expect(mockRgbLightningInvoice).toHaveBeenLastCalledWith({ asset: rgbToken.asset_id, assetAmount: 1, expirySeconds: 600, description: 'Receive USD' });
+});
+
+test('hides an expired RGB QR and its copy/share actions using the returned deadline', async () => {
+  mockConnected.RGB = true;
+  mockRgbInvoice.mockResolvedValueOnce({ invoice: mockRgbCode, expiration_timestamp: Math.floor(Date.now() / 1000) + 3 });
+  const ui = render(<ReceiveScreen navigation={navigation} route={{ params: { selectedAsset: rgbToken } }} />);
+  await generate();
+  expect(ui.getByLabelText('Share RGB invoice')).toBeTruthy();
+  await act(async () => { await jest.advanceTimersByTimeAsync(3_000); });
+  expect(ui.getByText('Invoice expired. Create a new request.')).toBeTruthy();
+  expect(ui.queryByText(mockRgbCode)).toBeNull();
+  expect(ui.queryByLabelText('Share RGB invoice')).toBeNull();
 });
 
 async function openArkadeRequest() {

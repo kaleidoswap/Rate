@@ -12,6 +12,8 @@ export interface ReceiveMethod {
   layer: ReceiveLayer;
   monitor: ReceiveMonitorKind;
   assetId?: string;
+  /** Unix timestamp in milliseconds if the adapter returns the invoice deadline. */
+  expiresAt?: number;
   /** An RGB invoice's recipient id: its transfer is watched ('rgb-transfer'). */
   recipientId?: string;
 }

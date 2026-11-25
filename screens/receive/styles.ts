@@ -7,6 +7,10 @@ export const createReceiveStyles = (theme: ThemeType) => StyleSheet.create({
     backgroundColor: theme.colors.background.primary,
   },
 
+  requestBody: {
+    flex: 1,
+  },
+
   scrollView: {
     flex: 1,
     zIndex: 0,
@@ -106,6 +110,7 @@ export const createReceiveStyles = (theme: ThemeType) => StyleSheet.create({
     gap: theme.spacing[2],
     minHeight: 44,
     paddingVertical: theme.spacing[2],
+    paddingHorizontal: theme.spacing[2],
     borderRadius: theme.borderRadius.lg,
     borderWidth: 1,
     borderColor: theme.colors.border.medium,
@@ -173,36 +178,25 @@ export const createReceiveStyles = (theme: ThemeType) => StyleSheet.create({
     color: theme.colors.text.primary,
   },
 
-  // "Receive an RGB asset" entry in the options sheet.
-  rgbEntry: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing[3],
-    minHeight: 56,
-    padding: theme.spacing[3],
+  rgbAmount: {
+    marginTop: theme.spacing[2],
     marginBottom: theme.spacing[3],
-    borderRadius: theme.borderRadius.lg,
-    borderWidth: 1,
-    borderColor: theme.colors.border.medium,
-    backgroundColor: theme.colors.surface.primary,
   },
-  rgbEntryIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
+  rgbInvoiceDraft: {
     justifyContent: 'center',
-    backgroundColor: theme.colors.surface.secondary,
+    gap: theme.spacing[3],
   },
-  rgbEntryTitle: {
-    fontSize: theme.typography.fontSize.base,
-    fontWeight: '600',
-    color: theme.colors.text.primary,
-  },
-  rgbEntryDetail: {
+  rgbInvoiceDraftText: {
     fontSize: theme.typography.fontSize.sm,
     color: theme.colors.text.secondary,
-    marginTop: 2,
+    textAlign: 'center',
+  },
+  rgbEditFooter: {
+    paddingHorizontal: theme.spacing[5],
+    paddingVertical: theme.spacing[3],
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.border.light,
+    backgroundColor: theme.colors.background.primary,
   },
 
   // Amount row with pencil edit

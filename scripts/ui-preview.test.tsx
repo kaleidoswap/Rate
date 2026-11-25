@@ -13,6 +13,7 @@ import React from 'react';
 import { render } from '@testing-library/react-native';
 import * as fs from 'fs';
 import * as path from 'path';
+import { StyleSheet } from 'react-native';
 import { theme } from '../theme';
 
 jest.mock('../store/hooks', () => ({
@@ -33,6 +34,11 @@ jest.mock('../components/ActivityDetailSheet', () => ({ ActivityDetailSheet: () 
 
 const { AmountPad } = require('../components/AmountPad');
 const { AmountEditorModal } = require('../components/AmountEditorModal');
+const { ActionButtons } = require('../components/ActionButtons');
+const { Input } = require('../components/Input');
+const { RgbAssetSheet } = require('../components/receive/RgbAssetSheet');
+const { RgbInvoiceOptions } = require('../components/receive/RgbInvoiceOptions');
+const { ANY_RGB_ASSET_ID, DEFAULT_RGB_RECEIVE_OPTIONS, rgbReceiveSupport } = require('../utils/rgb-receive');
 const PaymentSuccessOverlay = require('../components/PaymentSuccessOverlay').default;
 const DepositSuccessOverlay = require('../components/DepositSuccessOverlay').default;
 const { RecentActivityWidget } = require('../components/RecentActivityWidget');
@@ -42,12 +48,12 @@ const { RecentActivityWidget } = require('../components/RecentActivityWidget');
 type Json = { type?: string; props?: any; children?: (Json | string)[] } | string | null | undefined | false;
 
 const NO_UNIT = new Set(['flex', 'flexGrow', 'flexShrink', 'flexBasis', 'opacity', 'zIndex', 'fontWeight', 'aspectRatio']);
+const AXIS_PROPERTIES: Record<string, string> = {
+  paddingHorizontal: 'padding-inline', paddingVertical: 'padding-block',
+  marginHorizontal: 'margin-inline', marginVertical: 'margin-block',
+};
 
 const cssValue = (key: string, value: any): string => {
-  if (key === 'transform' && Array.isArray(value)) return value.map((t: any) => {
-    const [[k, v]] = Object.entries(t);
-    return `${k}(${typeof v === 'number' ? `${v}px` : v})`;
-  }).join(' ');
   if (key === 'fontVariant') return value.join(' ');
   if (key === 'shadowOffset' || key === 'elevation' || key === 'includeFontPadding' || key === 'textAlignVertical') return '';
   if (typeof value === 'number' && !NO_UNIT.has(key)) return `${value}px`;
@@ -61,20 +67,20 @@ const fontFamily = (value: string): string =>
   : value;
 
 const css = (style: any): string => {
-  const arr = (Array.isArray(style) ? style : [style]).filter(Boolean);
-  const out: string[] = [];
-  for (const s of arr) for (const [k, v] of Object.entries(s ?? {})) {
+  const out = ['border-style: solid', 'border-width: 0'];
+  for (const [k, v] of Object.entries(StyleSheet.flatten(style) ?? {})) {
     if (v == null) continue;
+    // Show the resting UI. The RN test tree includes off-screen mount transforms for sheets.
+    if (k === 'transform' || k.startsWith('shadow')) continue;
     if (k === 'fontFamily') { out.push(`font-family: ${fontFamily(String(v))}`); continue; }
-    if (k.startsWith('shadow')) continue;
     const val = cssValue(k, v);
-    if (val !== '') out.push(`${k.replace(/[A-Z]/g, m => '-' + m.toLowerCase())}: ${val}`);
+    if (val !== '') out.push(`${AXIS_PROPERTIES[k] ?? k.replace(/[A-Z]/g, m => '-' + m.toLowerCase())}: ${val}`);
   }
   return out.join('; ');
 };
 
 const GLYPH: Record<string, string> = {
-  'arrow-down': '↓', 'arrow-up': '↑', 'swap-horizontal': '⇄', 'add-circle-outline': '⊕',
+  'arrow-down': '↓', 'arrow-up': '↑', 'swap-horizontal': '⇄', 'send-outline': '➤', 'add-circle-outline': '⊕',
   'close-circle-outline': '⊘', 'ellipse-outline': '•', checkmark: '✓', 'backspace-outline': '⌫',
   'close': '✕', search: '⌕', 'chevron-down': '⌄', 'chevron-forward': '›', 'chevron-up': '⌃',
   'time-outline': '◷', layers_outline: '❐', 'swap-vertical': '⇅', 'alert-circle-outline': '⚠',
@@ -223,9 +229,10 @@ test('renders the UI gallery to output/ui-preview.html', () => {
       html: sceneToHtml(<BalanceCard {...balanceCardProps} loading primaryText={undefined} />, 'justify-content:center'),
     },
     {
-      title: 'Balance card — details open',
-      caption: 'Refresh keeps its corner; the breakdown opens from the written Details toggle, one control per job.',
-      html: sceneToHtml(<BalanceCard {...balanceCardProps} />),
+      title: 'Balance card — wallet actions',
+      caption: 'Receive, Swap, and Send use distinct styles in a compact row inside the balance card.',
+      html: sceneToHtml(<BalanceCard {...balanceCardProps}
+        footer={<ActionButtons onReceive={() => {}} onSwap={() => {}} onSend={() => {}} />} />),
     },
     {
       title: 'Receive — the QR is the screen',
@@ -260,47 +267,21 @@ test('renders the UI gallery to output/ui-preview.html', () => {
     },
     {
       title: 'Receive RGB — asset picker',
-      caption: 'The RGB tab opens the picker: Any asset is the default (the sender chooses), or pick one you hold. One tap more than "any asset", but you can name the asset.',
-      html: sceneToHtml(<View style={{ padding: 20, gap: 12 }}>
-        <Text style={{ color: theme.colors.text.primary, fontSize: theme.typography.fontSize.lg, fontWeight: '700', textAlign: 'center' }}>Receive an RGB asset</Text>
-        <Text style={{ color: theme.colors.text.tertiary, fontSize: theme.typography.fontSize.xs, textAlign: 'center' }}>Received on-chain into RGB on this phone</Text>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: '#1a2a44', backgroundColor: '#0F1C33' }}>
-          <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#1a1a2e', alignItems: 'center', justifyContent: 'center' }}>
-            <Text style={{ color: '#DD352E', fontSize: 16 }}>◆</Text>
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: theme.colors.text.primary, fontWeight: '600' }}>Any RGB asset</Text>
-            <Text style={{ color: theme.colors.text.tertiary, fontSize: 10 }}>The sender chooses the asset. Use this for one you don't hold yet.</Text>
-          </View>
-          <View style={{ width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: '#2BEE79', alignItems: 'center', justifyContent: 'center' }}>
-            <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: '#2BEE79' }} />
-          </View>
-        </View>
-        <Text style={{ color: theme.colors.text.tertiary, fontSize: theme.typography.fontSize.xs, marginTop: 8 }}>Assets you hold</Text>
-        {['USDT', 'KALEIDO'].map(t => (
-          <View key={t} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: '#1a2a44' }}>
-            <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#1a1a2e', alignItems: 'center', justifyContent: 'center' }}>
-              <Text style={{ color: '#DD352E', fontSize: 12, fontWeight: '700' }}>{t[0]}</Text>
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={{ color: theme.colors.text.primary, fontWeight: '600' }}>{t}</Text>
-              <Text style={{ color: theme.colors.text.tertiary, fontSize: 10 }}>Tether USD · 40.5 available</Text>
-            </View>
-            <View style={{ width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: '#2a3a54' }} />
-          </View>
-        ))}
-        <Text style={{ color: theme.colors.text.tertiary, fontSize: theme.typography.fontSize.xs, marginTop: 8 }}>A specific asset</Text>
-        <Text style={{ color: theme.colors.text.tertiary, fontSize: 10 }}>Only accepts the asset with this contract ID · rgb:…</Text>
-      </View>),
+      caption: 'Choose Any RGB asset or select a contract already in the wallet. The picker stays available from the invoice screen.',
+      html: sceneToHtml(<RgbAssetSheet visible onClose={() => {}} accountLabel="RGB on this phone"
+        selectedAssetId={ANY_RGB_ASSET_ID} onPickAny={() => {}} onPickAsset={() => {}}
+        held={[{ asset_id: 'rgb:preview-usdt', ticker: 'USDT', name: 'Tether USD' },
+          { asset_id: 'rgb:preview-xaut', ticker: 'XAUT', name: 'Tether Gold' }]} />),
     },
     {
       title: 'Receive RGB — invoice ready',
-      caption: 'After picking: same clean QR, the title says RGB invoice, and the Advanced options live in the routing sheet.',
+      caption: 'Choose an amount or edit invoice type, expiry, and confirmations on the QR screen.',
       html: sceneToHtml(<View style={{ padding: 20, gap: 16 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'center' }}>
           <Text style={{ color: '#DD352E', fontSize: 16 }}>◆</Text>
           <Text style={{ color: theme.colors.text.secondary, fontSize: theme.typography.fontSize.sm }}>USDT · On-chain to RGB on this phone</Text>
         </View>
+        <Input label="Invoice amount (USDT)" value="2.5" />
         <View style={{ backgroundColor: '#fff', padding: 20, borderRadius: 16, alignSelf: 'center' }}>
           <View style={{ width: 160, height: 160, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' }}>
             <Text style={{ color: '#fff', fontSize: 48 }}>⬛</Text>
@@ -316,6 +297,9 @@ test('renders the UI gallery to output/ui-preview.html', () => {
             <Text style={{ color: theme.colors.text.primary, fontWeight: '600' }}>⧉ Copy</Text>
           </View>
         </View>
+        <RgbInvoiceOptions support={rgbReceiveSupport({ protocolName: 'RGB_L1' })}
+          options={DEFAULT_RGB_RECEIVE_OPTIONS} onChange={() => {}} requestExpirySeconds={3600} proxyV1
+          utxos={null} onLoadUtxos={() => {}} />
       </View>, 'justify-content:center'),
     },
     {

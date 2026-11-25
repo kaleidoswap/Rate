@@ -1,5 +1,6 @@
 import React from 'react';
 import { render, fireEvent, waitFor, act } from '@testing-library/react-native';
+import * as Reanimated from 'react-native-reanimated';
 import SecurityService from '../services/SecurityService';
 import { AppLockGate } from './AppLockGate';
 
@@ -21,6 +22,32 @@ beforeEach(() => {
   security.verifyPin.mockResolvedValue(true);
   security.authenticateWithBiometric.mockResolvedValue(false);
   security.getPinLockedUntil.mockResolvedValue(0);
+});
+
+it('shows the opening animation until the security check resolves, then immediately offers the PIN', async () => {
+  let completeCheck!: (settings: typeof pinSettings) => void;
+  security.getSecuritySettings.mockReturnValueOnce(new Promise<typeof pinSettings>((resolve) => { completeCheck = resolve; }));
+  const animation = jest.spyOn(Reanimated, 'withRepeat');
+  const screen = render(<AppLockGate />);
+  expect(screen.getByRole('progressbar', { name: 'Checking wallet security' })).toBeTruthy();
+  expect(screen.queryByText('Enter your PIN to unlock')).toBeNull();
+  expect(animation).toHaveBeenCalled();
+
+  await act(async () => { completeCheck(pinSettings); });
+  expect(screen.queryByRole('progressbar')).toBeNull();
+  expect(screen.getByText('Enter your PIN to unlock')).toBeTruthy();
+  animation.mockRestore();
+});
+
+it('shows a static opening indicator with Reduce Motion enabled', async () => {
+  const motion = jest.spyOn(Reanimated, 'useReducedMotion').mockReturnValue(true);
+  const animation = jest.spyOn(Reanimated, 'withRepeat');
+  const screen = render(<AppLockGate />);
+  expect(screen.getByRole('progressbar', { name: 'Checking wallet security' })).toBeTruthy();
+  expect(animation).not.toHaveBeenCalled();
+  await waitFor(() => expect(screen.getByText('Enter your PIN to unlock')).toBeTruthy());
+  motion.mockRestore();
+  animation.mockRestore();
 });
 
 it('keeps cold start covered on read failure and offers retry', async () => {

@@ -12,6 +12,7 @@ jest.mock('./NWCExternalClient', () => ({
     rlnDecodeRgbInvoice: (params: unknown) => mockRequest('rln_decode_rgb_invoice', params),
     rlnSendAsset: (params: unknown) => mockRequest('rln_send_asset', params),
     rlnRgbInvoice: (params: unknown, signal?: AbortSignal) => mockRequest('rln_rgb_invoice', params, { signal }),
+    rlnLnInvoice: (params: unknown, signal?: AbortSignal) => mockRequest('rln_ln_invoice', params, { signal }),
     lookupInvoice: mockLookup,
     close: jest.fn(),
   })),
@@ -87,6 +88,28 @@ test('RGB receive address uses the same complete request and preserves explicit 
   }), { signal: undefined });
 });
 
+test('a fixed RGB invoice forwards asset base units as an RLN assignment', async () => {
+  const adapter = await connected(['rln_node_info', 'rln_rgb_invoice']);
+  await adapter.createRgbInvoice({ asset_id: 'rgb:asset', amount: 1_250_000, witness: false, expiration_timestamp: 1800000000 });
+  expect(mockRequest).toHaveBeenLastCalledWith('rln_rgb_invoice', {
+    asset_id: 'rgb:asset',
+    assignment: { type: 'Fungible', value: 1_250_000 },
+    witness: false,
+    min_confirmations: 1,
+    expiration_timestamp: 1800000000,
+  }, { signal: undefined });
+});
+
+test('an RGB Lightning invoice keeps the asset base units separate from the BTC minimum', async () => {
+  const adapter = await connected(['rln_node_info', 'rln_ln_invoice']);
+  mockRequest.mockResolvedValueOnce({ invoice: 'lntbsfixture' });
+  await expect(adapter.createInvoice({ asset: 'rgb:asset', assetAmount: 1_250_000, expirySeconds: 600 }))
+    .resolves.toMatchObject({ invoice: 'lntbsfixture', amount: 1_250_000 });
+  expect(mockRequest).toHaveBeenLastCalledWith('rln_ln_invoice', {
+    asset_id: 'rgb:asset', asset_amount: 1_250_000, amt_msat: 3_000_000, expiry_sec: 600,
+  }, { signal: undefined });
+});
+
 test.each(['Witness', 'Blind'])('sends a decoded %s invoice using the RLN recipient map', async type => {
   const adapter = await connected(['rln_node_info']);
   mockRequest.mockResolvedValueOnce({ recipient_id: 'recipient', recipient_type: type, assignment: 'Any', transport_endpoints: ['rpcs://recipient.proxy'] });
@@ -96,6 +119,26 @@ test.each(['Witness', 'Blind'])('sends a decoded %s invoice using the RLN recipi
     donation: false, fee_rate: 2, min_confirmations: 1, expiration_timestamp: expect.any(Number),
     recipient_map: { asset: [{ recipient_id: 'recipient', assignment: { Fungible: 42 }, transport_endpoints: ['rpcs://recipient.proxy'], witness_data: type === 'Witness' ? { amount_sat: 1000, blinding: null } : null }] },
   });
+});
+
+test.each([
+  { type: 'Fungible', value: 42 },
+  { Fungible: 42 },
+])('previews and sends a fixed RGB invoice with assignment %j', async assignment => {
+  const adapter = await connected(['rln_node_info']);
+  const decoded = { asset_id: 'asset', recipient_id: 'recipient', recipient_type: 'Blind', assignment, transport_endpoints: ['rpcs://recipient.proxy'] };
+  mockRequest.mockResolvedValueOnce(decoded);
+  await expect(adapter.decodeRgbInvoice({ invoice: 'rgb:invoice' })).resolves.toMatchObject({ assignment: { type: 'Fungible', value: 42 } });
+
+  mockRequest.mockResolvedValueOnce(decoded);
+  await expect(adapter.sendAsset({ asset_id: 'asset', recipientId: 'rgb:invoice', amount: 41 })).rejects.toThrow('different amount');
+  expect(mockRequest).toHaveBeenCalledTimes(2);
+
+  mockRequest.mockResolvedValueOnce(decoded).mockResolvedValueOnce({ txid: 'tx' });
+  await expect(adapter.sendAsset({ asset_id: 'asset', recipientId: 'rgb:invoice', amount: 42 })).resolves.toEqual({ txid: 'tx' });
+  expect(mockRequest).toHaveBeenLastCalledWith('rln_send_asset', expect.objectContaining({
+    recipient_map: { asset: [{ recipient_id: 'recipient', assignment, transport_endpoints: ['rpcs://recipient.proxy'], witness_data: null }] },
+  }));
 });
 
 test.each([

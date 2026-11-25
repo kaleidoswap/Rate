@@ -57,9 +57,9 @@ test('on a build that can’t switch, the network a seed started on stays its RG
   expect(await pinnedRgbL1Network('seed c')).toBe('mutinynet');
 });
 
-test('mainnet uses a public Esplora and the v1 RGB proxy', () => {
+test('mainnet uses a public Esplora and Kaleidoscope proxy v1', () => {
   expect(buildRgbL1Config('seed a', rgbL1Host('mainnet'))).toEqual(expect.objectContaining({
-    network: 'mainnet', indexerUrl: 'https://blockstream.info/api', transportEndpoint: 'rpcs://proxy.iriswallet.com/1.0/json-rpc',
+    network: 'mainnet', indexerUrl: 'https://blockstream.info/api', transportEndpoint: 'rpcs://proxy-v1.kaleidoswap.com/json-rpc',
   }));
 });
 
@@ -67,7 +67,7 @@ test('the adapter config carries the network endpoints; keys and backup password
   const config = buildRgbL1Config('seed a', rgbL1Host('mutinynet'));
   expect(config).toEqual(expect.objectContaining({
     protocol: 'RGB_L1', network: 'mutinynet', indexerUrl: 'https://esplora.signet.kaleidoswap.com',
-    transportEndpoint: 'rpcs://proxy.iriswallet.com/1.0/json-rpc',
+    transportEndpoint: 'rpcs://proxy-v1.kaleidoswap.com/json-rpc',
   }));
   expect(config.dataDir).toBe('.'); // rgb-lib's original folder
   expect(buildRgbL1Config('seed a', rgbL1Host('mutinynet'), 'rgb-mutinynet').dataDir).toBe('rgb-mutinynet');
@@ -88,12 +88,16 @@ test('a wallet can use its own indexer and proxy; bad URLs are refused', async (
   expect(() => validateRgbEndpoint('proxy', 'nonsense')).toThrow(/valid/);
 });
 
-test('saved Iris proxy 0.2 selections use the matching v1 endpoint after upgrade', async () => {
+test('saved legacy proxies use the same provider’s v1 endpoint after upgrade', async () => {
   const { loadRgbL1Host, saveRgbL1Endpoints } = require('./rgbL1');
   await saveRgbL1Endpoints('seed a', 'mainnet', {
     indexerUrl: 'https://blockstream.info/api', transportEndpoint: 'https://proxy.iriswallet.com/0.2/json-rpc',
   });
   expect((await loadRgbL1Host('seed a', 'mainnet')).transportEndpoint).toBe('rpcs://proxy.iriswallet.com/1.0/json-rpc');
+  await saveRgbL1Endpoints('seed a', 'mainnet', {
+    indexerUrl: 'https://blockstream.info/api', transportEndpoint: 'https://proxy.kaleidoswap.com/json-rpc',
+  });
+  expect((await loadRgbL1Host('seed a', 'mainnet')).transportEndpoint).toBe('rpcs://proxy-v1.kaleidoswap.com/json-rpc');
   await saveRgbL1Endpoints('seed a', 'signet', {
     indexerUrl: 'https://mempool.space/signet/api', transportEndpoint: 'https://my-proxy.example/json-rpc',
   });

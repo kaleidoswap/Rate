@@ -21,6 +21,9 @@ export function getAppLanguage(): AppLanguage {
 const italian: Record<string, string> = {
   Wallet: 'Portafoglio', Activity: 'Attività', Contacts: 'Contatti', Agent: 'Agent', Scan: 'Scansiona',
   Settings: 'Impostazioni', 'Search settings': 'Cerca nelle impostazioni', Preferences: 'Preferenze',
+  'Asset list settings': 'Impostazioni lista asset', 'Search assets': 'Cerca asset',
+  'Visible assets': 'Asset visibili', 'Show asset': 'Mostra asset', 'All networks': 'Tutte le reti', Network: 'Rete',
+  'No matching assets': 'Nessun asset corrispondente', 'No assets yet': 'Nessun asset', Done: 'Fatto',
   'Security & backup': 'Sicurezza e backup', Connections: 'Connessioni', More: 'Altro',
   Language: 'Lingua', 'System language': 'Lingua di sistema', 'App and Prismo voice': 'App e voce di Prismo',
   'Balance unit': 'Unità del saldo', 'Sats, BTC or local currency': 'Sats, BTC o valuta locale',
