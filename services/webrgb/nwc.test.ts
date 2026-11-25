@@ -61,7 +61,7 @@ let confirm: jest.Mock<Promise<boolean>, [WebRgbReview]>;
 beforeEach(() => {
   invalidateWebRgb(); jest.clearAllMocks(); mockSecure.clear(); mockLedger.clear(); mockPosts.length = 0;
   mockBinding = { account: mockAccount, key: 'one', walletName: 'Phone' };
-  confirm = jest.fn(async () => true);
+  confirm = jest.fn(async (_review: WebRgbReview) => true);
   setWebRgbReviewer(confirm);
 });
 afterEach(() => invalidateWebRgb());
@@ -151,7 +151,8 @@ test('refuses overlapping or replacement grants and displays no secret after a r
   await pairWebRgb(uri()); expect(mockSecure.size).toBe(1); expect(confirm).toHaveBeenCalledTimes(2);
 });
 
-test.each([{ request_methods: 'pay_invoice' }, { expires_at: '0' }, { max_amount: '100' }, { state: '1' }, { relay: 'http://example.org' },
-  { metadata: '{"network":"signet"}' }, { metadata: '{"challenge":"bad"}' }])('rejects malformed or unsupported QR restrictions %o', options => {
-  expect(() => parseAuthorization(uri(options as Record<string, string>), 'mutinynet', ['listAssets'])).toThrow();
+const invalidRestrictions: Record<string, string>[] = [{ request_methods: 'pay_invoice' }, { expires_at: '0' }, { max_amount: '100' },
+  { state: '1' }, { relay: 'http://example.org' }, { metadata: '{"network":"signet"}' }, { metadata: '{"challenge":"bad"}' }];
+test.each(invalidRestrictions)('rejects malformed or unsupported QR restrictions %o', options => {
+  expect(() => parseAuthorization(uri(options), 'mutinynet', ['listAssets'])).toThrow();
 });

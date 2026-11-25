@@ -25,6 +25,8 @@ let mockConnected: Record<'RGB' | 'SPARK' | 'ARKADE', boolean>;
 let mockAssets: InventoryAsset[];
 let mockRemoteRgb: boolean;
 let mockRgbChain = 'mutinynet';
+let mockBfa = false;
+let mockMintBridge = false;
 
 jest.mock('@react-navigation/native', () => ({ useIsFocused: () => true }));
 jest.mock('../store/hooks', () => ({
@@ -49,11 +51,14 @@ jest.mock('../services/protocols', () => ({
   })[key as 'SPARK' | 'ARKADE' | 'RGB_LN'] },
 }));
 jest.mock('../services/protocols/wdk', () => ({ isRgbConnecting: () => false, subscribeRgbConnecting: () => () => {} }));
-jest.mock('../services/protocols/rgbL1', () => ({ rgbLibModule: () => ({ supportsBfa: () => false }) }));
+jest.mock('../services/protocols/rgbL1', () => ({ rgbLibModule: () => ({ supportsBfa: () => mockBfa }) }));
 jest.mock('../services/protocols/rgbBackup', () => {
   const status = { state: 'idle' };
   return { rgbBackupStatus: () => status, onRgbBackupStatus: () => () => {}, runRgbBackup: jest.fn() };
 });
+jest.mock('../services/protocols/rgbOnlineOptions', () => ({
+  rgbOnlineOptions: () => mockMintBridge ? { evmChains: { '42161': {} } } : undefined,
+}));
 jest.mock('../services/kaleidoPay/connect', () => ({
   arkadeReceiveOptions: () => ({ wallet: {}, arkServerUrl: 'https://arkade.invalid' }),
   receiveAccountChain: () => mockRgbChain,
@@ -94,6 +99,7 @@ beforeEach(() => {
   jest.useFakeTimers();
   jest.clearAllMocks();
   mockRgbChain = 'mutinynet';
+  mockBfa = false; mockMintBridge = false;
   mockRgbInvoice.mockReset().mockResolvedValue({ invoice: mockRgbCode });
   mockConnected = { RGB: false, SPARK: false, ARKADE: false };
   mockAssets = [];
@@ -308,7 +314,7 @@ test('leaves an Arkade Lightning invoice in the universal QR when it has the sam
 
 test('the Utexo Mint preset issues an amountless public Signet invoice valid for one day', async () => {
   mockConnected.RGB = true;
-  mockRgbChain = 'signet';
+  mockRgbChain = 'signet'; mockBfa = true; mockMintBridge = true;
   const ui = render(<ReceiveScreen navigation={navigation} route={{ params: { rgbInvoicePreset: 'utexoMint' } }} />);
   await generate();
   expect(mockRgbInvoice).toHaveBeenCalledWith({ duration_seconds: 86_400, min_confirmations: 1 });
@@ -317,6 +323,15 @@ test('the Utexo Mint preset issues an amountless public Signet invoice valid for
 
 test('the Utexo Mint preset cannot issue an invoice on Mutinynet', async () => {
   mockConnected.RGB = true;
+  const ui = render(<ReceiveScreen navigation={navigation} route={{ params: { rgbInvoicePreset: 'utexoMint' } }} />);
+  await generate();
+  expect(mockRgbInvoice).not.toHaveBeenCalled();
+  expect(ui.queryByLabelText('Copy RGB invoice')).toBeNull();
+});
+
+test('a build missing the Arbitrum bridge configuration cannot offer a mint invoice', async () => {
+  mockConnected.RGB = true;
+  mockRgbChain = 'signet'; mockBfa = true;
   const ui = render(<ReceiveScreen navigation={navigation} route={{ params: { rgbInvoicePreset: 'utexoMint' } }} />);
   await generate();
   expect(mockRgbInvoice).not.toHaveBeenCalled();

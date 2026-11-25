@@ -264,7 +264,9 @@ export async function pairWebRgb(uri: string) {
   const deadline = setTimeout(() => controller.abort(), Math.max(0, request.expires * 1000 - Date.now()));
   const guard = () => { check(binding, rev); if (controller.signal.aborted || request.expires <= unixTime()) throw denied(); };
   try {
-    let host = await ordered(() => restore(binding, rev));
+    let host = await ordered(() => restore(binding, rev)).catch(() => {
+      guard(); throw new Error('Could not open the saved RGB connection. Check the wallet and try again.');
+    });
     guard();
     if (host && (host.grant.client !== request.client || host.grant.state !== request.state)) {
       throw new Error('Disconnect the current RGB app in Settings before connecting another.');
@@ -282,7 +284,8 @@ export async function pairWebRgb(uri: string) {
         try { nip44.v2.utils.getConversationKey(key, request.client); } catch { throw new Error('Invalid Nostr client public key.'); }
         const grant = { ...request, secret: bytesToHex(key) };
         const storage = storageKey(binding);
-        await SecureStore.setItemAsync(storage, JSON.stringify(grant), { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY });
+        try { await SecureStore.setItemAsync(storage, JSON.stringify(grant), { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY }); }
+        catch { throw new Error('Could not securely save the RGB connection.'); }
         try { guard(); active = new Runtime(binding, grant, rev); }
         catch (reason) { await SecureStore.deleteItemAsync(storage); throw reason; }
         error = null;

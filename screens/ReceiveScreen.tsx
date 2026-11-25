@@ -86,6 +86,7 @@ import { Sheet } from '../components/Sheet';
 import { SegmentedControl } from '../components/SegmentedControl';
 import { arkadeReceiveOptions, receiveAccountChain } from '../services/kaleidoPay/connect';
 import { rgbLibModule } from '../services/protocols/rgbL1';
+import { rgbOnlineOptions } from '../services/protocols/rgbOnlineOptions';
 import { claimArkadeLightningReceive, createArkadeLightningReceive, type ArkadeLightningReceive } from '../services/kaleidoPay/arkadeIntents';
 import { BarkBoardingPanel } from '../components/receive/BarkBoardingPanel';
 import NostrContactsSelector from '../components/NostrContactsSelector';
@@ -850,8 +851,14 @@ function ReceiveRequestScreen({ navigation, route: navRoute }: Props) {
           if (mintInvoice && (!rgbAccountIsOnDevice() || receiveAccountChain('RGB') !== 'signet')) {
             throw new Error('Utexo Mint requires RGB on this phone on public Signet.');
           }
-          if (mintInvoice && (params.amount !== undefined || Number(params.duration_seconds) <= 43_200)) {
-            throw new Error('Utexo Mint needs an open amount and more than 12 hours of invoice validity.');
+          if (mintInvoice) {
+            if (!nativeRgbSupportsBfa() || !rgbOnlineOptions('signet')?.evmChains?.['42161']) {
+              throw new Error('This build needs the public Signet bridge configuration to receive a Utexo mint.');
+            }
+            const validity = Number(params.duration_seconds);
+            if (params.amount !== undefined || validity <= 43_200 || validity > 90_000) {
+              throw new Error('Leave the amount open and select a one-day expiry for Utexo Mint.');
+            }
           }
           const issuedAt = Date.now();
           const rgbInvoice = await runReceiveOperation('Create RGB asset invoice', (signal) =>

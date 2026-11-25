@@ -440,7 +440,7 @@ Provide a JSON object keyed by decimal EVM chain IDs. Each entry has `rpcUrl`,
 the bridge being tested and a trusted HTTPS RPC that serves state at finalized
 blocks. These values ship in the public app bundle. Keep API secrets out of them.
 
-For UTEXO's public Signet profile, its SDK uses Arbitrum One (`42161`) with
+The release build defaults to UTEXO’s public Signet profile when the Signet override is empty. Its SDK uses Arbitrum One (`42161`) with
 `https://arb1.arbitrum.io/rpc` and mint lock limits of 1200 and 28800 blocks.
 Use a compatible test asset from the deployment. [UTEXO Signet quickstart](https://docs.utexo.com/getting-started/quickstart/node-js) · [SDK mint lock defaults](https://github.com/UTEXO-Protocol/rgb-sdk-web/blob/c0f3b02a69918ef8066e38d2839e3f56cd73a7ad/src/config.ts#L147-L161)
 
