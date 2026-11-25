@@ -2,9 +2,13 @@ import type { OnlineOptions } from '../../modules/kaleido-rgb'
 
 /** The RPC verifies bridge state, so only use endpoints supplied by the build. */
 export function rgbOnlineOptions(network: string): OnlineOptions | undefined {
-  if (network !== 'mutinynet') return undefined
+  const configs = {
+    mutinynet: process.env.EXPO_PUBLIC_RGB_L1_MUTINYNET_EVM_CHAINS,
+    signet: process.env.EXPO_PUBLIC_RGB_L1_SIGNET_EVM_CHAINS,
+  }
+  if (network !== 'mutinynet' && network !== 'signet') return undefined
 
-  const config = process.env.EXPO_PUBLIC_RGB_L1_MUTINYNET_EVM_CHAINS?.trim()
+  const config = configs[network]?.trim()
   if (!config) return undefined
 
   try {
@@ -28,7 +32,8 @@ export function rgbOnlineOptions(network: string): OnlineOptions | undefined {
     }
     return { evmChains }
   } catch {
-    throw new Error('The Mutinynet RGB bridge configuration is invalid. Check its EVM chain IDs, HTTPS RPC URLs and mint lock limits.')
+    const label = network === 'signet' ? 'Signet' : 'Mutinynet'
+    throw new Error(`The ${label} RGB bridge configuration is invalid. Check its EVM chain IDs, HTTPS RPC URLs and mint lock limits.`)
   }
 }
 

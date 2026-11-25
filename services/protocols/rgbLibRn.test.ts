@@ -53,10 +53,13 @@ function fakeLib() {
 const options = { network: 'mutinynet', indexerUrl: 'https://mutinynet.example/api', transportEndpoint: 'rpcs://proxy.example/json-rpc' };
 const evmChains = { '11155111': { rpcUrl: 'https://sepolia.example/rpc', minMintLockBlocks: 12, maxMintLockBlocks: 120 } };
 const previousBridgeConfig = process.env.EXPO_PUBLIC_RGB_L1_MUTINYNET_EVM_CHAINS;
+const previousSignetBridgeConfig = process.env.EXPO_PUBLIC_RGB_L1_SIGNET_EVM_CHAINS;
 
 afterEach(() => {
   if (previousBridgeConfig === undefined) delete process.env.EXPO_PUBLIC_RGB_L1_MUTINYNET_EVM_CHAINS;
   else process.env.EXPO_PUBLIC_RGB_L1_MUTINYNET_EVM_CHAINS = previousBridgeConfig;
+  if (previousSignetBridgeConfig === undefined) delete process.env.EXPO_PUBLIC_RGB_L1_SIGNET_EVM_CHAINS;
+  else process.env.EXPO_PUBLIC_RGB_L1_SIGNET_EVM_CHAINS = previousSignetBridgeConfig;
 });
 
 test('maps app networks to rgb-lib networks; Mutinynet is a custom signet', () => {
@@ -120,8 +123,10 @@ test('BFA is available through the engine on test networks and uses encrypted in
   await adapter.disconnect();
 });
 
-test('bridge RPCs are used only on Mutinynet and only with a BFA native build', async () => {
+test('public Signet and Mutinynet use separate bridge RPCs only with a BFA native build', async () => {
+  const signetChains = { '42161': { rpcUrl: 'https://arb1.arbitrum.io/rpc', minMintLockBlocks: 1200, maxMintLockBlocks: 28800 } };
   process.env.EXPO_PUBLIC_RGB_L1_MUTINYNET_EVM_CHAINS = JSON.stringify(evmChains);
+  process.env.EXPO_PUBLIC_RGB_L1_SIGNET_EVM_CHAINS = JSON.stringify(signetChains);
   const { lib, wallet } = fakeLib();
   const { WalletManagerRgb } = createRgbLibRnModule(() => lib as any, { onlineOptions: rgbOnlineOptions });
   const legacyManager = new WalletManagerRgb('seed', options);
@@ -130,15 +135,20 @@ test('bridge RPCs are used only on Mutinynet and only with a BFA native build', 
   await legacyManager.dispose();
 
   lib.supportsBfa.mockReturnValue(true);
-  const signetManager = new WalletManagerRgb('seed', { ...options, network: 'signet' });
+  const signetIndexer = 'https://mempool.space/signet/api';
+  const signetManager = new WalletManagerRgb('seed', { ...options, network: 'signet', indexerUrl: signetIndexer });
   await signetManager.getAccount();
-  expect(wallet.goOnline).toHaveBeenLastCalledWith(options.indexerUrl);
+  expect(lib.restoreKeys).toHaveBeenLastCalledWith('SIGNET', 'seed');
+  expect(wallet.goOnline).toHaveBeenLastCalledWith(signetIndexer, false, undefined, { evmChains: signetChains });
   await signetManager.dispose();
+  expect(rgbOnlineOptions('mutinynet')).toEqual({ evmChains });
+  expect(rgbOnlineOptions('mainnet')).toBeUndefined();
 });
 
-test('Mutinynet can open without bridge RPC configuration', () => {
-  delete process.env.EXPO_PUBLIC_RGB_L1_MUTINYNET_EVM_CHAINS;
-  expect(rgbOnlineOptions('mutinynet')).toBeUndefined();
+test('public Signet can open without its own bridge RPC configuration', () => {
+  process.env.EXPO_PUBLIC_RGB_L1_MUTINYNET_EVM_CHAINS = JSON.stringify(evmChains);
+  delete process.env.EXPO_PUBLIC_RGB_L1_SIGNET_EVM_CHAINS;
+  expect(rgbOnlineOptions('signet')).toBeUndefined();
 });
 
 test.each([

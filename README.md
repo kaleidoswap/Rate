@@ -430,17 +430,22 @@ On macOS, use `--platform ios` and `pnpm ios --device`. Keep a separate test wal
 Unilateral exit/recovery operations remain library APIs, without dedicated mobile controls.
 Native device linking and funded flows must be verified in a development build.
 
-### Test bridged RGB assets on Mutinynet
+### Test bridged RGB assets on Signet or Mutinynet
 
-Set `EXPO_PUBLIC_RGB_L1_MUTINYNET_EVM_CHAINS` before bundling or use the
-`RGB_L1_MUTINYNET_EVM_CHAINS` GitHub Actions variable for a release. Provide a JSON
-object keyed by decimal EVM chain IDs. Each entry has `rpcUrl`,
+Set `EXPO_PUBLIC_RGB_L1_SIGNET_EVM_CHAINS` for public Signet or
+`EXPO_PUBLIC_RGB_L1_MUTINYNET_EVM_CHAINS` for Mutinynet before bundling. Release
+builds read the corresponding GitHub Actions variable without `EXPO_PUBLIC_`.
+Provide a JSON object keyed by decimal EVM chain IDs. Each entry has `rpcUrl`,
 `minMintLockBlocks` and `maxMintLockBlocks`. Use the chain and lock limits for
 the bridge being tested and a trusted HTTPS RPC that serves state at finalized
 blocks. These values ship in the public app bundle. Keep API secrets out of them.
 
-Select Mutinynet under Settings → RGB on this phone and receive a freshly
-bridged asset using an invoice from Rate. Refresh RGB activity and verify that
+For UTEXO's public Signet profile, its SDK uses Arbitrum One (`42161`) with
+`https://arb1.arbitrum.io/rpc` and mint lock limits of 1200 and 28800 blocks.
+Use a compatible test asset from the deployment. [UTEXO Signet quickstart](https://docs.utexo.com/getting-started/quickstart/node-js) · [SDK mint lock defaults](https://github.com/UTEXO-Protocol/rgb-sdk-web/blob/c0f3b02a69918ef8066e38d2839e3f56cd73a7ad/src/config.ts#L147-L161)
+
+Select the matching network under Settings → RGB on this phone and receive a
+test asset using an invoice from Rate. Refresh RGB activity and verify that
 the transfer settles and the asset appears in Assets after restarting the app.
 Regular RGB transfers can still run with the chain configuration omitted.
 

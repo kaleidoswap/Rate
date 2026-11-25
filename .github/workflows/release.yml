@@ -40,6 +40,7 @@ env:
   # and Settings hides the opt-in switch.
   EXPO_PUBLIC_SENTRY_DSN: ${{ vars.SENTRY_DSN }}
   EXPO_PUBLIC_RGB_L1_MUTINYNET_EVM_CHAINS: ${{ vars.RGB_L1_MUTINYNET_EVM_CHAINS }}
+  EXPO_PUBLIC_RGB_L1_SIGNET_EVM_CHAINS: ${{ vars.RGB_L1_SIGNET_EVM_CHAINS }}
 
 permissions:
   contents: read
