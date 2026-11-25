@@ -9,6 +9,7 @@ import { ReceiveOutcomeCard } from '../components/receive/ReceiveOutcomeCard';
 import { receivePresentation } from '../utils/receive-presentation';
 import { useForegroundClock } from '../hooks/useForegroundClock';
 import { InvoiceExpiry, invoiceExpiry } from '../components/payments/InvoiceExpiry';
+import { PaymentNetworkLabel } from '../components/payments/PaymentNetworkLabel';
 // screens/ReceiveScreen.tsx
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
@@ -201,10 +202,8 @@ function ReceiveRequestScreen({ navigation, route: navRoute }: Props) {
   // off by 1e8.
   const bitcoinUnit = 'sats' as const;
 
-  // Fit the QR within the phone width while preserving a generous quiet zone.
-  const { width: screenWidth } = useWindowDimensions();
-  const qrSize = Math.max(96, Math.min(248, Math.round(screenWidth - 104)));
-  
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+
   const assets = useMemo(() => inventoryTokens(inventory), [inventory]);
   const rgbAssets = useMemo(() => assets.filter(asset => asset.protocol === 'RGB'), [assets]);
   // Bitcoin as the asset pickers list it.
@@ -451,6 +450,9 @@ function ReceiveRequestScreen({ navigation, route: navRoute }: Props) {
     .filter((account) => connectedNow[account] && (account !== 'BARK' || !isLite))
     .map((account) => ({ account, chain: receiveAccountChain(account) }));
   const assetFamily = receiveAssetFamily(selectedAsset);
+  // On shorter phones, leave room for RGB amount and sharing around the code.
+  const qrLimit = assetFamily === 'RGB' ? Math.min(248, screenHeight * 0.36) : 248;
+  const qrSize = Math.max(96, Math.round(Math.min(qrLimit, screenWidth - 104)));
   // A request for any asset has no contract on the node's Lightning channel.
   const heldRgbAsset = assetFamily === 'RGB' ? rgbAssets.find((a) => a.asset_id === selectedAsset.asset_id) : undefined;
   const receiveMethodIds: ReceiveMethodId[] = methodsFor(assetFamily, receiveAccounts, caps)
@@ -1380,7 +1382,7 @@ function ReceiveRequestScreen({ navigation, route: navRoute }: Props) {
     const isBtc = assetFamily === 'BTC' && !awaitingPrefilledAsset;
     const isRgb = assetFamily === 'RGB';
     const isAnyRgb = selectedAsset.asset_id === NEW_RGB_ASSET_ID;
-    const rgbChoiceLabel = isRgb ? (isAnyRgb ? 'Any RGB asset' : selectedAsset.ticker || selectedAsset.name) : 'RGB asset';
+    const rgbChoiceLabel = isRgb ? receiveAssetLabel(selectedAsset) : 'RGB asset';
     const selectedStyle = { borderColor: accent, backgroundColor: accent + '15' };
     const selectBtc = () => {
       feedback.select();
@@ -1390,7 +1392,7 @@ function ReceiveRequestScreen({ navigation, route: navRoute }: Props) {
     return (
       <View style={styles.assetTabs}>
         <TouchableOpacity accessibilityRole="tab" accessibilityState={{ selected: isBtc }} accessibilityLabel="Receive BTC"
-          style={[styles.assetTab, isBtc && selectedStyle]} onPress={selectBtc} activeOpacity={0.7}>
+          style={[styles.assetTab, isRgb && styles.btcAlternativeTab, isBtc && selectedStyle]} onPress={selectBtc} activeOpacity={0.7}>
           <AssetIcon ticker="BTC" size={20} showBadge={false} />
           <Text style={[styles.assetTabText, isBtc && { color: accent }]}>BTC</Text>
         </TouchableOpacity>
@@ -1470,7 +1472,7 @@ function ReceiveRequestScreen({ navigation, route: navRoute }: Props) {
 
   const qrOnScreen = networkType === 'unified'
     ? !!receiveTarget
-    : !(awaitingAmount && routeTarget) && !loading && !error && !!address;
+    : !(awaitingAmount && routeTarget) && !showRgbDraft && !loading && !error && !!address;
   // Arkade and Bark complete a Lightning receive from this device (a swap the
   // app claims), so the payer's money only lands while the app stays open.
   const claimsOnDevice = receiveMethods.some((m) => m.layer === 'lightning' && (m.protocol === 'ARKADE' || m.protocol === 'BARK'));
@@ -1620,10 +1622,10 @@ function ReceiveRequestScreen({ navigation, route: navRoute }: Props) {
     }
 
     if (showRgbDraft) return (
-      <View style={[styles.promptContainer, styles.rgbInvoiceDraft, { minHeight: qrSize }]}>
-        <Ionicons name="create-outline" size={32} color={theme.colors.primary[500]} />
+      <View style={styles.rgbInvoiceDraft}>
+        <Ionicons name="create-outline" size={20} color={theme.colors.primary[500]} />
         <Text accessibilityLiveRegion="polite" style={styles.rgbInvoiceDraftText}>
-          {rgbAmountError ? 'Enter a valid amount to update the invoice.' : 'Invoice draft'}
+          {rgbAmountError ? 'Enter a valid amount to update the invoice.' : 'Update to create a new invoice.'}
         </Text>
       </View>
     );
@@ -1690,6 +1692,9 @@ function ReceiveRequestScreen({ navigation, route: navRoute }: Props) {
     const swapNote = arkadeReceive && method?.protocol === 'ARKADE' && method.layer === 'lightning'
       ? `The sender pays ${arkadeReceive.payAmountSats.toLocaleString()} sats. You receive ${arkadeReceive.amountSats.toLocaleString()} sats in Arkade.`
       : undefined;
+    const isRgbRequest = assetFamily === 'RGB';
+    const actions = <ReceiveRequestActions value={address} summary={`${shareAmount} · ${shareRoute}`} label={title}
+      network={method ? receiveAccountChain(method.protocol) : undefined} showNetworkLabel={!isRgbRequest} />;
     return (
       <View style={styles.qrSection}>
         <View style={styles.qrTopBar}>
@@ -1705,16 +1710,17 @@ function ReceiveRequestScreen({ navigation, route: navRoute }: Props) {
           </TouchableOpacity>
         </View>
 
-        <View style={styles.qrContainer}>
-          <ReceiveQr value={address} size={qrSize} />
+        <View style={[styles.qrContainer, isRgbRequest && styles.rgbQrContainer]}>
+          <ReceiveQr value={address} size={qrSize} label={isRgbRequest ? title : undefined} />
         </View>
+        {isRgbRequest && actions}
         {renderStatus()}
         {renderAmountRow()}
         {assetFamily === 'SPARK' && <Text style={styles.promptText}>Ask the sender to select {selectedAsset.ticker} in their Spark wallet.</Text>}
         {!!swapNote && <Text style={styles.promptText}>{swapNote}</Text>}
 
         <InvoiceExpiry showCountdown={showCountdown} invoice={address} onRefresh={() => { void generateAddress(); }} />
-        <ReceiveRequestActions value={address} summary={`${shareAmount} · ${shareRoute}`} label={title} network={method ? receiveAccountChain(method.protocol) : undefined} />
+        {!isRgbRequest && actions}
       </View>
     );
   };
@@ -1764,20 +1770,25 @@ function ReceiveRequestScreen({ navigation, route: navRoute }: Props) {
           ) : <>
             {renderAssetTabs()}
             {!awaitingPrefilledAsset && renderOptionsPill()}
-            {showRgbInvoiceOptions && rgbPrecision !== undefined && <Input
-              label={`Amount (${selectedAsset.ticker || selectedAsset.name})`}
-              accessibilityHint="Leave blank to accept any amount."
-              placeholder="Any amount"
-              value={rgbAmount}
-              onChangeText={changeRgbAmount}
-              onSubmitEditing={rgbInvoiceEditing ? updateRgbInvoice : undefined}
-              error={rgbAmountError}
-              keyboardType={rgbPrecision === 0 ? 'number-pad' : 'decimal-pad'}
-              returnKeyType="done"
-              style={styles.rgbAmount}
-            />}
+            {showRgbInvoiceOptions && <PaymentNetworkLabel request={address} network={routeTarget?.chain} />}
+            {showRgbInvoiceOptions && (rgbPrecision === undefined
+              ? <Text style={styles.rgbOpenAmount}>Any amount</Text>
+              : <Input
+                  label={`Amount (${selectedAsset.ticker || selectedAsset.name})`}
+                  accessibilityHint="Leave blank to accept any amount."
+                  placeholder="Any amount"
+                  value={rgbAmount}
+                  onChangeText={changeRgbAmount}
+                  onSubmitEditing={rgbInvoiceEditing ? updateRgbInvoice : undefined}
+                  error={rgbAmountError}
+                  keyboardType={rgbPrecision === 0 ? 'number-pad' : 'decimal-pad'}
+                  returnKeyType="done"
+                  size="sm"
+                  style={styles.rgbAmount}
+                />)}
             {renderContent()}
             {showRgbInvoiceOptions && <RgbInvoiceOptions
+              key={`${selectedAsset.asset_id}:${route.method}`}
               support={rgbOnchain ? rgbSupport : { ...NO_RGB_RECEIVE_SUPPORT, expiry: true }}
               options={rgbOptions}
               onChange={changeRgbOptions}

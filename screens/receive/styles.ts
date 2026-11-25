@@ -124,6 +124,11 @@ export const createReceiveStyles = (theme: ThemeType) => StyleSheet.create({
     color: theme.colors.text.secondary,
     flexShrink: 1,
   },
+  btcAlternativeTab: {
+    flexGrow: 0,
+    flexBasis: 'auto',
+    paddingHorizontal: theme.spacing[3],
+  },
   qrSection: {
     backgroundColor: 'transparent',
     paddingHorizontal: 0,
@@ -136,6 +141,9 @@ export const createReceiveStyles = (theme: ThemeType) => StyleSheet.create({
   qrContainer: {
     alignItems: 'center',
     marginBottom: theme.spacing[3],
+  },
+  rgbQrContainer: {
+    marginBottom: 0,
   },
 
   // Top bar above the QR (title on the left, small refresh on the right)
@@ -182,14 +190,24 @@ export const createReceiveStyles = (theme: ThemeType) => StyleSheet.create({
     marginTop: theme.spacing[2],
     marginBottom: theme.spacing[3],
   },
+  rgbOpenAmount: {
+    color: theme.colors.text.secondary,
+    fontSize: theme.typography.fontSize.sm,
+    textAlign: 'center',
+    marginTop: theme.spacing[2],
+  },
   rgbInvoiceDraft: {
-    justifyContent: 'center',
-    gap: theme.spacing[3],
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing[2],
+    padding: theme.spacing[3],
+    borderRadius: theme.borderRadius.lg,
+    backgroundColor: theme.colors.surface.primary,
   },
   rgbInvoiceDraftText: {
+    flex: 1,
     fontSize: theme.typography.fontSize.sm,
     color: theme.colors.text.secondary,
-    textAlign: 'center',
   },
   rgbEditFooter: {
     paddingHorizontal: theme.spacing[5],
