@@ -8,7 +8,7 @@ import { combineReducers } from '@reduxjs/toolkit';
 import walletReducer from './slices/walletSlice';
 import nodeReducer from './slices/nodeSlice';
 import settingsReducer from './slices/settingsSlice';
-import assetsReducer from './slices/assetsSlice';
+import assetsReducer, { setProtocolAssets } from './slices/assetsSlice';
 import transactionsReducer from './slices/transactionsSlice';
 import uiReducer from './slices/uiSlice';
 import contactsReducer from './slices/contactsSlice';
@@ -22,6 +22,7 @@ import chatReducer from './slices/chatSlice';
 // Import middleware
 import { apiConfigMiddleware } from './middleware/apiConfigMiddleware';
 import { setStore } from './storeProvider';
+import { snapshotWalletKey } from '../services/balanceSnapshot';
 
 // The swap slice is otherwise ephemeral (current quote/execution reset each
 // session), but swapHistory should survive restarts so the History screen keeps
@@ -34,7 +35,7 @@ const swapPersistConfig = {
 const persistedSwapReducer = persistReducer(swapPersistConfig, swapReducer);
 
 // Combine all reducers first to get proper types
-const rootReducer = combineReducers({
+const combinedReducer = combineReducers({
   wallet: walletReducer,
   node: nodeReducer,
   settings: settingsReducer,
@@ -46,6 +47,19 @@ const rootReducer = combineReducers({
   nostr: nostrReducer,
   chat: chatReducer,
 });
+
+const rootReducer: typeof combinedReducer = (state, action) => {
+  if (state && setProtocolAssets.match(action) && action.payload.walletKey !== undefined
+    && action.payload.walletKey !== snapshotWalletKey(state.wallet?.activeWallet)) {
+    return combinedReducer(state, { type: '@@rate/ignoredWalletAssets' });
+  }
+  const next = combinedReducer(state, action);
+  const previousWallet = state?.wallet?.activeWallet;
+  if (state && previousWallet !== next.wallet.activeWallet && snapshotWalletKey(previousWallet) !== snapshotWalletKey(next.wallet.activeWallet)) {
+    return { ...next, assets: assetsReducer(undefined, action) };
+  }
+  return next;
+};
 
 // Get the actual state type from the root reducer
 type RootReducerState = ReturnType<typeof rootReducer>;

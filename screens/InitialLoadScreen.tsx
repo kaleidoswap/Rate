@@ -4,14 +4,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDispatch } from 'react-redux';
 import DatabaseService from '../services/DatabaseService';
 import { setUnlocked, setInitialized, setActiveWallet } from '../store/slices/walletSlice';
-import { autoRestoreNostrConnection, initializeProtocolServices } from '../services/initializeServices';
+import { autoRestoreNostrConnection } from '../services/initializeServices';
 import { BrandLoading } from '../components/brand/BrandLoading';
 import { Button } from '../components/Button';
-import { hasBalanceSnapshot } from '../services/balanceSnapshot';
+import { prepareBalanceSnapshot } from '../services/balanceSnapshot';
 import { useAppTheme } from '../theme/ThemeProvider';
-
-const STARTUP_WAIT_MS = 8000;
-const SNAPSHOT_STARTUP_WAIT_MS = 1000;
 
 export default function InitialLoadScreen({ navigation }: { navigation: any }) {
   const dispatch = useDispatch();
@@ -46,24 +43,8 @@ export default function InitialLoadScreen({ navigation }: { navigation: any }) {
         if (!activeWallet?.encrypted_mnemonic) throw new Error('Saved wallet is unavailable');
         dispatch(setActiveWallet(activeWallet));
 
-        // Give protocols a short head start. Slow connections continue in the background.
-        const startupWaitMs = (await hasBalanceSnapshot(activeWallet)) ? SNAPSHOT_STARTUP_WAIT_MS : STARTUP_WAIT_MS;
-        if (!active) return;
-        let startupTimer: ReturnType<typeof setTimeout> | undefined;
-        try {
-          await Promise.race([
-            initializeProtocolServices(),
-            new Promise<void>((resolve) => {
-              startupTimer = setTimeout(resolve, startupWaitMs);
-            }),
-          ]);
-        } catch (e) {
-          console.warn('Protocol initialization failed:', e instanceof Error ? e.message : String(e));
-        } finally {
-          if (startupTimer) clearTimeout(startupTimer);
-        }
-
-        if (!active) return;
+        // Home restores the local snapshot and starts network sync on focus.
+        prepareBalanceSnapshot(activeWallet);
         dispatch(setInitialized(true));
         dispatch(setUnlocked(true));
 

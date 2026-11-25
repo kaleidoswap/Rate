@@ -3,6 +3,7 @@ import { createSlice, PayloadAction, createAsyncThunk } from '@reduxjs/toolkit';
 import { AssetRecord } from '../../services/DatabaseService';
 import { protocolManager, rgbAccountAdapter } from '../../services/protocols';
 import DatabaseService from '../../services/DatabaseService';
+import { snapshotWalletKey, type SnapshotWallet } from '../../services/balanceSnapshot';
 import { assetRecordFromUnified, replaceProtocolAssets, type InventoryRecord, type TokenProtocol } from '../../utils/asset-inventory';
 
 // The RGB inventory's asset shape, mirrored here for the slices.
@@ -55,12 +56,18 @@ const initialState: AssetsState = {
   lastSyncTime: null,
 };
 
+const activeWalletKey = (state: unknown) => snapshotWalletKey((state as { wallet?: { activeWallet: SnapshotWallet | null } }).wallet?.activeWallet);
+
 // Async thunks
 export const loadAssets = createAsyncThunk<AssetRecord[], number>(
   'assets/load',
-  async (walletId: number) => {
+  async (walletId: number, { getState }) => {
+    const walletKey = activeWalletKey(getState());
     const dbService = DatabaseService.getInstance();
     const assets = await dbService.getAssetsByWallet(walletId);
+    if (walletKey !== activeWalletKey(getState()) || (walletKey && !walletKey.startsWith(`${walletId}:`))) {
+      throw new Error('Wallet changed while loading assets');
+    }
     return assets;
   }
 );
@@ -70,7 +77,9 @@ export const syncAssets = createAsyncThunk<
   number
 >(
   'assets/sync',
-  async (walletId: number) => {
+  async (walletId: number, { getState }) => {
+    const walletKey = activeWalletKey(getState());
+    if (walletKey && !walletKey.startsWith(`${walletId}:`)) throw new Error('Wallet changed before syncing assets');
     const dbService = DatabaseService.getInstance();
 
     // The same accounts, and the same record shape, as the dashboard's refresh.
@@ -111,6 +120,7 @@ export const syncAssets = createAsyncThunk<
       }
     }
 
+    if (walletKey !== activeWalletKey(getState())) throw new Error('Wallet changed while syncing assets');
     return { byProtocol, syncTime: Date.now() };
   }
 );
@@ -118,14 +128,15 @@ export const syncAssets = createAsyncThunk<
 /** Re-reads the RGB account's assets (after an issuance or a transfer settles). */
 export const refreshRgbAssets = createAsyncThunk<void, void>(
   'assets/refreshRgb',
-  async (_, { dispatch }) => {
+  async (_, { dispatch, getState }) => {
+    const walletKey = activeWalletKey(getState());
     const adapter = rgbAccountAdapter() as any;
     if (!adapter?.isConnected()) return;
     const listed = await adapter.listAssets();
     const records = listed
       .map((a: any) => assetRecordFromUnified(a, 'RGB'))
       .filter((r: InventoryRecord | null): r is InventoryRecord => r !== null);
-    dispatch(assetsSlice.actions.setProtocolAssets({ protocol: 'RGB', assets: records }));
+    if (walletKey === activeWalletKey(getState())) dispatch(assetsSlice.actions.setProtocolAssets({ protocol: 'RGB', assets: records, walletKey }));
   }
 );
 
@@ -194,7 +205,7 @@ const assetsSlice = createSlice({
       state.rgbAssets = action.payload;
     },
     /** One account's fresh assets replace the ones it listed before. */
-    setProtocolAssets: (state, action: PayloadAction<{ protocol: TokenProtocol; assets: InventoryRecord[] }>) => {
+    setProtocolAssets: (state, action: PayloadAction<{ protocol: TokenProtocol; assets: InventoryRecord[]; walletKey?: string | null }>) => {
       state.rgbAssets = replaceProtocolAssets(
         state.rgbAssets as InventoryRecord[], action.payload.protocol, action.payload.assets,
       ) as AssetRecord[];

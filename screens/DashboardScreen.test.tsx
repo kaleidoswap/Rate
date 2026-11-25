@@ -1,9 +1,10 @@
 import React from 'react';
-import { render, fireEvent, waitFor } from '@testing-library/react-native';
+import { act, render, fireEvent, waitFor } from '@testing-library/react-native';
 import DashboardScreen from './DashboardScreen';
 import { initializeProtocolServices } from '../services/initializeServices';
 import { protocolManager } from '../services/protocols';
-import { saveBalanceSnapshot } from '../services/balanceSnapshot';
+import { loadBalanceSnapshot, saveBalanceSnapshot } from '../services/balanceSnapshot';
+import { requestBalanceRefresh } from '../services/balanceRefresh';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const mockState: any = { wallet: { activeWallet: null, btcPriceUSD: 0 }, assets: { rgbAssets: [] }, node: {}, settings: { bitcoinUnit: 'sats' }, nostr: {} };
@@ -21,7 +22,10 @@ jest.mock('../components/mind/InsightCards', () => ({
 }));
 jest.mock('../services/initializeServices', () => ({ initializeProtocolServices: jest.fn() }));
 jest.mock('../services/protocols', () => ({ protocolManager: { getAdapterIfAvailable: jest.fn() }, rgbAccountAdapter: jest.fn(), rgbAccountProtocol: () => 'RGB_LN' }));
-jest.mock('../store/slices/walletSlice', () => ({ setBtcBalance: (payload: any) => ({ type: 'balance', payload }) }));
+jest.mock('../store/slices/walletSlice', () => ({
+  setBtcBalance: (payload: any) => ({ type: 'balance', payload }),
+  setWalletPortfolio: (payload: any) => ({ type: 'portfolio', payload }),
+}));
 jest.mock('../store/slices/assetsSlice', () => ({
   setRgbAssets: (payload: any) => ({ type: 'assets', payload }),
   setProtocolAssets: (payload: any) => ({ type: 'protocolAssets', payload }),
@@ -125,7 +129,7 @@ describe('dashboard connection recovery', () => {
 });
 
 describe('fast first balance', () => {
-  const sparkSnapshot = { byProtocol: { SPARK: { confirmed: 1000, unconfirmed: 0, total: 1000 } }, assets: [], channels: [], btcPriceUSD: 0 };
+  const sparkSnapshot = { byProtocol: { SPARK: { confirmed: 1000, unconfirmed: 0, total: 1000 } }, assets: [], channels: [], btcPriceUSD: 0, testNetworks: {} };
   beforeEach(async () => {
     jest.clearAllMocks();
     await AsyncStorage.clear();
@@ -203,6 +207,7 @@ test('shows the cached portfolio inline and opens details on the selected accoun
     ],
     channels: [],
     btcPriceUSD: 100_000,
+    testNetworks: {},
   });
   const navigate = jest.fn();
   const screen = render(<DashboardScreen navigation={{ navigate, getParent: () => ({ navigate }) }} />);
@@ -225,4 +230,62 @@ test('shows the cached portfolio inline and opens details on the selected accoun
   expect(navigate).toHaveBeenCalledWith('Assets');
   screen.unmount();
   mockLevel = 'lite';
+});
+
+test('a failed asset read preserves the displayed and saved row, while a successful empty read clears it', async () => {
+  const wallet = { id: 12, created_at: 7, encrypted_mnemonic: 'test-only-seed' };
+  mockState.wallet.activeWallet = wallet;
+  await saveBalanceSnapshot(wallet, {
+    byProtocol: { SPARK: { confirmed: 10_000, unconfirmed: 0, total: 10_000 } },
+    assets: [{ asset_id: 'saved', ticker: 'TOKEN', name: 'Saved token', precision: 0, protocol: 'SPARK', balance: 1000 }],
+    channels: [], btcPriceUSD: 0, testNetworks: {},
+  });
+  const before = await loadBalanceSnapshot(wallet);
+  const spark = {
+    isConnected: () => true,
+    getBtcBalance: jest.fn().mockResolvedValue({ confirmed: 11_000, unconfirmed: 0, total: 11_000 }),
+    listAssets: jest.fn().mockRejectedValue(new Error('offline')),
+  };
+  (protocolManager.getAdapterIfAvailable as jest.Mock).mockImplementation(p => p === 'SPARK' ? spark : undefined);
+  (initializeProtocolServices as jest.Mock).mockResolvedValue({ results: new Map([['SPARK', { success: true }]]) });
+  const screen = render(<DashboardScreen navigation={{ navigate: jest.fn() }} />);
+  await waitFor(() => expect(screen.getByText('Could not refresh SPARK assets.')).toBeTruthy());
+  expect(screen.getByLabelText(/^Saved token, 1,000 TOKEN, on Spark/)).toBeTruthy();
+  expect(await loadBalanceSnapshot(wallet)).toEqual(before);
+  expect(mockDispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'portfolio', payload: expect.objectContaining({
+    walletKey: '12:7', assets: before?.assets, status: 'partial', updatedAt: before?.savedAt,
+  }) }));
+
+  spark.listAssets.mockResolvedValue([]);
+  const first = requestBalanceRefresh('12:7');
+  const second = requestBalanceRefresh('12:7');
+  expect(first).toBe(second);
+  await act(async () => { expect(await first).toBe('complete'); });
+  expect(spark.listAssets).toHaveBeenCalledTimes(2);
+  expect(screen.queryByLabelText(/^Saved token/)).toBeNull();
+  expect((await loadBalanceSnapshot(wallet))?.assets).toEqual([]);
+});
+
+test('an offline legacy snapshot excludes configured Signet and unidentified balances from the mainnet total', async () => {
+  const wallet = { id: 17, created_at: 1, encrypted_mnemonic: 'test-only-seed', networks: [
+    { type: 'arkade', enabled: true, config: '{"network":"signet"}' },
+  ] };
+  mockState.wallet.activeWallet = wallet;
+  (initializeProtocolServices as jest.Mock).mockReturnValue(new Promise(() => {}));
+  (protocolManager.getAdapterIfAvailable as jest.Mock).mockReturnValue(undefined);
+  await saveBalanceSnapshot(wallet, {
+    byProtocol: {
+      ARKADE: { confirmed: 100, unconfirmed: 0, total: 100 },
+      SPARK: { confirmed: 200, unconfirmed: 0, total: 200 },
+    },
+    assets: [], channels: [], btcPriceUSD: 100_000,
+  });
+  const screen = render(<DashboardScreen navigation={{ navigate: jest.fn() }} />);
+  await screen.findByText('Accounts: ARKADE 100');
+  expect(mockDispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'portfolio', payload: expect.objectContaining({
+    walletKey: '17:1', status: 'cached', btcBalance: expect.objectContaining({
+      summary: { total: 0, available: 0, unavailable: 0, test: 100 },
+      networkChains: expect.objectContaining({ arkade: 'Mutinynet' }),
+    }),
+  }) }));
 });

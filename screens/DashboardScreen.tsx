@@ -1,9 +1,10 @@
 import { runReceiveOperation as boundedBalanceRead } from '../utils/receive-session';
 import { WalletSetupPrompt } from '../components/WalletSetupPrompt';
 import { useAppSelector } from '../store/hooks';
-import { bitcoinByNetwork, btcBalanceFromProtocols, mainnetBitcoinByNetwork, summarizeBitcoinBalances, withProtocolBalance } from '../utils/wallet-balance-summary';
-import { loadBalanceSnapshot, saveBalanceSnapshot, snapshotWalletKey, type SnapshotChannel } from '../services/balanceSnapshot';
-import { receiveAccountChain } from '../services/kaleidoPay/connect';
+import { bitcoinByNetwork, btcBalanceFromProtocols, mainnetBitcoinByNetwork, summarizeBitcoinBalances, withProtocolBalance, type BtcBalanceState } from '../utils/wallet-balance-summary';
+import { saveBalanceSnapshot, snapshotWalletKey, takeBalanceSnapshot, type SnapshotChannel } from '../services/balanceSnapshot';
+import { registerBalanceRefresh, type BalanceRefreshResult } from '../services/balanceRefresh';
+import { adapterChain, receiveAccountChain } from '../services/kaleidoPay/connect';
 import { chainLabel } from '../utils/receive-routes';
 import type { AccountId } from '../utils/account-routing';
 import { toEngineProtocol } from '../utils/protocol-bridge'
@@ -30,8 +31,8 @@ import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { RootState } from '../store';
 import { initializeProtocolServices } from '../services/initializeServices';
 import { protocolManager, rgbAccountAdapter } from '../services/protocols';
-import { setBtcBalance } from '../store/slices/walletSlice';
-import { setProtocolAssets, setRgbAssets } from '../store/slices/assetsSlice';
+import { setBtcBalance, setWalletPortfolio } from '../store/slices/walletSlice';
+import { setProtocolAssets } from '../store/slices/assetsSlice';
 import { loadNostrProfile } from '../store/slices/nostrSlice';
 import {
   selectDisclosureLevel,
@@ -56,15 +57,17 @@ import { ProfileChip } from '../components/ProfileChip';
 import { formatBitcoinAmount, useBitcoinConversion, useDisplayAmount } from '../utils/bitcoinUnits';
 import { formatAssetAmount } from '../utils/assetAmount';
 import {
-  assetRecordFromUnified, buildAssetInventory, inventoryBtc, inventoryTokens, liteUsdAssetIds as liteUsdIdsOf, withSnapshotFallback,
+  assetRecordFromUnified, buildAssetInventory, inventoryBtc, inventoryTokens, liteUsdAssetIds as liteUsdIdsOf, replaceProtocolAssets, withSnapshotFallback,
   type InventoryAsset, type InventoryRecord,
 } from '../utils/asset-inventory';
 import { breakdownAssetRows, tokenValueSats as priceTokensInSats } from '../utils/portfolio';
 
-import { assetDetailForItem, LITE_USD_KEY } from '../utils/asset-list-model';
+import { assetDetailForItem } from '../utils/asset-list-model';
 import { useAssetListView } from '../hooks/useAssetListView';
 import { readBarkRecovery, syncBarkForUpdates } from '../services/BarkService';
 import { getStoredHandle } from '../services/kaleidoswapMe';
+import { markWalletStartup } from '../utils/walletPerformance';
+import { qualifySnapshotNetworks } from '../services/portfolioNetworks';
 
 const { width } = Dimensions.get('window');
 
@@ -113,28 +116,54 @@ function buildGreeting(): string {
  * Accounts on a test network, with the network's name. Their sats have no value:
  * kept out of the total and its fiat figure, and shown on their own line.
  */
-function testNetworkLabels(): Partial<Record<AccountId, string>> {
-  const out: Partial<Record<AccountId, string>> = {};
+type PortfolioTestNetworks = Partial<Record<AccountId | 'LN', string>>;
+
+function testNetworkLabels(lastKnown?: PortfolioTestNetworks): PortfolioTestNetworks {
+  const out: PortfolioTestNetworks = {};
   for (const account of ['RGB', 'SPARK', 'ARKADE', 'BARK'] as AccountId[]) {
     const chain = receiveAccountChain(account);
     if (chain && chain !== 'mainnet') out[account] = chainLabel(chain);
+    if (!chain && lastKnown?.[account]) out[account] = lastKnown[account];
   }
+  const node = protocolManager.getAdapterIfAvailable('RGB_LN');
+  const lnChain = node?.isConnected() && node !== rgbAccountAdapter() ? adapterChain('RGB_LN', node) : undefined;
+  if (lnChain && lnChain !== 'mainnet') out.LN = chainLabel(lnChain);
+  if (!lnChain && lastKnown?.LN) out.LN = lastKnown.LN;
   return out;
 }
 
 function btcNetworkChains(testNetworks: ReturnType<typeof testNetworkLabels>) {
-  return { onchain: testNetworks.RGB, lightning: testNetworks.RGB, spark: testNetworks.SPARK, arkade: testNetworks.ARKADE, bark: testNetworks.BARK };
+  return { onchain: testNetworks.RGB, lightning: testNetworks.LN ?? testNetworks.RGB, spark: testNetworks.SPARK, arkade: testNetworks.ARKADE, bark: testNetworks.BARK };
+}
+
+function portfolioBalance(balance: BtcBalanceState, channels: SnapshotChannel[], rgbIsLightning: boolean, testNetworks = testNetworkLabels()) {
+  const balances = balance.byProtocol ?? {};
+  const testProtocols = new Set(Object.keys(testNetworks).filter(account => testNetworks[account as AccountId | 'LN']));
+  return {
+    ...balance,
+    summary: summarizeBitcoinBalances(balances, channels, rgbIsLightning, testProtocols),
+    networks: bitcoinByNetwork(balances, channels, rgbIsLightning),
+    mainnetNetworks: mainnetBitcoinByNetwork(balances, channels, rgbIsLightning, testProtocols),
+    networkChains: btcNetworkChains(testNetworks),
+  };
 }
 
 const EMPTY_BTC_BALANCE = {
   vanilla: { settled: 0, future: 0, spendable: 0 },
   colored: { settled: 0, future: 0, spendable: 0 },
 };
+const EMPTY_CHANNELS: SnapshotChannel[] = [];
+const EMPTY_ASSETS: InventoryRecord[] = [];
+
+/** Lite's group includes assets held in a Lightning channel. */
+function assetTotalBaseUnits(asset: InventoryAsset): number {
+  const detail = asset.balanceDetail;
+  return detail ? Number(detail.settled ?? asset.balance)
+    + Number(detail.offchain_inbound ?? 0) + Number(detail.offchain_outbound ?? 0) : asset.balance;
+}
 
 /** How long the first balance waits for every account before showing the connected ones. */
 const EARLY_BALANCE_MS = 2_500;
-/** The wallet whose assets redux holds: only a different wallet clears them (not a remount). */
-let assetsWalletKey: string | null = null;
 
 function anyAccountConnected(): boolean {
   return (['RGB', 'SPARK', 'ARKADE', 'BARK'] as const).some(
@@ -146,9 +175,11 @@ export default function DashboardScreen({ navigation }: Props) {
   const isScreenFocused = useIsFocused();
   const lspOn = useFeature('lsp');
   const activeWallet = useAppSelector(state => state.wallet.activeWallet);
+  const walletKey = snapshotWalletKey(activeWallet);
+  const [displayWalletKey, setDisplayWalletKey] = useState(walletKey);
+  const displayingCurrentWallet = walletKey === displayWalletKey;
   const needsSetup = !activeWallet?.encrypted_mnemonic;
   const dispatch = useDispatch();
-  const { nodeInfo } = useSelector((state: RootState) => state.node);
   const bitcoinUnit = useSelector((state: RootState) => state.settings.bitcoinUnit);
   // Top-left identity is the user's Nostr profile, with the greeting above the name.
   const nostrProfile = useSelector((state: RootState) => state.nostr?.profile ?? null);
@@ -190,13 +221,13 @@ export default function DashboardScreen({ navigation }: Props) {
   const disclosureLevel = useSelector(selectDisclosureLevel);
   const policy = policyFor(disclosureLevel);
   const isLite = disclosureLevel === 'lite';
-  const [isNodeUnlocked, setIsNodeUnlocked] = useState(false);
   const [isConnecting, setIsConnecting] = useState(true);
   const [balanceUpdatedAt, setBalanceUpdatedAt] = useState<number | undefined>();
   const [balanceWarning, setBalanceWarning] = useState<string | null>(null);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   // Accounts that failed to connect at startup; the banner names those still not connected.
   const [startupFailures, setStartupFailures] = useState<string[]>([]);
+  const attemptedAccounts = useRef(new Set<string>());
   const offlineAccounts = offlineAccountNames(startupFailures, (p) =>
     protocolManager.getAdapterIfAvailable(p as any)?.isConnected() ?? false);
   const [protocolsReady, setProtocolsReady] = useState(false);
@@ -215,34 +246,42 @@ export default function DashboardScreen({ navigation }: Props) {
   const [loading, setLoading] = useState(true);
   const [pendingBalanceAccounts, setPendingBalanceAccounts] = useState<string[]>([]);
   const [channels, setChannels] = useState<Channel[]>([]);
-  const [btcBalance, setBtcBalanceState] = useState<{
-    vanilla: { settled: number; future: number; spendable: number };
-    colored: { settled: number; future: number; spendable: number };
-    byProtocol?: Record<string, { confirmed: number; unconfirmed: number; total: number }>;
-  }>(EMPTY_BTC_BALANCE);
+  const [btcBalance, setBtcBalanceState] = useState<BtcBalanceState>(EMPTY_BTC_BALANCE);
   const balanceStateRef = useRef(btcBalance);
-  balanceStateRef.current = btcBalance;
+  const setDisplayedBalance = (balance: BtcBalanceState) => {
+    balanceStateRef.current = balance;
+    setBtcBalanceState(balance);
+  };
   // Live assets are in redux (the asset inventory every screen reads); the
   // last known ones stand in here until this wallet's accounts answer.
   const liveAssets = useAppSelector(state => state.assets.rgbAssets) as InventoryRecord[];
+  const liveAssetsRef = useRef(liveAssets);
+  liveAssetsRef.current = liveAssets;
   const [snapshotAssets, setSnapshotAssets] = useState<InventoryRecord[]>([]);
+  const snapshotAssetsRef = useRef<InventoryRecord[]>([]);
   // Accounts that listed their assets live for this wallet: until then their last known ones show.
   const [listedProtocols, setListedProtocols] = useState<string[]>([]);
+  const listedProtocolsRef = useRef(new Set<string>());
   const initDoneRef = useRef(false);
   const [isUpdating, setIsUpdating] = useState(false);
-  const isUpdatingRef = useRef(false);
+  const refreshFlight = useRef<{ wallet: typeof activeWallet; work: Promise<BalanceRefreshResult> } | undefined>(undefined);
   // Last known balances (per wallet) shown at launch until the live ones land.
   const [showingSnapshot, setShowingSnapshot] = useState(false);
   const [snapshotChannels, setSnapshotChannels] = useState<SnapshotChannel[]>([]);
   const [snapshotPrice, setSnapshotPrice] = useState(0);
+  const [snapshotRgbIsLightning, setSnapshotRgbIsLightning] = useState<boolean>();
+  const snapshotTestNetworks = useRef<PortfolioTestNetworks>({});
+  const lastRgbIsLightning = useRef<boolean | undefined>(undefined);
   const [channelsLive, setChannelsLive] = useState(false);
-  const walletKey = snapshotWalletKey(activeWallet);
-  const walletKeyRef = useRef(walletKey);
+  const lastChannelsRef = useRef<SnapshotChannel[]>([]);
+  const lastCompleteAt = useRef<number | undefined>(undefined);
+  const snapshotReady = useRef<Promise<void>>(Promise.resolve());
   const activeWalletRef = useRef(activeWallet);
   activeWalletRef.current = activeWallet;
-  // Set once live data has started replacing the snapshot for this wallet.
-  const liveDataRef = useRef(false);
   const btcPriceRef = useRef(0);
+  const mountedRef = useRef(true);
+  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
+  const currentWallet = (wallet: typeof activeWallet) => mountedRef.current && activeWalletRef.current === wallet;
 
   // Modal state for channel details
   const [channelModalVisible, setChannelModalVisible] = useState(false);
@@ -252,10 +291,12 @@ export default function DashboardScreen({ navigation }: Props) {
   const initializeApi = useCallback(async () => {
     if (needsSetup) return false;
     if (protocolsReadyRef.current) return true; // Already initialized
+    const walletAtStart = activeWalletRef.current;
 
     try {
       console.log('Initializing protocol services...');
       const { results } = await initializeProtocolServices();
+      if (!currentWallet(walletAtStart)) return false;
 
       const anyConnected = Array.from(results.values()).some(r => r.success);
 
@@ -272,7 +313,9 @@ export default function DashboardScreen({ navigation }: Props) {
       if (failed.length > 0) {
         console.warn('[Dashboard] Protocol failures:', failed.join(', '));
       }
-      setStartupFailures(failedAccounts(results));
+      const failedProtocols = failedAccounts(results);
+      attemptedAccounts.current = new Set([...failedProtocols, ...Array.from(results).filter(([, result]) => result.success).map(([protocol]) => protocol)]);
+      setStartupFailures(failedProtocols);
       if (skipped.length > 0) {
         console.log('[Dashboard] Protocols skipped:', skipped.join(', '));
       }
@@ -311,351 +354,341 @@ export default function DashboardScreen({ navigation }: Props) {
       return null;
     } catch (error) {
       console.error('Failed to initialize protocol services:', error);
-      setConnectionError(error instanceof Error ? error.message : 'Failed to initialize');
+      if (currentWallet(walletAtStart)) setConnectionError(error instanceof Error ? error.message : 'Failed to initialize');
       return null;
     }
   }, [needsSetup]);
 
-  const checkNodeStatus = async (skipInitialization = false) => {
-    try {
-      setIsConnecting(true);
-      setConnectionError(null);
-
-      if (!skipInitialization && !protocolsReadyRef.current) {
-        if (!await initializeApi()) return false;
-      }
-
-      // Try any connected adapter
-      let info: any = null;
-      const protocols: Array<'RGB' | 'SPARK' | 'ARKADE' | 'BARK'> = ['RGB', 'SPARK', 'ARKADE', 'BARK'];
-      for (const proto of protocols) {
-        try {
-          const adapter = protocolManager.getAdapterIfAvailable(toEngineProtocol(proto));
-          if (adapter?.isConnected()) {
-            info = await adapter.getNodeInfo();
-            break;
-          }
-        } catch { /* try next */ }
-      }
-
-      if (!info) throw new Error('No wallet connected');
-      console.log('Node info received:', info);
-      setIsNodeUnlocked(true);
-      return true;
-    } catch (error) {
-      console.error('Failed to get node info:', error);
-      setIsNodeUnlocked(false);
-      setConnectionError(error instanceof Error ? error.message : 'Unknown error occurred');
-      return false;
-    } finally {
-      setIsConnecting(false);
-    }
-  };
-
-  const loadDashboardData = async (showLoadingIndicator = true) => {
-    if (!protocolsReadyRef.current || isUpdatingRef.current) {
-      console.log('Skipping update: Protocols not ready or update in progress');
-      return;
-    }
-
-    // Results for a wallet the user has since switched away from are dropped.
+  const loadDashboardData = async (showLoadingIndicator = true): Promise<BalanceRefreshResult> => {
     const walletAtStart = activeWalletRef.current;
     const keyAtStart = snapshotWalletKey(walletAtStart);
-    const current = () => walletKeyRef.current === keyAtStart;
+    const current = () => currentWallet(walletAtStart);
+    if (!protocolsReadyRef.current || !keyAtStart) return 'unavailable';
 
     try {
-      isUpdatingRef.current = true;
       setIsUpdating(true);
-      if (showLoadingIndicator) {
-        setLoading(true);
-      }
-      console.log('Loading dashboard data...');
+      if (showLoadingIndicator) setLoading(true);
 
-      // Load via protocolManager (multi-protocol)
-      const rgbAdapter = rgbAccountAdapter(); // the node, or RGB on this phone
+      const rgbAdapter = rgbAccountAdapter();
       const sparkAdapter = protocolManager.getAdapterIfAvailable('SPARK');
       const arkadeAdapter = protocolManager.getAdapterIfAvailable('ARKADE');
       const barkAdapter = protocolManager.getAdapterIfAvailable('BARK');
-      // A plain Lightning wallet over NWC isn't the RGB account, so it gets its own line.
+      // A plain NWC Lightning wallet has its own line beside RGB on this phone.
       const nodeSlot = protocolManager.getAdapterIfAvailable('RGB_LN');
-      const lightningWallet = nodeSlot && nodeSlot !== rgbAdapter ? nodeSlot : null;
-
-      // Balances, assets and channels are all fetched at once, and each account's
-      // figure lands on screen as soon as it returns: the headline no longer waits
-      // for the slowest account (or for assets) before showing anything.
-      console.log('Fetching BTC balance...');
-      const adapterProtoMap: Array<[any, string]> = [
-        [rgbAdapter, 'RGB'], [sparkAdapter, 'SPARK'], [arkadeAdapter, 'ARKADE'], [barkAdapter, 'BARK'],
-        [lightningWallet, 'LN'],
-      ];
-      // Counted now, not after the fetch: an account that connects meanwhile
-      // wasn't asked, so it isn't a missing balance.
-      const requestedProtocols = adapterProtoMap.filter(([adapter]) => adapter?.isConnected()).map(([, proto]) => proto);
-      const connectedCount = requestedProtocols.length;
-      if (current()) setPendingBalanceAccounts(requestedProtocols);
-      const balancesTask = Promise.all(
-        adapterProtoMap.map(async ([adapter, proto]) => {
-          if (!adapter?.isConnected()) return null;
-          try {
-            // A failed sync (server unreachable) must not hide the last known Bark balance.
-            if (proto === 'BARK') await boundedBalanceRead('Bark sync', () => syncBarkForUpdates(), 20_000).catch((e) => console.warn('Bark sync failed:', e));
-            const btc = await boundedBalanceRead<any>(`${proto} balance`, () => adapter.getBtcBalance(), 60_000);
-            if (current()) {
-              liveDataRef.current = true;
-              setBtcBalanceState(prev => withProtocolBalance(prev as any, proto, btc));
-            }
-            return { proto, btc };
-          } catch (e) {
-            console.warn('Balance fetch error:', e);
-            return null;
-          } finally {
-            if (current()) setPendingBalanceAccounts(accounts => accounts.filter(p => p !== proto));
-          }
-        })
-      );
-
-      console.log('Fetching assets...');
-      const adapterMap: Array<[any, 'RGB' | 'SPARK' | 'ARKADE']> = [
+      const lightningWallet = nodeSlot !== rgbAdapter ? nodeSlot : null;
+      const requestedBalances = [
         [rgbAdapter, 'RGB'], [sparkAdapter, 'SPARK'], [arkadeAdapter, 'ARKADE'],
-      ];
-      const assetsTask = Promise.all(
-        adapterMap.map(async ([adapter, proto]) => {
-          if (!adapter?.isConnected()) {
-            // An account that is off (not just still connecting) lists nothing.
-            if (!adapter && initDoneRef.current && current()) {
-              dispatch(setProtocolAssets({ protocol: proto, assets: [] }));
-              setListedProtocols(list => list.includes(proto) ? list : [...list, proto]);
-            }
-            return [] as InventoryRecord[];
-          }
-          try {
-            const unifiedAssets = await boundedBalanceRead<any[]>(`${proto} assets`, () => adapter.listAssets(), 60_000);
-            const mapped = unifiedAssets
-              .map((a: any) => assetRecordFromUnified(a, proto))
-              .filter((r: InventoryRecord | null): r is InventoryRecord => r !== null);
-            // This account's assets replace whatever it showed before.
-            if (current()) {
-              liveDataRef.current = true;
-              dispatch(setProtocolAssets({ protocol: proto, assets: mapped }));
-              setListedProtocols(list => list.includes(proto) ? list : [...list, proto]);
-            }
-            return mapped;
-          } catch (e) {
-            console.warn('Asset fetch error:', e);
-            return [] as InventoryRecord[];
-          }
-        })
+        [barkAdapter, 'BARK'], [lightningWallet, 'LN'],
+      ] as const;
+      const connected = requestedBalances.filter(([adapter]) => adapter?.isConnected());
+      const attempted = attemptedAccounts.current;
+      const absent = (protocol: typeof requestedBalances[number][1]) => initDoneRef.current && (
+        protocol === 'RGB' ? !attempted.has('RGB_LN') && !attempted.has('RGB_L1')
+          : protocol === 'LN' ? !attempted.has('RGB_LN') || rgbAdapter === nodeSlot
+          : !attempted.has(protocol)
       );
+      const offlineBalances = requestedBalances.filter(([adapter, protocol]) => !adapter?.isConnected() && !absent(protocol));
+      let barkSyncFailed = false;
 
-      // Lightning channels (RGB node only). Plain NIP-47 wallets can create/pay
-      // invoices but do not expose RLN channel management.
-      console.log('Fetching Lightning channels...');
+      setPendingBalanceAccounts(connected.map(([, protocol]) => protocol));
+      const balancesTask = Promise.all(connected.map(async ([adapter, protocol]) => {
+        try {
+          // A failed Bark sync must not hide the last local balance.
+          if (protocol === 'BARK') {
+            await boundedBalanceRead('Bark sync', () => syncBarkForUpdates(), 20_000)
+              .catch(error => { barkSyncFailed = true; console.warn('Bark sync failed:', error); });
+          }
+          const btc = await boundedBalanceRead(`${protocol} balance`, () => adapter!.getBtcBalance(), 60_000);
+          if (current()) {
+            markWalletStartup('first-live-balance');
+            setDisplayedBalance(withProtocolBalance(balanceStateRef.current, protocol, btc));
+          }
+          return { protocol, btc };
+        } catch (error) {
+          console.warn('Balance fetch error:', error);
+          return { protocol };
+        } finally {
+          if (current()) setPendingBalanceAccounts(accounts => accounts.filter(p => p !== protocol));
+        }
+      }));
+
+      const requestedAssets = [[rgbAdapter, 'RGB'], [sparkAdapter, 'SPARK'], [arkadeAdapter, 'ARKADE']] as const;
+      const assetsTask = Promise.all(requestedAssets.map(async ([adapter, protocol]) => {
+        let assets: InventoryRecord[] | undefined;
+        if (adapter?.isConnected()) {
+          try {
+            const records = await boundedBalanceRead(`${protocol} assets`, () => adapter.listAssets(), 60_000);
+            assets = records.map(asset => assetRecordFromUnified(asset, protocol))
+              .filter((record): record is InventoryRecord => record !== null);
+          } catch (error) {
+            console.warn('Asset fetch error:', error);
+            return { protocol, failed: true as const };
+          }
+        } else if (absent(protocol)) {
+          // No configured adapter after initialization is the only missing account
+          // that may clear its previous rows. An error is never an empty list.
+          assets = [];
+        }
+        if (assets && current()) {
+          dispatch(setProtocolAssets({ protocol, assets, walletKey: keyAtStart }));
+          listedProtocolsRef.current.add(protocol);
+          setListedProtocols(Array.from(listedProtocolsRef.current));
+        }
+        return { protocol, assets };
+      }));
+
       const connectedWalletType = (rgbAdapter as any)?.walletType?.() ?? nwcWalletType;
       const canManageChannels = connectedWalletType == null || nwcCapabilities.includes('manageChannels');
-      const channelsTask: Promise<any[]> = rgbAdapter?.isConnected() && connectedWalletType !== 'ln' && canManageChannels
-        ? boundedBalanceRead<any[]>('Lightning channels', () => rgbAdapter.listChannels(), 60_000).catch(() => [] as any[])
-        : Promise.resolve([]);
-
+      const hasChannels = rgbAdapter?.isConnected() && connectedWalletType !== 'ln' && canManageChannels;
+      const channelsTask: Promise<Channel[] | undefined> = hasChannels && rgbAdapter
+        ? boundedBalanceRead('Lightning channels', async () => await rgbAdapter.listChannels() as Channel[], 60_000)
+          .catch(error => { console.warn('Channel fetch error:', error); return undefined; })
+        : Promise.resolve(rgbAdapter?.isConnected() || absent('RGB') ? [] : undefined);
       const [balanceResults, assetResults, channelsList] = await Promise.all([balancesTask, assetsTask, channelsTask]);
-      if (!current()) return;
+      const barkRecovery = barkAdapter?.isConnected()
+        ? await boundedBalanceRead('Bark recovery', () => readBarkRecovery(), 10_000).catch(() => null)
+        : null;
+      await snapshotReady.current;
+      if (!current()) return 'unavailable';
 
-      const okBalances = balanceResults.filter(Boolean) as Array<{ proto: string; btc: { confirmed: number; unconfirmed: number; total: number } }>;
-      // Bark recovery (moved from the old Bark screen): an incomplete restore can
-      // omit funds, so say so next to the total rather than on a separate page.
-      const barkRecovery = await boundedBalanceRead('Bark recovery', () => readBarkRecovery(), 10_000).catch(() => null);
-      setBalanceWarning(
-        barkRecovery === 'failed' || barkRecovery === 'incomplete'
-          ? 'Bark recovery is incomplete, so its balance may omit funds.'
-          : okBalances.length < connectedCount
-            ? `Could not refresh ${requestedProtocols.filter(proto => !okBalances.some(b => b.proto === proto)).join(', ')}. Your total may be incomplete.` : null);
+      const balanceFailures = balanceResults.filter(result => !result.btc).map(result => result.protocol);
+      const assetFailures = assetResults.filter(result => result.failed).map(result => result.protocol);
+      const channelsFailed = !!hasChannels && channelsList === undefined;
+      const barkIncomplete = barkSyncFailed || barkRecovery === 'failed' || barkRecovery === 'incomplete';
+      const complete = initDoneRef.current && connected.length > 0 && offlineBalances.length === 0
+        && !balanceFailures.length && !assetFailures.length && !channelsFailed && !barkIncomplete;
+      const warnings = [
+        balanceFailures.length ? `Could not refresh ${balanceFailures.join(', ')} balances.` : null,
+        assetFailures.length ? `Could not refresh ${assetFailures.join(', ')} assets.` : null,
+        channelsFailed ? 'Could not refresh Lightning channels.' : null,
+        barkIncomplete ? 'Bark recovery is incomplete, so its balance may omit funds.' : null,
+        initDoneRef.current && offlineBalances.length ? 'Some accounts could not refresh. Your total may be incomplete.' : null,
+      ].filter(Boolean);
+      setBalanceWarning(warnings.length ? warnings.join(' ') : null);
 
-      const assets = assetResults.flat();
-      setChannels(channelsList);
-      setChannelsLive(true);
-      // No full replace here: each account already replaced its own assets above, and one
-      // that is still connecting or failed keeps what it showed (the flicker on open).
+      if (channelsList) {
+        lastChannelsRef.current = channelsList;
+        setChannels(channelsList);
+        setChannelsLive(true);
+      }
 
-      // Every account failed: keep the last figures on screen (the warning says why)
-      // rather than replacing them with zero.
-      if (connectedCount > 0 && okBalances.length === 0) return;
+      let assets = withSnapshotFallback(liveAssetsRef.current, snapshotAssetsRef.current);
+      for (const result of assetResults) {
+        if (result.assets) assets = replaceProtocolAssets(assets, result.protocol, result.assets);
+      }
+      // Keep the display's last known assets even across multiple partial refreshes.
+      snapshotAssetsRef.current = assets;
+      setSnapshotAssets(assets);
 
-      const byProtocol: Record<string, { confirmed: number; unconfirmed: number; total: number }> = { ...balanceStateRef.current.byProtocol };
-      // Once startup is done, an account that is off or disconnected (an RGB node the user
-      // disconnected) shows no balance at all, rather than its last one in the breakdown.
-      if (initDoneRef.current) for (const [adapter, proto] of adapterProtoMap) if (!adapter?.isConnected()) delete byProtocol[proto];
-      // Bark is a layer like Arkade/Spark: counted in the total and shown in the breakdown.
-      for (const r of okBalances) byProtocol[r.proto] = r.btc;
+      const byProtocol = { ...balanceStateRef.current.byProtocol };
+      if (initDoneRef.current) {
+        for (const [adapter, protocol] of requestedBalances) {
+          if (!adapter?.isConnected() && absent(protocol)) delete byProtocol[protocol];
+        }
+      }
       const balance = btcBalanceFromProtocols(byProtocol);
-      if (connectedCount > 0 && okBalances.length === connectedCount) setBalanceUpdatedAt(Date.now());
-      liveDataRef.current = true;
-      setBtcBalanceState(balance);
+      setDisplayedBalance(balance);
       setShowingSnapshot(false);
-      const rgbIsLightning = typeof (rgbAdapter as any)?.walletType === 'function';
-      const testNetworks = testNetworkLabels();
-      const testProtocols = new Set(Object.keys(testNetworks));
-      dispatch(setBtcBalance({
-        ...balance,
-        summary: summarizeBitcoinBalances(byProtocol, channelsList, rgbIsLightning, testProtocols),
-        networks: bitcoinByNetwork(byProtocol, channelsList, rgbIsLightning),
-        mainnetNetworks: mainnetBitcoinByNetwork(byProtocol, channelsList, rgbIsLightning, testProtocols),
-        networkChains: btcNetworkChains(testNetworks),
+      const rgbIsLightning = rgbAdapter?.isConnected() ? typeof (rgbAdapter as any)?.walletType === 'function' : !!lastRgbIsLightning.current;
+      lastRgbIsLightning.current = rgbIsLightning;
+      setSnapshotRgbIsLightning(rgbIsLightning);
+      const testNetworks = testNetworkLabels(complete ? undefined : snapshotTestNetworks.current);
+      snapshotTestNetworks.current = testNetworks;
+      const btc = portfolioBalance(balance, lastChannelsRef.current, rgbIsLightning, testNetworks);
+      if (complete) {
+        lastCompleteAt.current = Date.now();
+        setBalanceUpdatedAt(lastCompleteAt.current);
+        // A partial refresh never replaces the last complete on-disk snapshot.
+        void saveBalanceSnapshot(walletAtStart, {
+          byProtocol, assets, channels: lastChannelsRef.current, btcPriceUSD: btcPriceRef.current, rgbBalanceIsLightning: rgbIsLightning, testNetworks,
+        });
+      }
+      const liveBalances = Object.fromEntries(balanceResults.flatMap(result => result.btc ? [[result.protocol, result.btc]] : []));
+      if (Object.keys(liveBalances).length) {
+        dispatch(setBtcBalance({ walletKey: keyAtStart,
+          balance: complete ? btc : portfolioBalance(btcBalanceFromProtocols(liveBalances), channelsList ?? [], rgbIsLightning),
+        }));
+      }
+      dispatch(setWalletPortfolio({
+        walletKey: keyAtStart, btcBalance: Object.keys(byProtocol).length ? btc : null, assets, btcPriceUSD: btcPriceRef.current,
+        updatedAt: lastCompleteAt.current, status: complete ? 'current' : 'partial',
       }));
-      if (connectedCount > 0 && okBalances.length === connectedCount && offlineAccounts.length === 0) void saveBalanceSnapshot(walletAtStart, {
-        byProtocol, assets, channels: channelsList, btcPriceUSD: btcPriceRef.current,
-      });
+      if (complete) return 'complete';
+      return balanceResults.some(result => result.btc) || assets.length > 0 ? 'partial' : 'unavailable';
     } catch (error) {
       console.error('Failed to load dashboard data:', error);
-      // Shown in the banner above the balance, not as a modal on top of it.
-      if (showLoadingIndicator) setBalanceWarning('Your balances could not be refreshed.');
+      if (current()) setBalanceWarning('Your balances could not be refreshed.');
+      return 'unavailable';
     } finally {
-      isUpdatingRef.current = false;
-      setIsUpdating(false);
-      if (showLoadingIndicator) {
-        setLoading(false);
+      if (current()) {
+        setIsUpdating(false);
+        if (showLoadingIndicator) setLoading(false);
       }
-      // A load that started for the previous wallet blocked the new wallet's first load.
-      if (!current() && protocolsReadyRef.current) void loadDashboardData(false);
     }
   };
 
-  // Auto-refresh only while Dashboard is actually visible. A parent-stack modal
-  // such as Receive keeps this component mounted; polling behind it can otherwise
-  // collide with receive-address generation and monopolize the same adapters.
-  useEffect(() => {
-    let intervalId: ReturnType<typeof setInterval>;
-
-    if (!protocolsReady || !isScreenFocused) return;
-
-    const refreshData = async () => {
-      if (!isUpdating) {
-        await loadDashboardData(false);
-      }
-    };
-
-    // The focus effect below owns the immediate refresh. This interval handles
-    // only subsequent refreshes, avoiding two adapter bursts on focus.
-    intervalId = setInterval(refreshData, 30000);
-
-    return () => {
-      if (intervalId) {
-        clearInterval(intervalId);
-      }
-    };
-  }, [protocolsReady, isScreenFocused, isNodeUnlocked, isConnecting]);
-
-  // A spend elsewhere (KaleidoMind voice/chat payment tools) emits this so the
-  // balance reflects it right away — plus a short follow-up once it settles —
-  // instead of waiting for the 30s poll. loadDashboardData self-guards on
-  // protocolsReady/isUpdating, so a stray emit is a no-op.
-  useEffect(() => {
-    const sub = DeviceEventEmitter.addListener('rate.refreshBalance', () => {
-      void loadDashboardData(false);
-      setTimeout(() => void loadDashboardData(false), 2500);
-    });
-    return () => sub.remove();
-  }, [protocolsReady]);
-
-  const mountedRef = useRef(true);
-  useEffect(() => () => { mountedRef.current = false; }, []);
-
-  const connectAndLoad = async () => {
-    if (needsSetup) {
-      protocolsReadyRef.current = false;
-      setProtocolsReady(false);
-      setIsConnecting(false);
-      setLoading(false);
-      setConnectionError(null);
-      return;
-    }
+  const connectAndLoad = async (): Promise<BalanceRefreshResult> => {
+    const walletAtStart = activeWalletRef.current;
     setIsConnecting(true);
     setConnectionError(null);
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      // An unreachable account (a node can take a minute to time out) must not hold
-      // back the others: after a short wait, show what is already connected.
+      // Show accounts that are already connected without waiting for every SDK.
       const init = initializeApi();
-      let timer: ReturnType<typeof setTimeout> | undefined;
       const initFirst = await Promise.race([
         init.then(() => true),
-        new Promise<false>((resolve) => { timer = setTimeout(() => resolve(false), EARLY_BALANCE_MS); }),
+        new Promise<false>(resolve => { timer = setTimeout(() => resolve(false), EARLY_BALANCE_MS); }),
       ]);
-      clearTimeout(timer);
-      if (!mountedRef.current) return;
+      if (timer) clearTimeout(timer);
+      if (!currentWallet(walletAtStart)) return 'unavailable';
       if (!initFirst && anyAccountConnected()) {
         protocolsReadyRef.current = true;
         setProtocolsReady(true);
         await loadDashboardData(true);
       }
-      if (!await init || !mountedRef.current) return;
+      if (!await init || !currentWallet(walletAtStart)) return 'unavailable';
       initDoneRef.current = true;
-      await Promise.all([checkNodeStatus(true), loadDashboardData(initFirst)]);
+      return await loadDashboardData(initFirst);
     } finally {
-      // Both a failed connection and a missing wallet are terminal UI states.
-      setIsConnecting(false);
-      setLoading(false);
+      if (currentWallet(walletAtStart)) {
+        setIsConnecting(false);
+        setLoading(false);
+      }
     }
   };
 
+  const runRefresh = (): Promise<BalanceRefreshResult> => {
+    const wallet = activeWalletRef.current;
+    if (!wallet?.encrypted_mnemonic) return Promise.resolve('unavailable');
+    if (refreshFlight.current?.wallet === wallet) return refreshFlight.current.work;
+
+    const work = (protocolsReadyRef.current ? loadDashboardData(false) : connectAndLoad())
+      .catch((): BalanceRefreshResult => 'unavailable')
+      .finally(() => { if (refreshFlight.current?.work === work) refreshFlight.current = undefined; });
+    refreshFlight.current = { wallet, work };
+    return work;
+  };
+
+  const refreshRef = useRef(runRefresh);
+  refreshRef.current = runRefresh;
   useEffect(() => {
+    setDisplayWalletKey(walletKey);
     protocolsReadyRef.current = false;
+    initDoneRef.current = false;
+    attemptedAccounts.current.clear();
     setProtocolsReady(false);
+    setStartupFailures([]);
+    setBalanceWarning(null);
   }, [activeWallet]);
 
-  // A different wallet starts from its own last balances (or blank), never the
-  // previous wallet's figures.
+  // A different wallet starts with its own local snapshot, independently of the network.
   useEffect(() => {
-    walletKeyRef.current = walletKey;
-    liveDataRef.current = false;
-    setBtcBalanceState(EMPTY_BTC_BALANCE);
+    setDisplayedBalance(EMPTY_BTC_BALANCE);
     setPendingBalanceAccounts([]);
+    snapshotAssetsRef.current = [];
     setSnapshotAssets([]);
+    listedProtocolsRef.current.clear();
     setListedProtocols([]);
-    // Redux must not keep the previous wallet's assets either; the same wallet keeps them.
-    if (assetsWalletKey !== null && assetsWalletKey !== walletKey) dispatch(setRgbAssets([]));
-    assetsWalletKey = walletKey;
     setChannels([]);
     setChannelsLive(false);
+    lastChannelsRef.current = [];
     setSnapshotChannels([]);
+    setSnapshotPrice(0);
+    setSnapshotRgbIsLightning(undefined);
+    lastRgbIsLightning.current = undefined;
+    snapshotTestNetworks.current = {};
     setShowingSnapshot(false);
+    lastCompleteAt.current = undefined;
     setBalanceUpdatedAt(undefined);
-    if (!walletKey || needsSetup) return;
+    snapshotReady.current = Promise.resolve();
+    const walletAtStart = activeWalletRef.current;
+    if (!walletKey || needsSetup || !walletAtStart) return;
+
     let cancelled = false;
-    void loadBalanceSnapshot(activeWalletRef.current).then((snap) => {
-      if (cancelled || !snap || walletKeyRef.current !== walletKey || liveDataRef.current) return;
-      setBtcBalanceState(btcBalanceFromProtocols(snap.byProtocol));
-      setSnapshotAssets(snap.assets as InventoryRecord[]);
+    snapshotReady.current = takeBalanceSnapshot(walletAtStart).then(async stored => {
+      if (!stored) return;
+      const snap = await qualifySnapshotNetworks(walletAtStart, stored);
+      if (cancelled || snapshotWalletKey(activeWalletRef.current) !== walletKey
+        || (!Object.keys(snap.byProtocol).length && !snap.assets.length && !snap.channels.length)) return;
+      const balance = btcBalanceFromProtocols({ ...snap.byProtocol, ...balanceStateRef.current.byProtocol });
+      setDisplayedBalance(balance);
+      snapshotAssetsRef.current = snap.assets;
+      setSnapshotAssets(snap.assets);
+      lastChannelsRef.current = snap.channels;
       setSnapshotChannels(snap.channels);
       setSnapshotPrice(snap.btcPriceUSD);
+      setSnapshotRgbIsLightning(snap.rgbBalanceIsLightning);
+      lastRgbIsLightning.current = snap.rgbBalanceIsLightning;
+      snapshotTestNetworks.current = snap.testNetworks ?? {};
+      lastCompleteAt.current = snap.savedAt;
       setBalanceUpdatedAt(snap.savedAt);
       setShowingSnapshot(true);
+      dispatch(setWalletPortfolio({
+        walletKey, btcBalance: Object.keys(snap.byProtocol).length ? portfolioBalance(balance, snap.channels, snap.rgbBalanceIsLightning
+          ?? (typeof (rgbAccountAdapter() as any)?.walletType === 'function'), testNetworkLabels(snap.testNetworks)) : null,
+        assets: snap.assets, btcPriceUSD: snap.btcPriceUSD, updatedAt: snap.savedAt, status: 'cached',
+      }));
     });
     return () => { cancelled = true; };
   }, [walletKey, needsSetup]);
 
-  const resumeRefreshRef = useRef<() => Promise<void>>(async () => {});
-  useFocusEffect(
-    useCallback(() => {
-      void connectAndLoad();
-      const subscription = AppState?.addEventListener('change', state => {
-        if (state === 'active') void resumeRefreshRef.current();
-      });
-      return () => subscription?.remove();
-    }, [activeWallet])
-  );
+  // All triggers share the in-flight request, including Assets pull-to-refresh.
+  const refreshWallet = () => {
+    if (connectionError || offlineAccounts.length) protocolsReadyRef.current = false;
+    return runRefresh();
+  };
+  const manualRefreshRef = useRef(refreshWallet);
+  manualRefreshRef.current = refreshWallet;
+  useEffect(() => {
+    if (!walletKey || needsSetup) return;
+    return registerBalanceRefresh(walletKey, () => manualRefreshRef.current());
+  }, [walletKey, needsSetup]);
 
-  // `silent`: the refresh on returning to the app, shown only by the balance card's own
-  // indicator, not by the pull-to-refresh spinner as if the user had pulled.
+  useFocusEffect(useCallback(() => {
+    if (AppState?.currentState !== 'background' && AppState?.currentState !== 'inactive') void manualRefreshRef.current();
+    const subscription = AppState?.addEventListener('change', state => {
+      if (state === 'active') void manualRefreshRef.current();
+    });
+    return () => subscription?.remove();
+  }, [activeWallet]));
+
+  useEffect(() => {
+    if (!walletKey || !protocolsReady || !isScreenFocused) return;
+    const timer = setInterval(() => {
+      if (AppState?.currentState !== 'background' && AppState?.currentState !== 'inactive') void refreshRef.current();
+    }, 30_000);
+    return () => clearInterval(timer);
+  }, [walletKey, protocolsReady, isScreenFocused]);
+
+  // Payments request an immediate refresh and a coalesced settling follow-up.
+  useEffect(() => {
+    if (!walletKey || needsSetup) return;
+    let settling: ReturnType<typeof setTimeout> | undefined;
+    let payment = 0;
+    let active = true;
+    const refresh = () => {
+      if (AppState?.currentState !== 'background' && AppState?.currentState !== 'inactive') return manualRefreshRef.current();
+    };
+    const sub = DeviceEventEmitter.addListener('rate.refreshBalance', () => {
+      const attempt = ++payment;
+      const work = refresh();
+      if (settling) clearTimeout(settling);
+      settling = setTimeout(async () => {
+        await work;
+        if (active && payment === attempt) void refresh();
+      }, 2500);
+    });
+    return () => { active = false; sub.remove(); if (settling) clearTimeout(settling); };
+  }, [walletKey, needsSetup]);
+
   const onRefresh = async (silent = false) => {
-    if (refreshing || isConnecting || needsSetup) return;
     if (!silent) setRefreshing(true);
     try {
-      if (connectionError || offlineAccounts.length > 0) protocolsReadyRef.current = false;
-      await connectAndLoad();
+      await refreshWallet();
     } finally {
-      if (!silent) setRefreshing(false);
+      if (!silent && mountedRef.current) setRefreshing(false);
     }
   };
-
-  resumeRefreshRef.current = () => onRefresh(true);
 
   const formatSatoshis = (satoshis: number): string => {
     return formatBitcoinAmount(satoshis, bitcoinUnit);
@@ -666,14 +699,10 @@ export default function DashboardScreen({ navigation }: Props) {
   };
 
   const getTotalBtcBalance = (): number => {
-    if (!btcBalance) return 0;
+    if (!displayingCurrentWallet) return 0;
     return btcBalance.vanilla.spendable + btcBalance.colored.spendable;
   };
 
-  const offChainBalance = (channelsLive ? channels : snapshotChannels).reduce(
-    (sum, channel) => sum + channel.local_balance_sat,
-    0
-  );
   const hasChannelCapableNode =
     (protocolManager.getAdapterIfAvailable('RGB_LN')?.isConnected() ?? false)
     && ((protocolManager.getAdapterIfAvailable('RGB_LN') as any)?.walletType?.() ?? nwcWalletType) !== 'ln'
@@ -681,77 +710,78 @@ export default function DashboardScreen({ navigation }: Props) {
 
   const btcPriceUSD = liveBtcPrice || snapshotPrice;
   btcPriceRef.current = btcPriceUSD;
-  const protocolBalances = (btcBalance as any).byProtocol as Record<string, { confirmed: number; unconfirmed: number; total: number }> | undefined;
+  const protocolBalances = displayingCurrentWallet ? btcBalance.byProtocol : undefined;
   // NWC reports Lightning funds already; HTTP RLN reports on-chain funds.
-  const rgbBalanceIsLightning = typeof (rgbAccountAdapter() as any)?.walletType === 'function';
+  const rgbAdapter = rgbAccountAdapter();
+  const rgbBalanceIsLightning = rgbAdapter?.isConnected()
+    ? typeof (rgbAdapter as any)?.walletType === 'function' : !!snapshotRgbIsLightning;
   // Accounts on a test network hold sats with no value: kept out of the total and its
   // fiat figure, and shown on their own line.
-  const testNetworks = testNetworkLabels();
-  const testProtocols = new Set(Object.keys(testNetworks));
+  const { RGB, SPARK, ARKADE, BARK, LN } = showingSnapshot ? snapshotTestNetworks.current : testNetworkLabels(snapshotTestNetworks.current);
+  const testNetworks = useMemo(() => ({ RGB, SPARK, ARKADE, BARK, LN }), [RGB, SPARK, ARKADE, BARK, LN]);
+  const testProtocols = useMemo(() => new Set(Object.keys(testNetworks).filter(account => testNetworks[account as AccountId | 'LN'])), [testNetworks]);
   // Until this wallet's channels load, its last known ones stand in for the total.
-  const summaryChannels = channelsLive ? channels : snapshotChannels;
-  const bitcoinSummary = summarizeBitcoinBalances(
+  const summaryChannels = displayingCurrentWallet ? (channelsLive ? channels : snapshotChannels) : EMPTY_CHANNELS;
+  const offChainBalance = summaryChannels.reduce((sum, channel) => sum + channel.local_balance_sat, 0);
+  const bitcoinSummary = useMemo(() => summarizeBitcoinBalances(
     protocolBalances ?? {}, summaryChannels, rgbBalanceIsLightning, testProtocols,
-  );
+  ), [protocolBalances, summaryChannels, rgbBalanceIsLightning, testProtocols]);
   const availableBtc = bitcoinSummary.available;
   const pendingBtc = bitcoinSummary.unavailable;
 
   // The shared asset inventory, fed with this screen's own bitcoin figures (live
   // per account, or the last known ones) and, until the accounts answer, the
   // last known assets of accounts that haven't listed theirs yet.
-  const inventory = buildAssetInventory({
+  const inventory = useMemo(() => buildAssetInventory({
     btc: {
       available: availableBtc,
       networks: bitcoinByNetwork(protocolBalances ?? {}, summaryChannels, rgbBalanceIsLightning),
     },
-    assets: withSnapshotFallback(liveAssets, snapshotAssets, listedProtocols),
-  });
+    assets: displayingCurrentWallet ? withSnapshotFallback(liveAssets, snapshotAssets, listedProtocols) : EMPTY_ASSETS,
+  }), [availableBtc, protocolBalances, summaryChannels, rgbBalanceIsLightning, displayingCurrentWallet, liveAssets, snapshotAssets, listedProtocols]);
   const btcEntry = inventoryBtc(inventory);
-  const tokens = inventoryTokens(inventory);
+  const tokens = useMemo(() => inventoryTokens(inventory), [inventory]);
 
   // Lite collapses every asset into BTC / USD / other, hiding which network each
   // lives on. Its USD line counts what is held anywhere (in channels too).
-  const assetTotalBaseUnits = (asset: InventoryAsset): number => {
-    const detail = asset.balanceDetail;
-    if (!detail) return asset.balance;
-    return (
-      Number(detail.settled ?? asset.balance) +
-      Number(detail.offchain_inbound ?? 0) +
-      Number(detail.offchain_outbound ?? 0)
-    );
-  };
-  const liteUsdAssetIds = liteUsdIdsOf(tokens);
+  const liteUsdAssetIds = useMemo(() => liteUsdIdsOf(tokens), [tokens]);
+  const listedAssets = useMemo(() => isLite ? tokens.map(token => liteUsdAssetIds.has(token.asset_id)
+    ? { ...token, balance: assetTotalBaseUnits(token) } : token) : tokens, [isLite, tokens, liteUsdAssetIds]);
   // Dollar stablecoins (and whatever Lite folds into its USD line) join the total
   // at $1, as sats at the live price — the extension's totalBTC = btc + tokenValueSats.
-  const tokenValueSats = priceTokensInSats(tokens, btcPriceUSD, testProtocols);
+  const tokenValueSats = useMemo(() => priceTokensInSats(tokens, btcPriceUSD, testProtocols), [tokens, btcPriceUSD, testProtocols]);
   const liveTotalBalance = bitcoinSummary.total + tokenValueSats;
   const lastCompleteTotal = useRef<{ wallet: string | null; value: number } | null>(null);
   const balanceRefreshing = isConnecting || isUpdating || loading || pendingBalanceAccounts.length > 0;
   useEffect(() => {
-    if (!balanceRefreshing && !pendingBalanceAccounts.length && balanceUpdatedAt && !showingSnapshot) lastCompleteTotal.current = { wallet: walletKey, value: liveTotalBalance };
-  }, [walletKey, liveTotalBalance, balanceRefreshing, pendingBalanceAccounts.length, balanceUpdatedAt, showingSnapshot]);
+    if (displayingCurrentWallet && !balanceRefreshing && balanceUpdatedAt && !showingSnapshot && !balanceWarning && !offlineAccounts.length) {
+      lastCompleteTotal.current = { wallet: walletKey, value: liveTotalBalance };
+    }
+  }, [walletKey, displayingCurrentWallet, liveTotalBalance, balanceRefreshing, balanceUpdatedAt, showingSnapshot, balanceWarning, offlineAccounts.length]);
   const holdingBalance = balanceRefreshing && lastCompleteTotal.current?.wallet === walletKey;
   const totalBalance = holdingBalance ? lastCompleteTotal.current!.value : liveTotalBalance;
   const denominatedTotal = formatDisplayAmount(totalBalance);
-  const balanceUnavailable = !!connectionError && totalBalance === 0;
+  const balanceUnavailable = !!connectionError && totalBalance === 0 && balanceUpdatedAt === undefined;
   const offlineNames = offlineAccounts.join(', ');
   const partialBalanceNotice = offlineNames
     ? `${offlineNames.replace(/^./, c => c.toUpperCase())} ${offlineAccounts.length === 1 ? 'is' : 'are'} offline, so the total may be incomplete.`
     : null;
   const connectionNotice = offlineNames ? `Can't reach ${offlineNames}.` : 'Wallet connection unavailable.';
-  const balanceNotice = connectionError ? connectionNotice : balanceWarning ?? partialBalanceNotice;
-  const showBtcAsset = balanceUpdatedAt !== undefined || Object.keys(protocolBalances ?? {}).length > 0
-    || (!balanceRefreshing && !connectionError && !balanceWarning);
+  const balanceNotice = connectionError ? connectionNotice : partialBalanceNotice ?? balanceWarning;
+  const showBtcAsset = displayingCurrentWallet && (balanceUpdatedAt !== undefined || Object.keys(protocolBalances ?? {}).length > 0
+    || (!balanceRefreshing && !connectionError && !balanceWarning));
   const showAssets = showBtcAsset || tokens.length > 0;
+  const mainnetNetworks = useMemo(() => mainnetBitcoinByNetwork(protocolBalances ?? {}, summaryChannels, rgbBalanceIsLightning, testProtocols),
+    [protocolBalances, summaryChannels, rgbBalanceIsLightning, testProtocols]);
+  const networkChains = useMemo(() => btcNetworkChains(testNetworks), [testNetworks]);
   const assetList = useAssetListView({
     btcNetworks: btcEntry.networks,
-    btcMainnetNetworks: mainnetBitcoinByNetwork(protocolBalances ?? {}, summaryChannels, rgbBalanceIsLightning, testProtocols),
-    btcNetworkChains: btcNetworkChains(testNetworks),
+    btcMainnetNetworks: mainnetNetworks,
+    btcNetworkChains: networkChains,
     btcAvailable: btcEntry.balance,
     showBtc: showBtcAsset,
     // Keep Lite's dollar row based on settled and channel amounts.
-    assets: isLite ? tokens.map(token => liteUsdAssetIds.has(token.asset_id)
-      ? { ...token, balance: assetTotalBaseUnits(token) } : token) : tokens,
+    assets: listedAssets,
     btcPriceUSD,
     liteUsdAssetIds: isLite ? liteUsdAssetIds : undefined,
     testProtocols,
@@ -900,7 +930,7 @@ export default function DashboardScreen({ navigation }: Props) {
   );
 
   return (
-    <View style={styles.container}>
+    <View style={styles.container} onLayout={() => { if (!needsSetup) markWalletStartup('dashboard-visible'); }}>
       <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
 
       {/* Sticky header: lives outside the ScrollView so it stays fixed while
@@ -1002,9 +1032,9 @@ export default function DashboardScreen({ navigation }: Props) {
             lightningBalance={offChainBalance}
             // Always provide the per-network breakdown; it stays collapsed behind
             // the chevron so it doesn't clutter lite mode.
-            byProtocol={(btcBalance as any)?.byProtocol}
+            byProtocol={protocolBalances}
             // Show a dash while first connecting, before any balance is available.
-            loading={(isConnecting || loading) && totalBalance === 0 && !refreshing && !showingSnapshot}
+            loading={!displayingCurrentWallet || ((isConnecting || loading) && totalBalance === 0 && !refreshing && !showingSnapshot)}
             updating={isConnecting || isUpdating || loading}
             pendingAccounts={pendingBalanceAccounts.map(p => ({ RGB: 'RGB', LN: 'Lightning', SPARK: 'Spark', ARKADE: 'Arkade', BARK: 'Bark' }[p] ?? p))}
             footer={
@@ -1030,10 +1060,6 @@ export default function DashboardScreen({ navigation }: Props) {
               bitcoinUnit={bitcoinUnit}
               hideBalances={denominatedTotal.hidden}
               onAssetPress={(item) => {
-                if (item.key === LITE_USD_KEY) {
-                  navigation.getParent()?.navigate('Assets');
-                  return;
-                }
                 const asset = assetDetailForItem(item, bitcoinUnit);
                 if (asset) navigation.getParent()?.navigate('AssetDetail', { asset });
               }}

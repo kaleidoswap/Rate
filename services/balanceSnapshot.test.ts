@@ -1,7 +1,7 @@
 jest.mock('@react-native-async-storage/async-storage', () => require('@react-native-async-storage/async-storage/jest/async-storage-mock'));
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
-  clearBalanceSnapshots, hasBalanceSnapshot, loadBalanceSnapshot, parseSnapshot, saveBalanceSnapshot, snapshotWalletKey,
+  clearBalanceSnapshots, loadBalanceSnapshot, parseSnapshot, prepareBalanceSnapshot, saveBalanceSnapshot, snapshotWalletKey, takeBalanceSnapshot,
 } from './balanceSnapshot';
 
 const walletA = { id: 1, created_at: 100 };
@@ -30,7 +30,6 @@ test('never shows another wallet\'s balances', async () => {
   expect(await loadBalanceSnapshot(walletB)).toBeNull();
   // A new wallet that reuses a deleted wallet's id has a different creation time.
   expect(await loadBalanceSnapshot({ id: 1, created_at: 999 })).toBeNull();
-  expect(await hasBalanceSnapshot(walletA)).toBe(true);
 });
 
 test('no wallet id, no snapshot', async () => {
@@ -59,4 +58,14 @@ test('deleting a wallet forgets its snapshots only', async () => {
   await clearBalanceSnapshots(1);
   expect(await loadBalanceSnapshot(walletA)).toBeNull();
   expect(await loadBalanceSnapshot(walletB)).not.toBeNull();
+});
+
+test('startup and Home share one local read, with no cross-wallet reuse', async () => {
+  await saveBalanceSnapshot(walletA, data);
+  (AsyncStorage.getItem as jest.Mock).mockClear();
+  prepareBalanceSnapshot(walletA);
+  expect((await takeBalanceSnapshot(walletA))?.byProtocol.SPARK.total).toBe(1000);
+  expect(AsyncStorage.getItem).toHaveBeenCalledTimes(1);
+  prepareBalanceSnapshot(walletA);
+  expect(await takeBalanceSnapshot(walletB)).toBeNull();
 });
