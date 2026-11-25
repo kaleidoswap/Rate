@@ -13,6 +13,7 @@ import {
   revokePhonePair,
 } from '../services/nwc/phoneWalletHost';
 import { parsePhoneInvitation } from '../services/nwc/phoneWalletProtocol';
+import { configuredPhonePasskeyOrigin } from '../services/phoneWalletPasskey';
 
 export default function PhoneWalletScreen({
   navigation,
@@ -42,6 +43,7 @@ export default function PhoneWalletScreen({
     }
   };
   const activePair = pair?.walletId === walletId ? pair : null;
+  const configured = !!configuredPhonePasskeyOrigin();
   let candidate;
   let invalid = '';
   if (raw && !activePair) {
@@ -65,7 +67,9 @@ export default function PhoneWalletScreen({
               {activePair.client}
             </Text>
             <Text style={value}>
-              {t('Keep the app open to review RGB payments. Each payment requires your passkey.')}
+              {t(configured
+                ? 'Keep the app open to review RGB payments. Each payment requires your passkey.'
+                : 'Passkeys for browser payments are unavailable in this build.')}
             </Text>
             <Button
               title={t('Disconnect browser')}
@@ -74,6 +78,8 @@ export default function PhoneWalletScreen({
               onPress={() => void run(() => revokePhonePair(walletId!))}
             />
           </>
+        ) : !configured ? (
+          <Text style={value}>{t('Passkeys for browser payments are unavailable in this build.')}</Text>
         ) : (
           <>
             <Text style={value}>

@@ -10,6 +10,7 @@ import { Platform } from 'react-native';
 import { Passkey, type PasskeyGetRequest } from 'react-native-passkey';
 import {
   approveWithPhoneWalletPasskey,
+  configuredPhonePasskeyOrigin,
   enrollPhoneWalletPasskey,
   hasPhoneWalletPasskey,
 } from './phoneWalletPasskey';
@@ -159,6 +160,7 @@ it('pins the Android signing certificate and rejects unsigned builds and unverif
   const previous = process.env.EXPO_PUBLIC_PASSKEY_ANDROID_CERT_SHA256;
   try {
     delete process.env.EXPO_PUBLIC_PASSKEY_ANDROID_CERT_SHA256;
+    expect(configuredPhonePasskeyOrigin()).toBeUndefined();
     await expect(enrollPhoneWalletPasskey(wallet)).rejects.toThrow(/unavailable/);
     process.env.EXPO_PUBLIC_PASSKEY_ANDROID_CERT_SHA256 = '01'.repeat(32);
     await expect(enrollPhoneWalletPasskey(wallet)).rejects.toThrow(/verify/);
@@ -169,6 +171,9 @@ it('pins the Android signing certificate and rejects unsigned builds and unverif
     flags = 5;
     await enrollPhoneWalletPasskey(wallet);
     await approveWithPhoneWalletPasskey(wallet, 'invoice');
+    delete process.env.EXPO_PUBLIC_PASSKEY_ANDROID_CERT_SHA256;
+    await expect(enrollPhoneWalletPasskey(wallet)).rejects.toThrow(/unavailable/);
+    await expect(approveWithPhoneWalletPasskey(wallet, 'invoice')).rejects.toThrow(/unavailable/);
   } finally {
     if (previous === undefined) delete process.env.EXPO_PUBLIC_PASSKEY_ANDROID_CERT_SHA256;
     else process.env.EXPO_PUBLIC_PASSKEY_ANDROID_CERT_SHA256 = previous;

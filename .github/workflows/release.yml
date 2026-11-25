@@ -48,9 +48,7 @@ env:
   # and Settings hides the opt-in switch.
   EXPO_PUBLIC_SENTRY_DSN: ${{ vars.SENTRY_DSN }}
   EXPO_PUBLIC_RGB_L1_MUTINYNET_EVM_CHAINS: ${{ vars.RGB_L1_MUTINYNET_EVM_CHAINS }}
-  # Utexo's public Bitcoin Signet bridge settles via Arbitrum One.
-  EXPO_PUBLIC_RGB_L1_SIGNET_EVM_CHAINS: >-
-    ${{ vars.RGB_L1_SIGNET_EVM_CHAINS || '{"42161":{"rpcUrl":"https://arb1.arbitrum.io/rpc","minMintLockBlocks":1200,"maxMintLockBlocks":28800}}' }}
+  EXPO_PUBLIC_RGB_L1_SIGNET_EVM_CHAINS: ${{ vars.RGB_L1_SIGNET_EVM_CHAINS }}
 
 permissions:
   contents: read
@@ -186,14 +184,10 @@ jobs:
           ORG_GRADLE_PROJECT_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           ORG_GRADLE_PROJECT_VERSION_NAME: ${{ needs.version.outputs.name }}
           ORG_GRADLE_PROJECT_VERSION_CODE: ${{ needs.version.outputs.code }}
+          # Set together with the domain association when Android passkeys are released.
+          EXPO_PUBLIC_PASSKEY_ANDROID_CERT_SHA256: ${{ vars.RATE_ANDROID_PASSKEY_CERT_SHA256 }}
           ANDROID_SHRINK: ${{ (github.event_name == 'workflow_dispatch' && inputs.android_shrink) && '1' || '0' }}
         run: |
-          # For this sideloaded APK the Android passkey origin is its release signer.
-          keytool -exportcert -keystore "$ORG_GRADLE_PROJECT_RELEASE_STORE_FILE" \
-            -storepass:env ORG_GRADLE_PROJECT_RELEASE_STORE_PASSWORD \
-            -alias "$ORG_GRADLE_PROJECT_RELEASE_KEY_ALIAS" -file "$RUNNER_TEMP/apk-signer.der"
-          signer_digest="$(sha256sum "$RUNNER_TEMP/apk-signer.der")"
-          export EXPO_PUBLIC_PASSKEY_ANDROID_CERT_SHA256="${signer_digest%% *}"
           flags=()
           if [ "$ANDROID_SHRINK" = "1" ]; then
             flags+=(-Pandroid.enableMinifyInReleaseBuilds=true -Pandroid.enableShrinkResourcesInReleaseBuilds=true)

@@ -21,13 +21,19 @@ interface Credential {
 // A seed-derived wallet fingerprint survives database row renumbering and device reinstalls.
 const recordKey = (wallet: string) => 'phone-passkey-v1.' + bytesToHex(sha256(utf8ToBytes(wallet)));
 
-function expectedOrigin(): string {
+export function configuredPhonePasskeyOrigin(): string | undefined {
   if (Platform.OS === 'ios') return 'https://' + RP;
   const hex = process.env.EXPO_PUBLIC_PASSKEY_ANDROID_CERT_SHA256?.replace(/:/g, '');
   if (Platform.OS === 'android' && hex && /^[a-f0-9]{64}$/i.test(hex)) {
     return 'android:apk-key-hash:' + b64.encode(hexToBytes(hex));
   }
-  throw new Error('Passkeys for browser payments are unavailable in this build.');
+  return undefined;
+}
+
+function expectedOrigin(): string {
+  const origin = configuredPhonePasskeyOrigin();
+  if (!origin) throw new Error('Passkeys for browser payments are unavailable in this build.');
+  return origin;
 }
 
 function requireProof(ok: unknown): asserts ok {
@@ -81,8 +87,8 @@ async function ceremony(action: () => Promise<void>) {
 /** Explicit user action during pairing. A payment request can never enroll or replace a passkey. */
 export function enrollPhoneWalletPasskey(walletId: string): Promise<void> {
   return ceremony(async () => {
-    if (await readCredential(walletId)) return;
     const origin = expectedOrigin();
+    if (await readCredential(walletId)) return;
     const challenge = b64.encode(await getRandomBytesAsync(32));
     const userHandle = b64.encode(await getRandomBytesAsync(32));
     const name = 'Wallet ' + userHandle.slice(0, 8);
