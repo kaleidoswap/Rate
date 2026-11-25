@@ -265,7 +265,24 @@ jest.mock('react-native', () => ({
   Modal: 'Modal',
   Pressable: ({ onPress, disabled, children, ...props }: { onPress?: (...args: unknown[]) => void; disabled?: boolean; children?: React.ReactNode } & Record<string, unknown>) =>
     require('react').createElement('Pressable', { ...props, disabled, onPress: (...args: unknown[]) => { if (!disabled) onPress?.(...args); } }, children),
-  FlatList: 'FlatList',
+  // Render the initial batch and list content for interaction tests. Native
+  // layout and subsequent scroll windows are outside the Jest renderer.
+  FlatList: ({ data, renderItem, keyExtractor, ListHeaderComponent, ListEmptyComponent, initialNumToRender = 10, ...props }: {
+    data?: readonly unknown[] | null;
+    renderItem?: (item: { item: unknown; index: number }) => React.ReactNode;
+    keyExtractor?: (item: unknown, index: number) => string;
+    ListHeaderComponent?: React.ReactElement | React.ComponentType;
+    ListEmptyComponent?: React.ReactElement | React.ComponentType;
+    initialNumToRender?: number;
+  } & Record<string, unknown>) => {
+    const React = jest.requireActual<typeof import('react')>('react');
+    const element = (component?: React.ReactElement | React.ComponentType) =>
+      typeof component === 'function' ? React.createElement(component) : component;
+    const rows = (data ?? []).slice(0, initialNumToRender).map((item, index) =>
+      React.createElement(React.Fragment, { key: keyExtractor?.(item, index) ?? index }, renderItem?.({ item, index })));
+    return React.createElement('FlatList', { ...props, data }, element(ListHeaderComponent),
+      rows.length ? rows : element(ListEmptyComponent));
+  },
   Image: 'Image',
   ActivityIndicator: 'ActivityIndicator',
   Animated: {

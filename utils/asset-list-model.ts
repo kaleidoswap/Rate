@@ -190,9 +190,12 @@ function unique<T>(xs: T[]): T[] {
   return Array.from(new Set(xs));
 }
 
-/** The holding a tap opens: the largest one. */
-export function dominantHolding(item: AssetListItem): AssetHolding | undefined {
-  return item.holdings.reduce<AssetHolding | undefined>((best, h) => (!best || h.amount > best.amount ? h : best), undefined);
+/** Expand Lite's USD total into the exact token and network rows behind it. */
+export function liteUsdHoldings(item: AssetListItem): AssetListItem[] {
+  if (item.key !== LITE_USD_KEY) return [];
+  return item.holdings.flatMap(holding => holding.token
+    ? [tokenItem({ ...holding, token: holding.token }, item.unitUsd)]
+    : []);
 }
 
 /** Preserve the selected network and full balance when opening an asset. */
@@ -207,7 +210,8 @@ export function assetDetailForItem(item: AssetListItem, bitcoinUnit: 'BTC' | 'sa
       locations: item.holdings.map(h => ({ label: btcNetworkLabel(h.network, h.chain), amount: h.amount, unit: 'sats' })),
     };
   }
-  const holding = dominantHolding(item);
+  if (item.key === LITE_USD_KEY || item.holdings.length !== 1) return undefined;
+  const [holding] = item.holdings;
   if (!holding?.token) return undefined;
   const token = holding.token;
   const { protocol } = token;
@@ -248,7 +252,7 @@ export function filterAssetItems(items: readonly AssetListItem[], filter: AssetF
   const exactSearch = !!q && items.some((item) => item.holdings.some(matchesId));
   const out: AssetListItem[] = [];
   for (const item of items) {
-    const holdings = filter === 'all' ? item.holdings : item.holdings.filter((h) => h.network === filter);
+    let holdings = filter === 'all' ? item.holdings : item.holdings.filter((h) => h.network === filter);
     if (filter !== 'all' && !holdings.length) continue;
     if (exactSearch) {
       const matching = holdings.filter(matchesId);
@@ -257,17 +261,18 @@ export function filterAssetItems(items: readonly AssetListItem[], filter: AssetF
       continue;
     }
     if (q && !matchesText(item)) {
-      const matchesFoldedToken = item.key === LITE_USD_KEY && holdings.some(({ token }) => token && matchesText(token));
-      if (!matchesFoldedToken) continue;
+      if (item.key !== LITE_USD_KEY) continue;
+      holdings = holdings.filter(({ token }) => token && matchesText(token));
+      if (!holdings.length) continue;
     }
-    if (filter === 'all') { out.push(item); continue; }
+    if (holdings === item.holdings) { out.push(item); continue; }
     const amount = holdings.reduce((s, h) => s + h.amount, 0);
     out.push({
       ...item,
       amount,
       holdings,
-      networks: [filter],
-      btcNetwork: item.isBtc && filter !== 'rgb' ? filter : undefined,
+      networks: filter === 'all' ? unique(holdings.map(h => h.network)) : [filter],
+      btcNetwork: item.isBtc && filter !== 'all' && filter !== 'rgb' ? filter : undefined,
       usdValue: item.isBtc
         ? holdings.reduce((sum, holding) => sum + (holding.btcUsdValue ?? 0), 0) || undefined
         : item.unitUsd !== undefined ? amount * item.unitUsd : undefined,

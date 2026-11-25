@@ -1,5 +1,5 @@
 import {
-  assetDetailForItem, assetListUsdTotal, availableAssetFilters, buildAssetListItems, dominantHolding, filterAssetItems, LITE_USD_KEY,
+  assetDetailForItem, assetListUsdTotal, availableAssetFilters, buildAssetListItems, filterAssetItems, liteUsdHoldings, LITE_USD_KEY,
 } from './asset-list-model';
 import { LIQUID_USDT_ASSET_ID } from '@kaleidorg/wallet-engine';
 import { USDB_TOKEN_ADDRESS } from './flashnet';
@@ -34,7 +34,7 @@ test('the same ticker on two networks keeps separate holdings and no ticker-base
     { amount: 10, networks: ['spark'], name: 'USDT on Spark', assetIdLabel: 'spark-usdt' },
   ]);
   expect(usdts.map(i => i.usdValue)).toEqual([undefined, undefined]);
-  expect(dominantHolding(usdts[0])?.token?.asset_id).toBe('rgb-usdt');
+  expect(assetDetailForItem(usdts[0], 'sats')?.asset_id).toBe('rgb-usdt');
   expect(items.find((i) => i.ticker === 'XAUT')?.usdValue).toBeUndefined();
   expect(items).toHaveLength(4);
 });
@@ -77,6 +77,7 @@ test('Lite folds its dollar assets into one USD row, like the dashboard', () => 
   const items = buildAssetListItems({ ...base, assets, liteUsdAssetIds: new Set([LIQUID_USDT_ASSET_ID, 'rgb-usdt']) });
   const usd = items.find((i) => i.key === LITE_USD_KEY)!;
   expect(usd).toMatchObject({ ticker: 'USD', amount: 30, usdValue: 30 });
+  expect(assetDetailForItem(usd, 'sats')).toBeUndefined();
   // The rest stays as it was.
   expect(items.find((i) => i.key === 'asset:rgb:rgb-usdt')?.amount).toBe(30);
   const [exact] = filterAssetItems(items, 'all', LIQUID_USDT_ASSET_ID);
@@ -99,6 +100,11 @@ test('search on a selected network checks only its holdings in folded Lite USD',
   expect(filterAssetItems(items, 'spark', 'liquid tether')).toEqual([]);
   expect(filterAssetItems(items, 'spark', LIQUID_USDT_ASSET_ID)).toEqual([]);
   expect(filterAssetItems(items, 'spark', 'spark usd')).toMatchObject([{ amount: 20, networks: ['spark'] }]);
+  const [usd] = filterAssetItems(items, 'all', 'spark usd');
+  expect(usd).toMatchObject({ amount: 20, networks: ['spark'] });
+  const holdings = liteUsdHoldings(usd);
+  expect(holdings).toHaveLength(1);
+  expect(assetDetailForItem(holdings[0], 'sats')).toMatchObject({ asset_id: spark, protocol: 'SPARK', fiatValue: 20 });
 });
 
 test('the header total adds up every priced row', () => {
