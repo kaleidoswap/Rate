@@ -10,7 +10,7 @@ const mockState: any = { wallet: { activeWallet: null, btcPriceUSD: 0 }, assets:
 const mockDispatch = jest.fn();
 let mockLevel: 'lite' | 'advanced' = 'lite';
 jest.mock('react-redux', () => ({ useDispatch: () => mockDispatch, useSelector: (fn: any) => fn(mockState) }));
-jest.mock('../store/hooks', () => ({ useAppSelector: (fn: any) => fn(mockState) }));
+jest.mock('../store/hooks', () => ({ useAppSelector: (fn: any) => fn(mockState), useAppDispatch: () => mockDispatch }));
 jest.mock('@react-navigation/native', () => ({
   useIsFocused: () => true,
   useFocusEffect: (fn: any) => require('react').useEffect(fn, [fn]),
@@ -27,7 +27,7 @@ jest.mock('../store/slices/assetsSlice', () => ({
   setProtocolAssets: (payload: any) => ({ type: 'protocolAssets', payload }),
 }));
 jest.mock('../store/slices/nostrSlice', () => ({ loadNostrProfile: jest.fn() }));
-jest.mock('../store/slices/settingsSlice', () => ({ selectDisclosureLevel: () => mockLevel }));
+jest.mock('../store/slices/settingsSlice', () => ({ selectDisclosureLevel: () => mockLevel, setAssetHiddenPreference: jest.fn() }));
 jest.mock('@kaleidorg/wallet-engine', () => ({ policyFor: (level: string) => ({ showNetworks: level === 'advanced' }), liteBucketOf: () => 'OTHER' }));
 jest.mock('../utils/bitcoinUnits', () => ({
   formatBitcoinAmount: String,
@@ -210,9 +210,13 @@ test('shows the cached portfolio inline and opens details on the selected accoun
   expect(screen.getByLabelText(/^Tether USD, 10 USDT, on Spark/)).toBeTruthy();
   expect(screen.getAllByText(/^(Balance ready|Assets|Insights)$/).map(text => text.props.children))
     .toEqual(['Balance ready', 'Assets', 'Insights']);
+  expect(screen.queryByLabelText('Search assets')).toBeNull();
+  expect(screen.queryByLabelText('Spark')).toBeNull();
+  fireEvent.press(screen.getByLabelText('Asset settings'));
   fireEvent.changeText(screen.getByLabelText('Search assets'), 'tether');
+  fireEvent.press(screen.getByLabelText('Spark'));
+  fireEvent.press(screen.getByText('Done'));
   expect(screen.queryByLabelText(/^Bitcoin,/)).toBeNull();
-  fireEvent.press(screen.getByLabelText('Show assets on Spark'));
   fireEvent.press(screen.getByLabelText(/^Tether USD, 10 USDT/));
   expect(navigate).toHaveBeenCalledWith('AssetDetail', {
     asset: expect.objectContaining({ asset_id: 'second-usdt', protocol: 'SPARK', isRGB: false }),

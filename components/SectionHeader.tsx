@@ -14,6 +14,8 @@ interface SectionHeaderProps {
   title: string;
   actionLabel?: string;
   onAction?: () => void;
+  /** An additional action alongside the link. */
+  trailingAction?: React.ReactNode;
   /** Show a chevron after the action label (default true when an action exists). */
   actionChevron?: boolean;
   /** Render the title as an uppercase, wide-tracked, dimmed eyebrow (extension parity). */
@@ -25,6 +27,7 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
   title,
   actionLabel,
   onAction,
+  trailingAction,
   actionChevron = true,
   eyebrow = false,
   style,
@@ -34,25 +37,28 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
   return (
     <View style={[styles.header, style]}>
       <Text style={[styles.title, eyebrow && styles.eyebrow]}>{title}</Text>
-      {actionLabel && onAction && (
-        <PressableScale
-          onPress={onAction}
-          style={styles.action}
-          accessibilityRole="button"
-          accessibilityLabel={actionLabel}
-          // The link is small; the touch target still reaches 44pt.
-          hitSlop={{ top: 14, bottom: 14, left: 12, right: 12 }}
-        >
-          <Text style={styles.actionText}>{actionLabel}</Text>
-          {actionChevron && (
-            <Ionicons
-              name="chevron-forward"
-              size={12}
-              color={theme.colors.primary[500]}
-            />
-          )}
-        </PressableScale>
-      )}
+      <View style={styles.actions}>
+        {actionLabel && onAction && (
+          <PressableScale
+            onPress={onAction}
+            style={styles.action}
+            accessibilityRole="button"
+            accessibilityLabel={actionLabel}
+            // The link is small; the touch target still reaches 44pt.
+            hitSlop={{ top: 14, bottom: 14, left: 12, right: 12 }}
+          >
+            <Text style={styles.actionText}>{actionLabel}</Text>
+            {actionChevron && (
+              <Ionicons
+                name="chevron-forward"
+                size={12}
+                color={theme.colors.primary[500]}
+              />
+            )}
+          </PressableScale>
+        )}
+        {trailingAction}
+      </View>
     </View>
   );
 };
@@ -70,6 +76,7 @@ const createStyles = (theme: ReturnType<typeof useAppTheme>) =>
       fontWeight: theme.typography.fontWeight.bold,
       color: theme.colors.text.primary,
     },
+    actions: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[3] },
     eyebrow: {
       ...typeRoles.mini,
       letterSpacing: typeRoles.mini.fontSize * 0.18,

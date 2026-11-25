@@ -3,10 +3,12 @@ import { DeviceEventEmitter } from 'react-native';
 import { fireEvent, render } from '@testing-library/react-native';
 import AssetsScreen from './AssetsScreen';
 import { USDB_TOKEN_ADDRESS } from '../utils/flashnet';
+import settingsReducer from '../store/slices/settingsSlice';
 
 let mockState: any;
 let mockLevel: 'lite' | 'advanced' = 'advanced';
-jest.mock('react-redux', () => ({ useSelector: (fn: any) => fn(mockState), useDispatch: () => jest.fn() }));
+const mockDispatch = jest.fn(action => { mockState.settings = settingsReducer(mockState.settings, action); });
+jest.mock('react-redux', () => ({ useSelector: (fn: any) => fn(mockState), useDispatch: () => mockDispatch }));
 jest.mock('../hooks/usePolicy', () => ({
   usePolicy: () => require('@kaleidorg/wallet-engine').policyFor(mockLevel),
 }));
@@ -25,6 +27,7 @@ jest.mock('../services/protocols', () => ({ rgbAccountAdapter: () => mockRgb }))
 
 const stateWith = (extra: object = {}) => ({
   wallet: {
+    activeWallet: { id: 3, created_at: 1 },
     btcBalance: {
       vanilla: { settled: 15_000, future: 15_000, spendable: 15_000 }, colored: { settled: 0, future: 0, spendable: 0 },
       byProtocol: { RGB: { confirmed: 10_000, unconfirmed: 0, total: 10_000 }, SPARK: { confirmed: 5_000, unconfirmed: 0, total: 5_000 } },
@@ -56,35 +59,49 @@ test('one row per asset, with its value and where it lives; total matches the da
   expect(screen.getByLabelText('Spark USD Balance, 20 USDB, about $20.00, on Spark')).toBeTruthy();
   // 15,000 sats of bitcoin plus $20 of verified USDB.
   expect(screen.getByText('35000')).toBeTruthy();
+  expect(screen.queryByLabelText('Search assets')).toBeNull();
+  expect(screen.queryByLabelText('Spark')).toBeNull();
   expect(screen.queryByText(/Supply|Precision|Total Tokens/)).toBeNull();
 });
 
-test('network chips narrow the list to what lives there', () => {
+test('network controls in settings narrow the list to what lives there', () => {
   const screen = render(<AssetsScreen navigation={navigation()} />);
-  fireEvent.press(screen.getByLabelText('Show assets on Spark'));
+  fireEvent.press(screen.getByLabelText('Asset settings'));
+  fireEvent.press(screen.getByLabelText('Spark'));
+  fireEvent.press(screen.getByText('Done'));
   expect(screen.getByLabelText('Bitcoin, 5,000 sats, about $5.00, on Spark')).toBeTruthy();
   expect(screen.getByLabelText(/^Tether USD, 10 USDT, on Spark/)).toBeTruthy();
-  fireEvent.press(screen.getByLabelText('Show assets on RGB'));
+  fireEvent.press(screen.getByLabelText('Asset settings'));
+  fireEvent.press(screen.getByLabelText('RGB'));
+  fireEvent.press(screen.getByText('Done'));
   expect(screen.queryByLabelText(/^Bitcoin/)).toBeNull();
 });
 
 test('search finds by name or ticker', () => {
   const screen = render(<AssetsScreen navigation={navigation()} />);
+  fireEvent.press(screen.getByLabelText('Asset settings'));
   fireEvent.changeText(screen.getByLabelText('Search assets'), 'teth');
+  fireEvent.press(screen.getByText('Done'));
   expect(screen.queryByLabelText(/^Bitcoin/)).toBeNull();
+  fireEvent.press(screen.getByLabelText('Asset settings'));
   fireEvent.changeText(screen.getByLabelText('Search assets'), 'zzz');
+  fireEvent.press(screen.getByText('Done'));
   expect(screen.getByText('No matching assets')).toBeTruthy();
 });
 
 test('an exact ID search opens the corresponding contract', () => {
   const nav = navigation();
   const screen = render(<AssetsScreen navigation={nav} />);
+  fireEvent.press(screen.getByLabelText('Asset settings'));
   fireEvent.changeText(screen.getByLabelText('Search assets'), 'rgb-usdt');
+  fireEvent.press(screen.getByText('Done'));
   fireEvent.press(screen.getByLabelText(/^Tether USD/));
   expect(nav.navigate).toHaveBeenCalledWith('AssetDetail', {
     asset: expect.objectContaining({ asset_id: 'rgb-usdt', isRGB: true, protocol: 'RGB', balance: { spendable: 30_000_000, offchain_outbound: 1 }, fiatValue: undefined }),
   });
-  fireEvent.press(screen.getByLabelText('Clear search'));
+  fireEvent.press(screen.getByLabelText('Asset settings'));
+  fireEvent.changeText(screen.getByLabelText('Search assets'), '');
+  fireEvent.press(screen.getByText('Done'));
   fireEvent.press(screen.getByLabelText(/^Bitcoin/));
   expect(nav.navigate).toHaveBeenCalledWith('AssetDetail', {
     asset: expect.objectContaining({ asset_id: 'BTC', balance: { spendable: 14_000 } }),
@@ -101,19 +118,51 @@ test('a test network has no fiat value and its Bitcoin detail keeps the selected
   const nav = navigation();
   const screen = render(<AssetsScreen navigation={nav} />);
   expect(screen.getByText('10000')).toBeTruthy();
-  fireEvent.press(screen.getByLabelText('Show assets on Spark'));
+  fireEvent.press(screen.getByLabelText('Asset settings'));
+  fireEvent.press(screen.getByLabelText('Spark'));
+  fireEvent.press(screen.getByText('Done'));
   fireEvent.press(screen.getByLabelText('Bitcoin, 100,000 sats, on Spark · Regtest (test)'));
   expect(nav.navigate).toHaveBeenCalledWith('AssetDetail', {
     asset: expect.objectContaining({ asset_id: 'BTC', btcNetwork: 'spark', balance: { spendable: 100_000 }, fiatValue: undefined }),
   });
 });
 
-test('Lite hides networks and the issue button', () => {
+test('Lite shows networks on rows and keeps issue unavailable', () => {
   mockLevel = 'lite';
   const screen = render(<AssetsScreen navigation={navigation()} />);
-  expect(screen.queryByLabelText('Show assets on Spark')).toBeNull();
+  expect(screen.queryByLabelText('Search assets')).toBeNull();
   expect(screen.queryByLabelText('Issue a new asset')).toBeNull();
-  expect(screen.getByLabelText('Tether USD, 30 USDT, asset ID rgb-usdt')).toBeTruthy();
+  expect(screen.getByLabelText('Tether USD, 30 USDT, on RGB, asset ID rgb-usdt')).toBeTruthy();
+});
+
+test('remembers a hidden contract and keeps Asset settings available to show it again', () => {
+  const nav = navigation();
+  const screen = render(<AssetsScreen navigation={nav} />);
+  fireEvent.press(screen.getByLabelText('Asset settings'));
+  fireEvent(screen.getByLabelText('Show asset Tether USD, RGB, rgb-usdt'), 'valueChange', false);
+  fireEvent.press(screen.getByText('Done'));
+  expect(screen.queryByLabelText(/^Tether USD, 30 USDT/)).toBeNull();
+  expect(screen.getByLabelText(/^Tether USD, 10 USDT, on Spark/)).toBeTruthy();
+  screen.unmount();
+
+  const reopened = render(<AssetsScreen navigation={nav} />);
+  expect(reopened.queryByLabelText(/^Tether USD, 30 USDT/)).toBeNull();
+  fireEvent.press(reopened.getByLabelText('Asset settings'));
+  expect(reopened.getByLabelText('Show asset Tether USD, RGB, rgb-usdt').props.value).toBe(false);
+  fireEvent(reopened.getByLabelText('Show asset Tether USD, RGB, rgb-usdt'), 'valueChange', true);
+  fireEvent.press(reopened.getByText('Done'));
+  expect(reopened.getByLabelText(/^Tether USD, 30 USDT, on RGB/)).toBeTruthy();
+});
+
+test('every row can be hidden and the empty state still opens settings', () => {
+  mockState.settings.hiddenAssetKeysByWallet = { 3: [
+    'BTC', 'asset:rgb:rgb-usdt', 'asset:spark:spark-usdt', `asset:spark:${USDB_TOKEN_ADDRESS.mainnet}`,
+  ] };
+  const screen = render(<AssetsScreen navigation={navigation()} />);
+  expect(screen.getByText('Assets are hidden')).toBeTruthy();
+  expect(screen.getByText('35000')).toBeTruthy();
+  fireEvent.press(screen.getByLabelText('Edit asset settings'));
+  expect(screen.getByLabelText('Show asset Bitcoin, Bitcoin, Spark').props.value).toBe(false);
 });
 
 test('one add button in Advanced; pull to refresh asks the dashboard for fresh balances', () => {

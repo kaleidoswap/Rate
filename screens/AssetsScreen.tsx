@@ -16,7 +16,8 @@ import { RootState } from '../store';
 import { theme } from '../theme';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { AmountText } from '../components/AmountText';
-import { AssetList } from '../components/AssetList';
+import { AssetList, AssetListSettingsButton } from '../components/AssetList';
+import { AssetListSettingsSheet } from '../components/AssetListSettingsSheet';
 import { useRgbWalletSheets } from '../components/rgb/RgbWalletTools';
 import { rgbAccountAdapter } from '../services/protocols';
 import { rgbWalletSupport } from '../utils/rgb-wallet';
@@ -25,7 +26,9 @@ import { useBitcoinPrice, useDisplayAmount } from '../utils/bitcoinUnits';
 import { tokenValueSats } from '../utils/portfolio';
 import { inventoryBtc, inventoryTokens, liteUsdAssetIds as liteUsdIdsOf } from '../utils/asset-inventory';
 import { useAssetInventory } from '../hooks/useAssetInventory';
-import { assetDetailForItem, buildAssetListItems } from '../utils/asset-list-model';
+import { assetDetailForItem } from '../utils/asset-list-model';
+import { useAssetListView } from '../hooks/useAssetListView';
+import { snapshotWalletKey } from '../services/balanceSnapshot';
 
 interface Props {
   navigation: any;
@@ -37,6 +40,7 @@ const REFRESH_TIMEOUT_MS = 15000;
 export default function AssetsScreen({ navigation, route }: Props) {
   // The shared asset inventory: the dashboard's refresh writes it.
   const btcBalance = useSelector((state: RootState) => state.wallet.btcBalance);
+  const walletKey = useSelector((state: RootState) => snapshotWalletKey(state.wallet.activeWallet));
   const inventory = useAssetInventory();
   const btc = inventoryBtc(inventory);
   const tokens = useMemo(() => inventoryTokens(inventory), [inventory]);
@@ -73,7 +77,7 @@ export default function AssetsScreen({ navigation, route }: Props) {
     ]);
   }, [btcBalance?.networkChains]);
 
-  const items = useMemo(() => buildAssetListItems({
+  const assetList = useAssetListView({
     btcNetworks: btc.networks,
     btcMainnetNetworks: btcBalance?.mainnetNetworks,
     btcNetworkChains: btcBalance?.networkChains,
@@ -84,7 +88,7 @@ export default function AssetsScreen({ navigation, route }: Props) {
     btcPriceUSD,
     liteUsdAssetIds,
     testProtocols,
-  }), [btc, btcBalance, tokens, btcPriceUSD, liteUsdAssetIds, testProtocols]);
+  }, walletKey);
 
   // The headline matches the dashboard's: bitcoin held plus dollar tokens at $1.
   const totalSats = (btcBalance?.summary?.total ?? btcBalance?.vanilla?.spendable ?? 0)
@@ -112,12 +116,17 @@ export default function AssetsScreen({ navigation, route }: Props) {
       <ScreenHeader
         title="Assets"
         showBack
-        rightAction={canIssue ? (
-          <TouchableOpacity style={styles.addButton} onPress={rgbSheets.openIssue}
-            accessibilityRole="button" accessibilityLabel="Issue a new asset">
-            <Ionicons name="add" size={22} color={theme.colors.text.primary} />
-          </TouchableOpacity>
-        ) : undefined}
+        rightAction={(
+          <View style={styles.headerActions}>
+            <AssetListSettingsButton onPress={assetList.openSettings} filtered={assetList.filtered} />
+            {canIssue && (
+              <TouchableOpacity style={styles.addButton} onPress={rgbSheets.openIssue}
+                accessibilityRole="button" accessibilityLabel="Issue a new asset">
+                <Ionicons name="add" size={22} color={theme.colors.text.primary} />
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
       />
 
       <ScrollView
@@ -143,9 +152,8 @@ export default function AssetsScreen({ navigation, route }: Props) {
         </TouchableOpacity>
 
         <AssetList
-          items={items}
+          {...assetList.listProps}
           bitcoinUnit={bitcoinUnit}
-          showNetworks={policy.showNetworks}
           hideBalances={hideBalances}
           onAssetPress={(item) => {
             const asset = assetDetailForItem(item, bitcoinUnit);
@@ -154,6 +162,7 @@ export default function AssetsScreen({ navigation, route }: Props) {
         />
       </ScrollView>
 
+      <AssetListSettingsSheet {...assetList.settingsProps} />
       {rgbSheets.sheets}
     </SafeAreaView>
   );
@@ -170,6 +179,7 @@ const styles = StyleSheet.create({
     paddingBottom: theme.spacing[8],
     gap: theme.spacing[3],
   },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[1] },
   addButton: {
     width: 36,
     height: 36,

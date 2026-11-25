@@ -83,6 +83,7 @@ export interface BuildAssetListArgs {
   /** Assets the dashboard folds into its "USD" line (Lite). */
   liteUsdAssetIds?: ReadonlySet<string>;
   testProtocols?: ReadonlySet<string>;
+  hiddenAssetKeys?: ReadonlySet<string>;
 }
 
 const BTC_NETWORK_ORDER: BtcNetwork[] = ['onchain', 'lightning', 'spark', 'arkade', 'bark'];
@@ -120,7 +121,7 @@ export function buildAssetListItems(args: BuildAssetListArgs): AssetListItem[] {
   const btcNetworks = args.btcNetworks ?? {};
   const btcUnitUsd = args.btcPriceUSD > 0 ? args.btcPriceUSD / 1e8 : undefined;
 
-  if (args.showBtc) {
+  if (args.showBtc && !args.hiddenAssetKeys?.has('BTC')) {
     const held = BTC_NETWORK_ORDER.filter((n) => (btcNetworks[n] ?? 0) > 0);
     const present = BTC_NETWORK_ORDER.filter((n) => btcNetworks[n] !== undefined);
     items.push({
@@ -152,7 +153,7 @@ export function buildAssetListItems(args: BuildAssetListArgs): AssetListItem[] {
     const holding = { network: networkOfProtocol(token.protocol), amount: wholeAmount(token), token };
     const price = tokenUsdPrice(token, args.testProtocols);
     const item = tokenItem(holding, price);
-    if (seen.has(item.key)) continue;
+    if (seen.has(item.key) || args.hiddenAssetKeys?.has(item.key)) continue;
     seen.add(item.key);
     if (price === 1 && args.liteUsdAssetIds?.has(token.asset_id)) {
       holdings.push(holding);
@@ -242,19 +243,24 @@ export function filterAssetItems(items: readonly AssetListItem[], filter: AssetF
     const id = h.token?.asset_id;
     return !!id && (id.startsWith('rgb:') ? id === typedId : id.toLowerCase() === q);
   };
+  const matchesText = ({ ticker, name }: Pick<AssetListItem, 'ticker' | 'name'>) =>
+    ticker.toLowerCase().includes(q) || name.toLowerCase().includes(q);
   const exactSearch = !!q && items.some((item) => item.holdings.some(matchesId));
   const out: AssetListItem[] = [];
   for (const item of items) {
+    const holdings = filter === 'all' ? item.holdings : item.holdings.filter((h) => h.network === filter);
+    if (filter !== 'all' && !holdings.length) continue;
     if (exactSearch) {
-      const matching = item.holdings.filter(matchesId).filter(h => filter === 'all' || h.network === filter);
+      const matching = holdings.filter(matchesId);
       if (matching.length && item.key === LITE_USD_KEY) out.push(...matching.map(h => tokenItem(h, item.unitUsd)));
       else if (matching.length) out.push(item);
       continue;
     }
-    if (q && !item.ticker.toLowerCase().includes(q) && !item.name.toLowerCase().includes(q)) continue;
+    if (q && !matchesText(item)) {
+      const matchesFoldedToken = item.key === LITE_USD_KEY && holdings.some(({ token }) => token && matchesText(token));
+      if (!matchesFoldedToken) continue;
+    }
     if (filter === 'all') { out.push(item); continue; }
-    const holdings = item.holdings.filter((h) => h.network === filter);
-    if (!holdings.length) continue;
     const amount = holdings.reduce((s, h) => s + h.amount, 0);
     out.push({
       ...item,

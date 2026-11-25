@@ -1,18 +1,14 @@
-import React, { useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import React from 'react';
+import { StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { formatBitcoinAmount } from '../utils/bitcoinUnits';
 import { formatUsd } from '../utils/portfolio';
 import { feedback } from '../utils/feedback';
-import {
-  ASSET_FILTERS, availableAssetFilters, btcNetworkLabel, filterAssetItems, formatTokenAmount, networkLabel,
-  type AssetFilter, type AssetListItem,
-} from '../utils/asset-list-model';
+import { btcNetworkLabel, formatTokenAmount, networkLabel, type AssetListItem } from '../utils/asset-list-model';
 import { AmountText } from './AmountText';
 import { AssetIcon } from './AssetIcon';
 import { EmptyState } from './EmptyState';
-import { NetworkIcon } from './NetworkIcon';
 import { NetworkStack } from './NetworkStack';
 import { PressableScale } from './PressableScale';
 
@@ -23,20 +19,41 @@ interface Props {
   bitcoinUnit: 'BTC' | 'sats';
   showNetworks: boolean;
   hideBalances?: boolean;
+  emptyReason?: 'search' | 'network' | 'hidden';
+  onOpenSettings?: () => void;
   onAssetPress: (item: AssetListItem) => void;
 }
 
 const HIDDEN = '••••';
 
-/** Search and group the portfolio within the owning screen's vertical scroll. */
-export function AssetList({ items, bitcoinUnit, showNetworks, hideBalances = false, onAssetPress }: Props) {
+const EMPTY_STATES = {
+  search: { icon: 'search-outline', title: 'No matching assets', message: 'Try another name, ticker or asset ID.' },
+  network: { icon: 'layers-outline', title: 'Nothing on this network', message: 'Choose another network in Asset settings.' },
+  hidden: { icon: 'eye-off-outline', title: 'Assets are hidden', message: 'Choose which assets to show in Asset settings.' },
+  default: { icon: 'layers-outline', title: 'No assets yet', message: 'Assets you receive will appear here.' },
+} as const;
+
+export function AssetListSettingsButton({ onPress, filtered = false }: { onPress: () => void; filtered?: boolean }) {
   const theme = useAppTheme();
   const styles = makeStyles(theme);
-  const [filter, setFilter] = useState<AssetFilter>('all');
-  const [query, setQuery] = useState('');
-  const filters: AssetFilter[] = showNetworks ? availableAssetFilters(items) : ['all'];
-  const activeFilter = filters.includes(filter) ? filter : 'all';
-  const shown = filterAssetItems(items, activeFilter, query);
+  return (
+    <PressableScale
+      onPress={() => { feedback.select(); onPress(); }}
+      style={styles.settingsButton}
+      accessibilityRole="button"
+      accessibilityLabel="Asset settings"
+      accessibilityHint={filtered ? 'List filters are active' : 'Filter the list or change which assets are shown'}
+    >
+      <Ionicons name="options-outline" size={20} color={filtered ? theme.colors.primary[500] : theme.colors.text.secondary} />
+      {filtered && <View style={styles.filterIndicator} />}
+    </PressableScale>
+  );
+}
+
+/** Group the portfolio rows within the owning screen's vertical scroll. */
+export function AssetList({ items, bitcoinUnit, showNetworks, hideBalances = false, emptyReason, onOpenSettings, onAssetPress }: Props) {
+  const theme = useAppTheme();
+  const styles = makeStyles(theme);
 
   const amountText = (item: AssetListItem): { amount: string; unit: string } => {
     if (item.isBtc) return { amount: formatBitcoinAmount(item.amount, bitcoinUnit), unit: bitcoinUnit };
@@ -68,7 +85,7 @@ export function AssetList({ items, bitcoinUnit, showNetworks, hideBalances = fal
         accessibilityLabel={hideBalances
           ? `${item.name}${location}, balance hidden${identifier}`
           : `${item.name}, ${amount} ${unit}${fiat ? `, about ${fiat}` : ''}${location}${identifier}`}
-        style={[styles.row, index < shown.length - 1 && styles.rowDivider]}
+        style={[styles.row, index < items.length - 1 && styles.rowDivider]}
       >
         <AssetIcon ticker={item.ticker} logoUri={item.icon} size={40} showBadge={false} />
         <View style={styles.info}>
@@ -100,117 +117,23 @@ export function AssetList({ items, bitcoinUnit, showNetworks, hideBalances = fal
     );
   };
 
-  return (
-    <View style={styles.list}>
-      <View style={styles.search}>
-        <Ionicons name="search" size={16} color={theme.colors.text.tertiary} />
-        <TextInput
-          value={query}
-          onChangeText={setQuery}
-          placeholder="Search assets"
-          placeholderTextColor={theme.colors.text.tertiary}
-          style={styles.searchInput}
-          autoCorrect={false}
-          autoCapitalize="none"
-          returnKeyType="search"
-          accessibilityLabel="Search assets"
-        />
-        {!!query && (
-          <TouchableOpacity onPress={() => setQuery('')} accessibilityRole="button" accessibilityLabel="Clear search"
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-            <Ionicons name="close-circle" size={16} color={theme.colors.text.tertiary} />
-          </TouchableOpacity>
-        )}
-      </View>
-
-      {filters.length > 1 && (
-        <ScrollView
-          horizontal
-          keyboardShouldPersistTaps="handled"
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.chips}
-        >
-          {ASSET_FILTERS.filter((f) => filters.includes(f.key)).map((f) => {
-            const selected = f.key === activeFilter;
-            return (
-              <TouchableOpacity
-                key={f.key}
-                onPress={() => setFilter(f.key)}
-                style={[styles.chip, selected && styles.chipSelected]}
-                accessibilityRole="button"
-                accessibilityState={{ selected }}
-                accessibilityLabel={`Show ${f.key === 'all' ? 'all assets' : `assets on ${f.label}`}`}
-              >
-                {f.key === 'all'
-                  ? <Ionicons name="apps" size={14} color={selected ? theme.colors.text.primary : theme.colors.text.secondary} />
-                  : <NetworkIcon network={f.key} size={14} />}
-                <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{f.label}</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-      )}
-
-      {shown.length > 0 ? (
-        <View style={styles.group}>{shown.map(renderRow)}</View>
-      ) : (
-        <EmptyState
-          icon={query ? 'search-outline' : 'layers-outline'}
-          title={query ? 'No matching assets' : items.length ? 'Nothing on this network' : 'No assets yet'}
-          message={query
-            ? 'Try another name or ticker.'
-            : items.length ? 'Pick another network to see what you hold there.' : 'Assets you receive will appear here.'}
-        />
-      )}
-    </View>
-  );
+  if (items.length) return <View style={styles.group}>{items.map(renderRow)}</View>;
+  const empty = EMPTY_STATES[emptyReason ?? 'default'];
+  return <EmptyState {...empty} actionLabel={emptyReason ? 'Edit asset settings' : undefined} onAction={onOpenSettings} />;
 }
 
 const makeStyles = (theme: ReturnType<typeof useAppTheme>) => StyleSheet.create({
-  list: { gap: theme.spacing[3] },
-  search: {
-    flexDirection: 'row',
+  settingsButton: {
+    width: 44,
+    height: 44,
     alignItems: 'center',
-    gap: theme.spacing[2],
-    paddingHorizontal: theme.spacing[3],
-    minHeight: 44,
-    borderRadius: theme.borderRadius.lg,
-    backgroundColor: theme.colors.surface.primary,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.border.light,
-  },
-  searchInput: {
-    flex: 1,
-    paddingVertical: theme.spacing[2],
-    fontSize: theme.typography.fontSize.base,
-    color: theme.colors.text.primary,
-  },
-  chips: {
-    gap: theme.spacing[2],
-    paddingVertical: theme.spacing[0.5],
-  },
-  chip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing[1.5],
-    minHeight: 34,
-    paddingHorizontal: theme.spacing[3],
+    justifyContent: 'center',
     borderRadius: theme.borderRadius.full,
-    backgroundColor: theme.colors.surface.primary,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.border.light,
   },
-  chipSelected: {
-    backgroundColor: theme.colors.surface.secondary,
-    borderColor: theme.colors.primary[500],
-  },
-  chipText: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.secondary,
-  },
-  chipTextSelected: {
-    color: theme.colors.text.primary,
-    fontWeight: theme.typography.fontWeight.semibold,
+  filterIndicator: {
+    position: 'absolute', top: 9, right: 9,
+    width: 6, height: 6, borderRadius: theme.borderRadius.full,
+    backgroundColor: theme.colors.primary[500],
   },
   group: {
     borderRadius: theme.borderRadius.xl,

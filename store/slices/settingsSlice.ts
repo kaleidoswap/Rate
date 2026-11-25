@@ -75,6 +75,7 @@ interface SettingsState {
   transactionNotifications: boolean;
   priceAlerts: boolean;
   hideBalances: boolean;
+  hiddenAssetKeysByWallet?: Record<number, string[]>;
   // UI sound effects (paired with haptics for accessible, multi-modal feedback).
   soundEnabled: boolean;
   biometricEnabled: boolean;
@@ -114,6 +115,7 @@ const initialState: SettingsState = {
   transactionNotifications: true,
   priceAlerts: false,
   hideBalances: false,
+  hiddenAssetKeysByWallet: {},
   soundEnabled: true,
   biometricEnabled: false,
   pinEnabled: false,
@@ -186,6 +188,15 @@ const settingsSlice = createSlice({
     setHideBalances: (state, action: PayloadAction<boolean>) => {
       state.hideBalances = action.payload;
     },
+    setAssetHiddenPreference: (state, action: PayloadAction<{ walletId: number; assetKey: string; hidden: boolean }>) => {
+      const { walletId, assetKey, hidden } = action.payload;
+      const previous = state.hiddenAssetKeysByWallet?.[walletId] ?? [];
+      if (previous.includes(assetKey) === hidden) return;
+      const preferences = state.hiddenAssetKeysByWallet ??= {};
+      const next = hidden ? [...previous, assetKey] : previous.filter(key => key !== assetKey);
+      if (next.length) preferences[walletId] = next;
+      else delete preferences[walletId];
+    },
     setSoundEnabled: (state, action: PayloadAction<boolean>) => {
       state.soundEnabled = action.payload;
     },
@@ -255,6 +266,7 @@ export const {
   setTransactionNotifications,
   setPriceAlerts,
   setHideBalances,
+  setAssetHiddenPreference,
   setSoundEnabled,
   setBiometricEnabled,
   setPinEnabled,
