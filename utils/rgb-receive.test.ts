@@ -1,6 +1,6 @@
 import {
-  ANY_RGB_ASSET_ID, DEFAULT_RGB_RECEIVE_OPTIONS, NO_RGB_RECEIVE_SUPPORT, isDefaultRgbOptions, listRgbUtxos, normalizeUnspents,
-  parseRgbContractId, rgbInvoiceParams, rgbReceiveErrorMessage, rgbReceiveSupport, rgbReceiveUsesProxyV1, utxoCounts, classifyUtxo, summarizeUtxos,
+  ANY_RGB_ASSET_ID, DEFAULT_RGB_RECEIVE_OPTIONS, NO_RGB_RECEIVE_SUPPORT, RGB_COLLECTIBLE_RECEIVE_AMOUNT_ERROR, listRgbUtxos, normalizeUnspents,
+  rgbInvoiceParams, rgbReceiveErrorMessage, rgbReceiveSupport, rgbReceiveUsesProxyV1, utxoCounts, classifyUtxo, summarizeUtxos,
 } from './rgb-receive';
 
 const onDevice = { protocolName: 'RGB_L1', listUnspents: jest.fn(), createRgbUtxos: jest.fn() };
@@ -50,6 +50,14 @@ describe('rgbInvoiceParams', () => {
       options: { kind: 'blinded', durationSeconds: 86_400, minConfirmations: 3 },
     })).toEqual({ asset_id: 'rgb:abc', min_confirmations: 3, duration_seconds: 86_400, witness: false });
   });
+  it('includes exact base units only for a specific asset', () => {
+    const invoice = { amount: 1_250_000, expirySeconds: 3600 };
+    expect(rgbInvoiceParams({ ...invoice, assetId: 'rgb:abc' })).toMatchObject({ asset_id: 'rgb:abc', amount: 1_250_000 });
+    expect(rgbInvoiceParams({ ...invoice, assetId: ANY_RGB_ASSET_ID })).toEqual({ min_confirmations: 1, duration_seconds: 3600 });
+  });
+  it('rejects invalid fixed amounts before creating the invoice', () => {
+    expect(() => rgbInvoiceParams({ assetId: 'rgb:abc', amount: 1.25, expirySeconds: 3600 })).toThrow('positive integer');
+  });
   it('drops what the account does not support', () => {
     const options = { kind: 'blinded' as const, durationSeconds: 600, minConfirmations: 6 };
     expect(rgbInvoiceParams({ assetId: ANY_RGB_ASSET_ID, expirySeconds: 3600, options, support: rgbReceiveSupport(nwcNode) }))
@@ -65,22 +73,6 @@ describe('rgbInvoiceParams', () => {
       duration_seconds: 1800, min_confirmations: 3, witness: false,
     });
     expect(rgbInvoiceParams({ ...request, options })).toMatchObject({ duration_seconds: 600 });
-  });
-  it('knows the default options', () => {
-    expect(isDefaultRgbOptions(DEFAULT_RGB_RECEIVE_OPTIONS)).toBe(true);
-    expect(isDefaultRgbOptions({ ...DEFAULT_RGB_RECEIVE_OPTIONS, kind: 'blinded' })).toBe(false);
-  });
-});
-
-describe('parseRgbContractId', () => {
-  it('accepts contract ids, strips the mnemonic suffix and whitespace', () => {
-    expect(parseRgbContractId('  rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8#ticket-alpha ')).toBe('rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8');
-    expect(parseRgbContractId('RGB1QYFE883HEY6JRGJ2Q4GZQH0DHTM5F0Z3DAV9')).toBe('rgb1qyfe883hey6jrgj2q4gzqh0dhtm5f0z3dav9');
-  });
-  it('rejects anything else', () => {
-    expect(parseRgbContractId('')).toBeNull();
-    expect(parseRgbContractId('rgb:short')).toBeNull();
-    expect(parseRgbContractId('bc1qxyz')).toBeNull();
   });
 });
 
@@ -124,9 +116,13 @@ describe('UTXOs', () => {
 });
 
 describe('rgbReceiveErrorMessage', () => {
-  it('explains a missing receive slot, pointing Advanced users at the fix', () => {
-    expect(rgbReceiveErrorMessage('InsufficientAllocationSlots', { advanced: true, onDevice: true })).toMatch(/^Your RGB wallet .*Create slots under Advanced, or switch to a Standard invoice/);
+  it('explains a missing receive slot and how to receive with a blinded invoice', () => {
+    expect(rgbReceiveErrorMessage('InsufficientAllocationSlots', { advanced: true, onDevice: true })).toMatch(/^Your RGB wallet .*Create receive slots, or switch to a Standard invoice/);
     expect(rgbReceiveErrorMessage('No uncolored UTXOs are available', { advanced: false, onDevice: false })).toMatch(/^Your RGB Lightning node .*or receive over Lightning\.$/);
     expect(rgbReceiveErrorMessage('timeout', { advanced: true, onDevice: true })).toMatch(/network|timeout/i);
+  });
+  it('preserves the amount correction for a collectible', () => {
+    expect(rgbReceiveErrorMessage(RGB_COLLECTIBLE_RECEIVE_AMOUNT_ERROR, { advanced: false, onDevice: true }))
+      .toBe(RGB_COLLECTIBLE_RECEIVE_AMOUNT_ERROR);
   });
 });

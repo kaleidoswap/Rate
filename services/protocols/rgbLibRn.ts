@@ -13,7 +13,7 @@
  * for this wallet (see `rgbLibSubdir`), else rgb-lib's original folder.
  */
 import type * as RgbLib from '../../modules/kaleido-rgb'
-import { RGB_PROXY_V1_RECEIVE_DURATION_ERROR } from '../../utils/rgb-receive'
+import { RGB_COLLECTIBLE_RECEIVE_AMOUNT_ERROR, RGB_PROXY_V1_RECEIVE_DURATION_ERROR } from '../../utils/rgb-receive'
 
 type RgbModule = typeof RgbLib
 type LibNetwork = RgbLib.BitcoinNetwork
@@ -235,8 +235,13 @@ export class RgbLibRnAccount {
       (!Number.isSafeInteger(duration) || duration <= PROXY_CLOCK_SKEW_SECONDS + INVOICE_EXPIRATION_MARGIN_SECONDS)) {
       throw invalidInvoice(RGB_PROXY_V1_RECEIVE_DURATION_ERROR)
     }
-    const assignment: RgbLib.Assignment = params.amount && params.amount > 0
-      ? { type: 'FUNGIBLE', amount: params.amount }
+    const amount = params.amount ?? 0
+    const collectible = assetId !== null && this.udaIds.has(assetId)
+    if (collectible && amount > 0 && amount !== 1) {
+      throw invalidInvoice(RGB_COLLECTIBLE_RECEIVE_AMOUNT_ERROR)
+    }
+    const assignment: RgbLib.Assignment = amount > 0
+      ? (collectible ? { type: 'NON_FUNGIBLE' } : { type: 'FUNGIBLE', amount })
       : { type: 'ANY' }
     const receive = params.witness === false ? this.wallet.blindReceive.bind(this.wallet) : this.wallet.witnessReceive.bind(this.wallet)
     const transportEndpoints = [this.transportEndpoint]
@@ -424,6 +429,7 @@ export class RgbLibRnAccount {
       params.ticker, params.name, params.details || null, params.precision ?? 0,
       params.mediaFilePath ?? null, params.attachmentsFilePaths ?? [],
     ))
+    this.udaIds.add(asset.assetId)
     this.onChange()
     return asset
   }

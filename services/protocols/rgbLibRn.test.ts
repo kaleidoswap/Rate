@@ -92,6 +92,19 @@ test('receive takes the node-style options too, and witness invoices are the def
   expect(wallet.blindReceive).toHaveBeenCalledWith(null, { type: 'FUNGIBLE', amount: 7 }, null, ['rpcs://proxy.example/json-rpc'], 1);
 });
 
+test('reception of a known collectible encodes an explicit single unit as non-fungible', async () => {
+  const { lib, wallet } = fakeLib();
+  wallet.listAssets.mockResolvedValueOnce({ nia: [], uda: [{ assetId: 'rgb:nft', ticker: 'NFT', precision: 0 }], cfa: [], ifa: [] } as any);
+  const account = await open(lib);
+  await account.listAssets();
+  await expect(account.receiveAsset({ asset_id: 'rgb:nft', amount: 2 })).rejects.toThrow('Enter 1 unit to request this collectible.');
+  expect(wallet.witnessReceive).not.toHaveBeenCalled();
+  await account.receiveAsset({ asset_id: 'rgb:nft', amount: 1 });
+  expect(wallet.witnessReceive).toHaveBeenLastCalledWith('rgb:nft', { type: 'NON_FUNGIBLE' }, null, ['rpcs://proxy.example/json-rpc'], 1);
+  await account.receiveAsset({ asset_id: 'rgb:nft' });
+  expect(wallet.witnessReceive).toHaveBeenLastCalledWith('rgb:nft', { type: 'ANY' }, null, ['rpcs://proxy.example/json-rpc'], 1);
+});
+
 test('send decodes the invoice and pays its recipient over the proxy it names', async () => {
   const { lib, wallet } = fakeLib();
   const account = await new (createRgbLibRnModule(() => lib as any).WalletManagerRgb)('seed', options).getAccount();

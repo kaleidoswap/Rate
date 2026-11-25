@@ -18,6 +18,9 @@ import {
   ScrollView,
   ActivityIndicator,
   AppState,
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
   useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -51,11 +54,13 @@ import {
 } from '../hooks/useDepositDetection';
 import { useSparkAutoClaim } from '../hooks/useSparkAutoClaim';
 import { AssetIcon } from '../components/AssetIcon';
+import { Button } from '../components/Button';
+import { Input } from '../components/Input';
 import { RgbIcon } from '../components/ProtocolIcons';
 import { NetworkStack } from '../components/NetworkStack';
 import { AmountEditorModal } from '../components/AmountEditorModal';
 import { RgbAssetSheet, type RgbAssetChoice } from '../components/receive/RgbAssetSheet';
-import { RgbReceiveAdvanced, type RgbUtxoState } from '../components/receive/RgbReceiveAdvanced';
+import { RgbInvoiceOptions, type RgbUtxoState } from '../components/receive/RgbInvoiceOptions';
 import { RgbUtxoSheet } from '../components/rgb/RgbUtxoSheet';
 import { refreshRgbAssets } from '../store/slices/assetsSlice';
 import { rgbInvoiceWatch, rgbWalletSupport } from '../utils/rgb-wallet';
@@ -85,9 +90,11 @@ import { BarkBoardingPanel } from '../components/receive/BarkBoardingPanel';
 import NostrContactsSelector from '../components/NostrContactsSelector';
 import { contactKeyFor, recordContactEvent } from '../services/contactHistory';
 import {
-  ANY_RGB_ASSET_ID, DEFAULT_RGB_RECEIVE_OPTIONS, listRgbUtxos, rgbInvoiceParams, rgbReceiveErrorMessage, rgbReceiveSupport, rgbReceiveUsesProxyV1,
+  ANY_RGB_ASSET_ID, DEFAULT_RGB_RECEIVE_OPTIONS, NO_RGB_RECEIVE_SUPPORT, RGB_COLLECTIBLE_RECEIVE_AMOUNT_ERROR,
+  listRgbUtxos, rgbInvoiceParams, rgbReceiveErrorMessage, rgbReceiveSupport, rgbReceiveUsesProxyV1,
   type RgbReceiveOptions,
 } from '../utils/rgb-receive';
+import { parseRgbReceiveAmount } from '../utils/rgb-amount';
 import { useFeature } from '../hooks/useFeature';
 
 const NEW_RGB_ASSET_ID = ANY_RGB_ASSET_ID;
@@ -253,13 +260,13 @@ function ReceiveRequestScreen({ navigation, route: navRoute }: Props) {
   // Request (a one-off code) or My address (the reusable ones).
   const [receiveTab, setReceiveTab] = useState<'request' | 'address'>('request');
   const [showOptions, setShowOptions] = useState(false);
-  const [showOtherAssets, setShowOtherAssets] = useState(false);
   // What the request is for: the Lightning invoice description.
   const [note, setNote] = useState('');
   // Who the request is for (optional): it goes into that contact's history.
   const [requestContact, setRequestContact] = useState<{ name: string; key: string } | null>(null);
   const [showContactPicker, setShowContactPicker] = useState(false);
   const requestEventId = useRef<string | null>(null);
+  const requestScrollView = useRef<ScrollView>(null);
   const [amount, setAmount] = useState('');
   const [expirySeconds, setExpirySeconds] = useState(3600);
   const [showCountdown, setShowCountdown] = useState(false);
@@ -267,6 +274,8 @@ function ReceiveRequestScreen({ navigation, route: navRoute }: Props) {
   const [loading, setLoading] = useState(false);
   const [showRgbAssets, setShowRgbAssets] = useState(false);
   const [rgbOptions, setRgbOptions] = useState<RgbReceiveOptions>(DEFAULT_RGB_RECEIVE_OPTIONS);
+  const [rgbAmountDraft, setRgbAmountDraft] = useState<{ text: string; precision: number } | null>(null);
+  const [rgbInvoiceEditing, setRgbInvoiceEditing] = useState(false);
   const [rgbUtxos, setRgbUtxos] = useState<RgbUtxoState | null>(null);
   const [showCreateUtxos, setShowCreateUtxos] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -442,10 +451,10 @@ function ReceiveRequestScreen({ navigation, route: navRoute }: Props) {
     .filter((account) => connectedNow[account] && (account !== 'BARK' || !isLite))
     .map((account) => ({ account, chain: receiveAccountChain(account) }));
   const assetFamily = receiveAssetFamily(selectedAsset);
-  // An asset the RGB account doesn't hold yet (any, or one by contract id) has no channel: on-chain only.
-  const rgbAssetHeld = rgbAssets.some((a) => a.asset_id === selectedAsset.asset_id);
+  // A request for any asset has no contract on the node's Lightning channel.
+  const heldRgbAsset = assetFamily === 'RGB' ? rgbAssets.find((a) => a.asset_id === selectedAsset.asset_id) : undefined;
   const receiveMethodIds: ReceiveMethodId[] = methodsFor(assetFamily, receiveAccounts, caps)
-    .filter((m) => assetFamily !== 'RGB' || rgbAssetHeld || m === 'onchain');
+    .filter((m) => assetFamily !== 'RGB' || heldRgbAsset || m === 'onchain');
   const route = routeOf({ networkType, arkadeSubMode, selectedAccount });
   const destinationsOf = (method: ReceiveMethodId) => destinationsFor(method, receiveAccounts, caps, assetFamily);
   const routeDestinations = destinationsOf(route.method);
@@ -457,12 +466,21 @@ function ReceiveRequestScreen({ navigation, route: navRoute }: Props) {
   const rgbAdapterNow = rgbAccountAdapter();
   const rgbConnected = !!rgbAdapterNow?.isConnected();
   const rgbSupport = rgbReceiveSupport(rgbConnected ? rgbAdapterNow : null);
-  const rgbProxyV1 = rgbConnected && rgbReceiveUsesProxyV1(rgbAdapterNow, nativeRgbSupportsBfa);
-  // RGB invoice options are an Advanced-mode control; Lite always makes the default invoice.
-  const showRgbAdvanced = !isLite && assetFamily === 'RGB' && networkType === 'onchain' && rgbConnected;
-  const rgbOptionsInEffect = isLite ? DEFAULT_RGB_RECEIVE_OPTIONS : rgbOptions;
+  const rgbOnchain = assetFamily === 'RGB' && networkType === 'onchain';
+  const rgbProxyV1 = rgbOnchain && rgbConnected && rgbReceiveUsesProxyV1(rgbAdapterNow, nativeRgbSupportsBfa);
   const assetRouteAvailable = !awaitingPrefilledAsset &&
     (assetFamily === 'BTC' || receiveMethodIds.includes(route.method));
+  const showRgbInvoiceOptions = assetRouteAvailable && assetFamily === 'RGB';
+  const canChooseRgb = rgbConnected && rgbCanReceiveOnchain(caps);
+  const rgbAmount = rgbAmountDraft?.text ?? '';
+  // Keep units stable while a holding refreshes in the background.
+  const rgbPrecision = rgbAmountDraft?.precision ?? heldRgbAsset?.precision;
+  const parsedRgbAmount = rgbPrecision === undefined ? { kind: 'open' } as const : parseRgbReceiveAmount(rgbAmount, rgbPrecision);
+  const rgbAmountError = parsedRgbAmount.kind === 'invalid' ? parsedRgbAmount.message
+    : error === RGB_COLLECTIBLE_RECEIVE_AMOUNT_ERROR ? error : undefined;
+  const rgbAmountUnits = parsedRgbAmount.kind === 'fixed' ? parsedRgbAmount.amount : undefined;
+  const requestedRgbAmount = rgbAmountUnits === undefined ? undefined : `${rgbAmount.trim()} ${selectedAsset.ticker || selectedAsset.name}`;
+  const showRgbDraft = showRgbInvoiceOptions && (rgbInvoiceEditing || !!rgbAmountError);
   // A fixed-amount destination (Bark, Arkade Lightning) waits for an amount instead of failing.
   const awaitingAmount = networkType === 'lightning' && !!routeTarget?.needsAmount && requestedSats <= 0;
 
@@ -597,7 +615,7 @@ function ReceiveRequestScreen({ navigation, route: navRoute }: Props) {
 
   const generateAddress = async () => {
     cancelScheduledAddress.current();
-    if (!assetRouteAvailable) return;
+    if (!assetRouteAvailable || rgbAmountError || rgbInvoiceEditing) return;
 
     const generationId = addressGenerationRef.current + 1;
     addressGenerationRef.current = generationId;
@@ -819,13 +837,16 @@ function ReceiveRequestScreen({ navigation, route: navRoute }: Props) {
           const params = rgbInvoiceParams({
             assetId: selectedAsset.asset_id,
             expirySeconds,
-            options: rgbOptionsInEffect,
+            options: rgbOptions,
+            amount: rgbAmountUnits,
             support: rgbReceiveSupport(rgbAssetAdapter),
             proxyV1: rgbReceiveUsesProxyV1(rgbAssetAdapter, nativeRgbSupportsBfa),
           });
+          const issuedAt = Date.now();
           const rgbInvoice = await runReceiveOperation('Create RGB asset invoice', (signal) =>
             callAbortableAdapterMethod<any>(rgbAssetAdapter, 'createRgbInvoice', [params], signal));
           result = rgbInvoice?.invoice ?? rgbInvoice?.recipient_id;
+          const expiration = Number(rgbInvoice?.expiration_timestamp ?? rgbInvoice?.expirationTimestamp);
           // Watch the invoice's own transfer where the account lists transfers; else its balance.
           const watch = rgbInvoiceWatch(rgbInvoice, rgbWalletSupport(rgbAssetAdapter), selectedAsset.asset_id === NEW_RGB_ASSET_ID ? 'none' : 'balance');
           methodMeta = {
@@ -835,12 +856,12 @@ function ReceiveRequestScreen({ navigation, route: navRoute }: Props) {
             kind: 'invoice',
             layer: 'rgb',
             assetId: selectedAsset.asset_id,
+            expiresAt: Number.isSafeInteger(expiration) && expiration > 0
+              ? expiration * 1000
+              : issuedAt + Number(params.duration_seconds) * 1000,
             ...watch,
           };
         } else {
-          // RGB-over-Lightning invoice, always open-amount: the sender fills it in.
-          // `amount` is the BTC/sats request (the amount row is hidden for RGB
-          // assets), so it must never be read as asset units here.
           const rgbAssetLnAdapter = protocolManager.getAdapterIfAvailable('RGB_LN');
           if (!rgbAssetLnAdapter?.isConnected()) {
             throw new Error('Connect your RGB Lightning node in Settings to receive RGB assets.');
@@ -851,8 +872,9 @@ function ReceiveRequestScreen({ navigation, route: navRoute }: Props) {
               'createInvoice',
               [{
                 asset: selectedAsset.asset_id,
+                ...(rgbAmountUnits === undefined ? {} : { assetAmount: rgbAmountUnits }),
                 description: note || `Receive ${selectedAsset.ticker}`,
-                expirySeconds,
+                expirySeconds: rgbOptions.durationSeconds ?? expirySeconds,
               }],
               signal,
             ));
@@ -902,7 +924,7 @@ function ReceiveRequestScreen({ navigation, route: navRoute }: Props) {
         ms: Math.round(nowMs() - startedAt),
       });
       const errorMessage = error instanceof Error ? error.message : 'Failed to generate address. Please try again.';
-      setError(rgbReceiveErrorMessage(errorMessage, { advanced: showRgbAdvanced, onDevice: rgbAccountIsOnDevice() }));
+      setError(rgbReceiveErrorMessage(errorMessage, { advanced: rgbOnchain && rgbSupport.invoiceKind, onDevice: rgbAccountIsOnDevice() }));
       setAddress('');
     } finally {
       if (isCurrentGeneration()) setLoading(false);
@@ -1164,7 +1186,9 @@ function ReceiveRequestScreen({ navigation, route: navRoute }: Props) {
 
   // A single request identity prevents overlapping amount/network regeneration.
   const cancelScheduledAddress = useReceiveGeneration(
-    networkType !== 'unified' && assetRouteAvailable && !awaitingAmount ? JSON.stringify([selectedAsset.asset_id, networkType, arkadeSubMode, routeDestination, amount, expirySeconds, note, assetFamily === 'RGB' ? rgbOptionsInEffect : null]) : null,
+    networkType !== 'unified' && assetRouteAvailable && !awaitingAmount && !rgbAmountError && !rgbInvoiceEditing
+      ? JSON.stringify([selectedAsset.asset_id, networkType, arkadeSubMode, routeDestination, amount, expirySeconds, note, showRgbInvoiceOptions ? [rgbOptions, rgbAmountUnits] : null])
+      : null,
     () => { setAddress(''); setError(null); setLoading(true); },
     () => { void generateAddress(); },
     () => { addressGenerationRef.current += 1; },
@@ -1200,7 +1224,7 @@ function ReceiveRequestScreen({ navigation, route: navRoute }: Props) {
     (networkType !== 'unified' && loading && !address);
   const deadlines = useMemo(() => receiveMethods
     .filter(method => method.value !== separateArkadeInvoice?.invoice)
-    .map(method => invoiceExpiry(method.value)).filter((deadline): deadline is number => deadline !== null),
+    .map(method => method.expiresAt ?? invoiceExpiry(method.value)).filter((deadline): deadline is number => deadline !== null),
   [receiveMethods, separateArkadeInvoice]);
   // The maker's offer can close before the BOLT11 stops being payable. Keep polling old
   // payments until they resolve, while showing new payers only an active maker request.
@@ -1233,7 +1257,11 @@ function ReceiveRequestScreen({ navigation, route: navRoute }: Props) {
   const selectReceiveAsset = (asset: ReceiveAsset) => {
     appliedPrefill.current = true;
     setAwaitingPrefilledAsset(false);
+    cancelScheduledAddress.current();
     resetReceiveSurface();
+    setRgbAmountDraft(null);
+    setRgbInvoiceEditing(false);
+    setRgbOptions(DEFAULT_RGB_RECEIVE_OPTIONS);
     setSelectedAsset(asset);
     const next = initialReceiveRoute(asset);
     setSelectedAccount(next.selectedAccount);
@@ -1244,7 +1272,7 @@ function ReceiveRequestScreen({ navigation, route: navRoute }: Props) {
 
   // An RGB asset is received on-chain into the RGB account.
   const receiveRgbAsset = (asset: RgbAssetChoice | null) => {
-    feedback.select();
+    if (assetFamily === 'RGB' && networkType === 'onchain' && selectedAsset.asset_id === (asset?.asset_id ?? NEW_RGB_ASSET_ID)) return;
     selectReceiveAsset(asset
       ? { ...asset, protocol: 'RGB' }
       : { asset_id: NEW_RGB_ASSET_ID, ticker: 'RGB', name: 'Any RGB asset', protocol: 'RGB' });
@@ -1277,16 +1305,37 @@ function ReceiveRequestScreen({ navigation, route: navRoute }: Props) {
     if (!adapter?.isConnected()) return;
     setRgbUtxos({ loading: true });
     try {
-      const list = await runReceiveOperation('List RGB UTXOs', () => listRgbUtxos(adapter), 15_000);
+      const list = await runTimedReceiveOperation('List RGB UTXOs', () => listRgbUtxos(adapter), 15_000);
       setRgbUtxos({ loading: false, list });
     } catch {
       setRgbUtxos({ loading: false, error: 'Couldn’t load your receive slots. Try again.' });
     }
   };
 
-  const changeRgbOptions = (next: RgbReceiveOptions) => {
+  const startRgbInvoiceEdit = () => {
+    if (rgbInvoiceEditing) return;
+    cancelScheduledAddress.current();
     resetReceiveSurface();
+    setRgbInvoiceEditing(true);
+  };
+
+  const changeRgbOptions = (next: RgbReceiveOptions) => {
+    if (next.kind === rgbOptions.kind && next.durationSeconds === rgbOptions.durationSeconds && next.minConfirmations === rgbOptions.minConfirmations) return;
+    startRgbInvoiceEdit();
     setRgbOptions(next);
+  };
+
+  const changeRgbAmount = (next: string) => {
+    if (next === rgbAmount || rgbPrecision === undefined) return;
+    startRgbInvoiceEdit();
+    setRgbAmountDraft({ text: next, precision: rgbPrecision });
+  };
+
+  const updateRgbInvoice = () => {
+    if (rgbAmountError) return;
+    Keyboard.dismiss();
+    setRgbInvoiceEditing(false);
+    requestScrollView.current?.scrollTo({ y: 0, animated: true });
   };
 
   // iOS presents one modal at a time: close the options sheet before opening another.
@@ -1300,7 +1349,7 @@ function ReceiveRequestScreen({ navigation, route: navRoute }: Props) {
   const showAddressTab = assetFamily === 'BTC' && !awaitingPrefilledAsset && (lightningAddressAvailable || hasReceivingNode);
   const assetIconProtocol = assetFamily === 'BTC' ? undefined : assetFamily;
 
-  // One line saying what the request is; tap it to change asset, method or account.
+  // The RGB asset picker and the route picker are separate controls.
   const renderOptionsPill = () => {
     const asset = receiveAssetLabel(selectedAsset);
     const { text: summary, icons } = receiveSummary({
@@ -1311,16 +1360,14 @@ function ReceiveRequestScreen({ navigation, route: navRoute }: Props) {
     });
     return (
       <TouchableOpacity
-        accessibilityRole="button" accessibilityLabel={`${asset}, ${summary}. Change receive options`}
+        accessibilityRole="button" accessibilityLabel={assetFamily === 'RGB' ? `${summary}. Change receive network` : `${asset}, ${summary}. Change receive options`}
         onPress={() => { feedback.select(); setShowOptions(true); }} activeOpacity={0.7} style={styles.optionsPill}
       >
-        {selectedAsset.asset_id === NEW_RGB_ASSET_ID
-          ? <RgbIcon size={16} />
-          : selectedAsset.asset_id === 'BTC'
-            ? <AssetIcon ticker="BTC" size={16} showBadge={false} />
-            : <AssetIcon ticker={selectedAsset.ticker} protocol={assetIconProtocol} size={16} showBadge={false} />}
-        <Text style={styles.optionsPillAsset} numberOfLines={1}>{asset}</Text>
-        {!!summary && <Text style={styles.optionsPillSummary}>·</Text>}
+        {assetFamily !== 'RGB' && <>
+          <AssetIcon ticker={selectedAsset.ticker} protocol={assetIconProtocol} size={16} showBadge={false} />
+          <Text style={styles.optionsPillAsset} numberOfLines={1}>{asset}</Text>
+          {!!summary && <Text style={styles.optionsPillSummary}>·</Text>}
+        </>}
         {icons.length > 0 && <NetworkStack networks={icons} size={16} />}
         {!!summary && <Text style={styles.optionsPillSummary} numberOfLines={1}>{summary}</Text>}
         <Ionicons name="chevron-down" size={14} color={theme.colors.text.secondary} />
@@ -1330,80 +1377,45 @@ function ReceiveRequestScreen({ navigation, route: navRoute }: Props) {
 
   const renderAssetTabs = () => {
     const accent = theme.colors.primary[500];
-    const t = selectedAsset.ticker;
     const isBtc = assetFamily === 'BTC' && !awaitingPrefilledAsset;
+    const isRgb = assetFamily === 'RGB';
+    const isAnyRgb = selectedAsset.asset_id === NEW_RGB_ASSET_ID;
+    const rgbChoiceLabel = isRgb ? (isAnyRgb ? 'Any RGB asset' : selectedAsset.ticker || selectedAsset.name) : 'RGB asset';
+    const selectedStyle = { borderColor: accent, backgroundColor: accent + '15' };
     const selectBtc = () => {
       feedback.select();
       if (isBtc && networkType === 'unified') return;
       selectReceiveAsset(btcAsset());
     };
-    const Tab = (
-      key: string,
-      active: boolean,
-      onPress: () => void,
-      icon: React.ReactNode,
-      label: string
-    ) => (
-      <TouchableOpacity
-        key={key}
-        accessibilityRole="tab" accessibilityLabel={`Receive ${label}`} accessibilityState={{ selected: active }}
-        style={[styles.assetTab, active && { borderColor: accent, backgroundColor: accent + '15' }]}
-        onPress={onPress}
-        activeOpacity={0.7}
-      >
-        {icon}
-        <Text
-          style={[styles.assetTabText, active && { color: accent, fontWeight: '700' }]}
-          numberOfLines={1}
-        >
-          {label}
-        </Text>
-      </TouchableOpacity>
-    );
-
     return (
       <View style={styles.assetTabs}>
-        {Tab('BTC', isBtc, selectBtc, <AssetIcon ticker="BTC" size={20} showBadge={false} />, 'BTC')}
-        {rgbConnecting && !rgbConnected && <Text accessibilityLiveRegion="polite" style={styles.assetTabText}>RGB · Connecting…</Text>}
-        {/* RGB one tap away, not three levels deep in the options sheet. */}
-        {rgbConnected && selectedAsset.asset_id !== NEW_RGB_ASSET_ID &&
-          Tab('RGB', false, () => { feedback.select(); setShowRgbAssets(true); }, <RgbIcon size={20} />, 'RGB')}
-        {assetFamily !== 'BTC' &&
-          Tab('custom', true, () => {}, (
-            <AssetIcon
-              ticker={t}
-              protocol={assetIconProtocol}
-              size={20}
-              showBadge={false}
-            />
-          ), t)}
+        <TouchableOpacity accessibilityRole="tab" accessibilityState={{ selected: isBtc }} accessibilityLabel="Receive BTC"
+          style={[styles.assetTab, isBtc && selectedStyle]} onPress={selectBtc} activeOpacity={0.7}>
+          <AssetIcon ticker="BTC" size={20} showBadge={false} />
+          <Text style={[styles.assetTabText, isBtc && { color: accent }]}>BTC</Text>
+        </TouchableOpacity>
+        {(canChooseRgb || isRgb) && <TouchableOpacity accessibilityRole="button" accessibilityState={{ expanded: showRgbAssets }}
+          accessibilityLabel={isRgb ? `Change RGB asset, ${rgbChoiceLabel}` : 'Choose an RGB asset'}
+          onPress={() => { feedback.select(); setShowRgbAssets(true); }} activeOpacity={0.7}
+          style={[styles.assetTab, isRgb && selectedStyle]}>
+          {isRgb && !isAnyRgb
+            ? <AssetIcon ticker={selectedAsset.ticker} logoUri={heldRgbAsset?.icon} protocol="RGB" size={20} showBadge={false} />
+            : <RgbIcon size={20} />}
+          <Text style={[styles.assetTabText, isRgb && { color: accent }]} numberOfLines={1}>{rgbChoiceLabel}</Text>
+          <Ionicons name="chevron-down" size={14} color={theme.colors.text.secondary} />
+        </TouchableOpacity>}
+        {rgbConnecting && !rgbConnected && !isRgb && <Text accessibilityLiveRegion="polite" style={styles.assetTabText}>RGB · Connecting…</Text>}
+        {assetFamily !== 'BTC' && !isRgb && <View style={[styles.assetTab, selectedStyle]}>
+          <AssetIcon ticker={selectedAsset.ticker} protocol={assetIconProtocol} size={20} showBadge={false} />
+          <Text style={[styles.assetTabText, { color: accent }]} numberOfLines={1}>{selectedAsset.ticker}</Text>
+        </View>}
       </View>
     );
   };
 
-  const renderRgbEntry = () => (
-    <TouchableOpacity
-      accessibilityRole="button"
-      accessibilityLabel={rgbConnected ? 'Receive an RGB asset. Any asset, or a specific one by contract ID' : 'Receive an RGB asset. Turn on RGB in Settings first'}
-      disabled={!rgbConnected}
-      onPress={() => { feedback.select(); afterOptions(() => setShowRgbAssets(true)); }}
-      activeOpacity={0.7}
-      style={[styles.rgbEntry, !rgbConnected && { opacity: 0.6 }]}
-    >
-      <View style={styles.rgbEntryIcon}><RgbIcon size={20} /></View>
-      <View style={{ flex: 1 }}>
-        <Text style={styles.rgbEntryTitle}>Receive an RGB asset</Text>
-        <Text style={styles.rgbEntryDetail} numberOfLines={2}>
-          {rgbConnected ? 'Any asset, or a specific one by contract ID' : 'Turn on RGB in Settings, or connect your RGB node'}
-        </Text>
-      </View>
-      {rgbConnected && <Ionicons name="chevron-forward" size={18} color={theme.colors.text.tertiary} />}
-    </TouchableOpacity>
-  );
-
   // ── Amount row with pencil edit (opens the multi-currency editor) ─────────
   const renderAmountRowInner = () => {
-    // This editor enters Bitcoin amounts. Spark token addresses and RGB invoices are open-amount.
+    // This editor enters Bitcoin amounts; RGB uses the selected token's precision.
     if (assetFamily !== 'BTC') return null;
     // Arkade and on-chain addresses don't carry an amount; offering one there
     // would suggest the payer is asked for it when they aren't.
@@ -1470,12 +1482,12 @@ function ReceiveRequestScreen({ navigation, route: navRoute }: Props) {
 
   const renderOutcome = () => <ReceiveOutcomeCard status={requestPresentation} onRefresh={refreshRequest}
     detectedAmount={detectedAmount} message={depositMonitor.message}
-    requestedAmount={assetFamily === 'BTC' && currentAmountSats > 0 ? `${currentAmountSats.toLocaleString('en-US')} sats` : undefined}
+    requestedAmount={assetFamily === 'BTC' && currentAmountSats > 0 ? `${currentAmountSats.toLocaleString('en-US')} sats` : requestedRgbAmount}
     onActivity={claimsOnDevice && requestPresentation === 'pending' ? undefined : () => navigation.navigate('Dashboard', { screen: 'Activity' })}
     hint={claimsOnDevice ? 'Keep this screen open until the payment arrives.' : undefined} />;
 
   const shareAsset = assetFamily !== 'BTC'
-    ? (selectedAsset.asset_id === NEW_RGB_ASSET_ID ? 'RGB asset' : selectedAsset.ticker)
+    ? (requestedRgbAmount ?? (selectedAsset.asset_id === NEW_RGB_ASSET_ID ? 'Any RGB asset' : selectedAsset.ticker))
     : currentAmountSats > 0 ? `${currentAmountSats.toLocaleString()} sats` : 'BTC';
 
   const renderSeparateArkade = () => {
@@ -1607,6 +1619,15 @@ function ReceiveRequestScreen({ navigation, route: navRoute }: Props) {
       return renderUnifiedBody();
     }
 
+    if (showRgbDraft) return (
+      <View style={[styles.promptContainer, styles.rgbInvoiceDraft, { minHeight: qrSize }]}>
+        <Ionicons name="create-outline" size={32} color={theme.colors.primary[500]} />
+        <Text accessibilityLiveRegion="polite" style={styles.rgbInvoiceDraftText}>
+          {rgbAmountError ? 'Enter a valid amount to update the invoice.' : 'Invoice draft'}
+        </Text>
+      </View>
+    );
+
     if (showOutcome && address && !loading) return renderOutcome();
 
     if (awaitingAmount && routeTarget) {
@@ -1709,62 +1730,78 @@ function ReceiveRequestScreen({ navigation, route: navRoute }: Props) {
         }}
       />
 
-      <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="on-drag"
-      >
-        <ReceiveConnectionNotice hasRequest={!!receiveTarget} />
-        {showAddressTab && (
-          <SegmentedControl<'request' | 'address'>
-            accessibilityLabel="Receive with a one-time request or your address"
-            options={[
-              { key: 'request', label: 'Request', icon: 'qr-code-outline' },
-              { key: 'address', label: 'My address', icon: 'at-outline' },
-            ]}
-            value={receiveTab}
-            onChange={(tab) => { feedback.select(); setReceiveTab(tab); }}
-            style={{ marginBottom: theme.spacing[3] }}
-          />
-        )}
-        {showAddressTab && receiveTab === 'address' ? (
-          <MyAddressPanel
-            walletId={walletId}
-            qrSize={qrSize}
-            showLightningAddress={lightningAddressAvailable}
-            showOffer={merchantOfferOn && hasReceivingNode}
-            onManageAddress={() => { cancelReceiveWork(); navigation.navigate('LightningAddress'); }}
-            onOpenOffer={() => { cancelReceiveWork(); navigation.navigate('MerchantOffer'); }}
-          />
-        ) : <>
-          {renderAssetTabs()}
-          {!awaitingPrefilledAsset && renderOptionsPill()}
-          {renderContent()}
-
-          {networkType === 'bark' && arkadeSubMode === 'boarding' && <BarkBoardingPanel />}
-          {/* With a QR on screen the status sits right under it; otherwise here. */}
-          {!qrOnScreen && renderStatus()}
-        </>}
-
-      </ScrollView>
-
-      {/* The pill opens the routes directly: one sheet, not a sheet inside a sheet. */}
-      <Sheet visible={showOptions} onClose={() => setShowOptions(false)} title="How they pay">
-        <ScrollView style={{ maxHeight: 520 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-          {showRgbAdvanced && (
-            <RgbReceiveAdvanced
-              support={rgbSupport}
+      <KeyboardAvoidingView style={styles.requestBody} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView
+          ref={requestScrollView}
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+        >
+          <ReceiveConnectionNotice hasRequest={!!receiveTarget} />
+          {showAddressTab && (
+            <SegmentedControl<'request' | 'address'>
+              accessibilityLabel="Receive with a one-time request or your address"
+              options={[
+                { key: 'request', label: 'Request', icon: 'qr-code-outline' },
+                { key: 'address', label: 'My address', icon: 'at-outline' },
+              ]}
+              value={receiveTab}
+              onChange={(tab) => { feedback.select(); setReceiveTab(tab); }}
+              style={{ marginBottom: theme.spacing[3] }}
+            />
+          )}
+          {showAddressTab && receiveTab === 'address' ? (
+            <MyAddressPanel
+              walletId={walletId}
+              qrSize={qrSize}
+              showLightningAddress={lightningAddressAvailable}
+              showOffer={merchantOfferOn && hasReceivingNode}
+              onManageAddress={() => { cancelReceiveWork(); navigation.navigate('LightningAddress'); }}
+              onOpenOffer={() => { cancelReceiveWork(); navigation.navigate('MerchantOffer'); }}
+            />
+          ) : <>
+            {renderAssetTabs()}
+            {!awaitingPrefilledAsset && renderOptionsPill()}
+            {showRgbInvoiceOptions && rgbPrecision !== undefined && <Input
+              label={`Amount (${selectedAsset.ticker || selectedAsset.name})`}
+              accessibilityHint="Leave blank to accept any amount."
+              placeholder="Any amount"
+              value={rgbAmount}
+              onChangeText={changeRgbAmount}
+              onSubmitEditing={rgbInvoiceEditing ? updateRgbInvoice : undefined}
+              error={rgbAmountError}
+              keyboardType={rgbPrecision === 0 ? 'number-pad' : 'decimal-pad'}
+              returnKeyType="done"
+              style={styles.rgbAmount}
+            />}
+            {renderContent()}
+            {showRgbInvoiceOptions && <RgbInvoiceOptions
+              support={rgbOnchain ? rgbSupport : { ...NO_RGB_RECEIVE_SUPPORT, expiry: true }}
               options={rgbOptions}
               onChange={changeRgbOptions}
               requestExpirySeconds={expirySeconds}
               proxyV1={rgbProxyV1}
               utxos={rgbUtxos}
               onLoadUtxos={() => { void loadRgbUtxos(); }}
-              onCreateUtxos={rgbSupport.createUtxos ? () => afterOptions(() => setShowCreateUtxos(true)) : undefined}
-            />
-          )}
+              onCreateUtxos={rgbSupport.createUtxos ? () => setShowCreateUtxos(true) : undefined}
+            />}
+
+            {networkType === 'bark' && arkadeSubMode === 'boarding' && <BarkBoardingPanel />}
+            {/* With a QR on screen the status sits right under it; otherwise here. */}
+            {!qrOnScreen && renderStatus()}
+          </>}
+
+        </ScrollView>
+        {showRgbDraft && <View style={styles.rgbEditFooter}>
+          <Button title="Update invoice" onPress={updateRgbInvoice} disabled={!!rgbAmountError} fullWidth />
+        </View>}
+      </KeyboardAvoidingView>
+
+      {/* The pill opens the routes directly: one sheet, not a sheet inside a sheet. */}
+      <Sheet visible={showOptions} onClose={() => setShowOptions(false)} title="How they pay">
+        <ScrollView style={{ maxHeight: 520 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <ReceiveRoutePicker embedded
             methods={receiveMethodIds}
             method={route.method}
@@ -1803,6 +1840,7 @@ function ReceiveRequestScreen({ navigation, route: navRoute }: Props) {
         onClose={() => setShowRgbAssets(false)}
         accountLabel={rgbLabel}
         held={rgbAssets}
+        selectedAssetId={selectedAsset.asset_id}
         onPickAny={() => receiveRgbAsset(null)}
         onPickAsset={receiveRgbAsset}
       />
@@ -1822,7 +1860,6 @@ function ReceiveRequestScreen({ navigation, route: navRoute }: Props) {
         visible={showAmountEditor}
         onClose={() => setShowAmountEditor(false)}
         requestOptions={{ expirySeconds, showCountdown, note }}
-        rgbProxyV1={assetFamily === 'RGB' && networkType === 'onchain' && rgbProxyV1}
         initialSats={currentAmountSats}
         rates={fiatRates}
         bitcoinUnit={bitcoinUnit}

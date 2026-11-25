@@ -46,6 +46,14 @@ export const NWC_CONNECTION_KEY = ACTIVE_NWC_CONNECTION_KEY;
 const anyRec = (v: unknown): Record<string, any> =>
   v && typeof v === 'object' ? (v as Record<string, any>) : {};
 
+function decodeRlnAssignment(value: unknown) {
+  const assignment = anyRec(value);
+  if (typeof assignment.type === 'string') return assignment;
+  if (assignment.Fungible != null) return { type: 'Fungible', value: assignment.Fungible };
+  if (typeof value === 'string') return { type: value };
+  return undefined;
+}
+
 function display(amount: number, precision: number): string {
   if (!precision) return String(amount);
   return (amount / Math.pow(10, precision)).toString();
@@ -457,9 +465,13 @@ export class NwcRgbAdapter implements IProtocolAdapter {
 
   async createRgbInvoiceWithSignal(params: any, signal?: AbortSignal): Promise<any> {
     this.requireRln();
-    const { duration_seconds, ...body } = params ?? {};
+    const { amount, duration_seconds, ...body } = params ?? {};
+    if (amount != null && (!Number.isSafeInteger(amount) || amount <= 0)) {
+      throw new Error('The RGB invoice amount must be a positive integer in asset units.');
+    }
     return this.c().rlnRgbInvoice({
       ...body,
+      ...(body.assignment == null && amount != null ? { assignment: { type: 'Fungible', value: amount } } : {}),
       witness: body.witness ?? true,
       min_confirmations: body.min_confirmations ?? 1,
       expiration_timestamp: body.expiration_timestamp
@@ -504,7 +516,10 @@ export class NwcRgbAdapter implements IProtocolAdapter {
 
   async decodeRgbInvoice(params: any): Promise<any> {
     this.requireRln();
-    return this.c().rlnDecodeRgbInvoice(params);
+    const response = await this.c().rlnDecodeRgbInvoice(params);
+    const invoice = anyRec(response);
+    const assignment = decodeRlnAssignment(invoice.assignment);
+    return assignment ? { ...invoice, assignment } : response;
   }
 
   async getInvoiceStatus(params: { invoice: string }): Promise<any> {
@@ -558,9 +573,17 @@ export class NwcRgbAdapter implements IProtocolAdapter {
     if (invoice.asset_id && invoice.asset_id !== params.asset_id) throw new Error('The invoice asks for a different asset.');
     const now = Math.floor(Date.now() / 1000);
     if (invoice.expiration_timestamp != null && invoice.expiration_timestamp <= now) throw new Error('The RGB invoice has expired.');
-    if (invoice.assignment?.Fungible != null && invoice.assignment.Fungible !== params.amount) throw new Error('The invoice asks for a different amount.');
-    if (invoice.assignment === 'NonFungible' && params.amount !== 1) throw new Error('A collectible must be sent as one unit.');
-    if (invoice.assignment !== 'Any' && invoice.assignment !== 'NonFungible' && invoice.assignment?.Fungible == null) throw new Error('This RGB assignment is not supported for payments.');
+    const assignment = decodeRlnAssignment(invoice.assignment);
+    if (assignment?.type !== 'Any' && assignment?.type !== 'NonFungible' && assignment?.type !== 'Fungible') {
+      throw new Error('This RGB assignment is not supported for payments.');
+    }
+    if (assignment.type === 'Fungible' && assignment.value !== params.amount) throw new Error('The invoice asks for a different amount.');
+    const nonFungible = assignment.type === 'NonFungible';
+    if (nonFungible && params.amount !== 1) throw new Error('A collectible must be sent as one unit.');
+    const tagged = typeof invoice.assignment?.type === 'string';
+    const recipientAssignment = nonFungible
+      ? (tagged ? { type: 'NonFungible' } : 'NonFungible')
+      : (tagged ? { type: 'Fungible', value: params.amount } : { Fungible: params.amount });
     const feeRate = params.feeRate ?? 2;
     if (!Number.isSafeInteger(feeRate) || feeRate <= 0) throw new Error('The node requires a positive whole-number fee rate.');
     return this.c().rlnSendAsset({
@@ -571,7 +594,7 @@ export class NwcRgbAdapter implements IProtocolAdapter {
       recipient_map: {
         [params.asset_id]: [{
           recipient_id: invoice.recipient_id,
-          assignment: invoice.assignment === 'NonFungible' ? 'NonFungible' : { Fungible: params.amount },
+          assignment: recipientAssignment,
           witness_data: invoice.recipient_type === 'Witness' ? { amount_sat: 1000, blinding: null } : null,
           ...(invoice.transport_endpoints?.length ? { transport_endpoints: invoice.transport_endpoints } : {}),
         }],
