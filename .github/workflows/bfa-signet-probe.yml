@@ -1,0 +1,50 @@
+name: BFA public Signet probe
+
+on:
+  push:
+    branches: [test/rgb-bfa-signet]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: Verify Rate native RGB and WASM on public Signet
+    runs-on: macos-15
+    timeout-minutes: 22
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install the pinned native RGB artifact
+        run: node modules/kaleido-rgb/scripts/download-rgb-lib-ios.js
+      - name: Boot the iOS simulator
+        timeout-minutes: 6
+        run: |
+          simulator="$(xcrun simctl list devices available -j | jq -er \
+            '[.devices[][] | select(.isAvailable and (.name | startswith("iPhone"))) | .udid] | last')"
+          xcrun simctl boot "$simulator" || true
+          xcrun simctl bootstatus "$simulator" -b
+          echo "SIMULATOR_UDID=$simulator" >> "$GITHUB_ENV"
+      - name: Verify real encrypted backup rejection and recovery
+        run: bash scripts/bfa-e2e/run-ios.sh
+      - name: Connect the native wallet and reserve a public Signet invoice
+        timeout-minutes: 6
+        run: bash scripts/bfa-e2e/run-ios.sh --signet "$RUNNER_TEMP/rate-signet-invoice.json"
+      - name: Compare the pinned WASM decoders
+        run: |
+          download_decoder() {
+            local edition="$1" expected_sha="$2"
+            local target="$RUNNER_TEMP/rate-wasm-beta${edition}"
+            mkdir -p "$target"
+            curl -fsS --retry 2 --max-time 60 "https://registry.npmjs.org/@utexo/rgb-lib-wasm/-/rgb-lib-wasm-1.0.0-beta.${edition}.tgz" -o "$target/wasm.tgz"
+            printf '%s  %s\n' "$expected_sha" "$target/wasm.tgz" | shasum -a 256 -c -
+            tar -xzf "$target/wasm.tgz" -C "$target"
+          }
+          download_decoder 3 5c7bb3df4bc4a6cba960fef04da81ef4e7cfbf5b7441690140b003853311417a
+          download_decoder 4 7680beab15a7a8dfdcb16681b0c58031bb1b9b567330fcbe2613aa2fcfdb1903
+          node scripts/bfa-e2e/verify-signet-invoice.mjs "$RUNNER_TEMP/rate-signet-invoice.json" \
+            "$RUNNER_TEMP/rate-wasm-beta4/package" "$RUNNER_TEMP/rate-wasm-beta3/package"
