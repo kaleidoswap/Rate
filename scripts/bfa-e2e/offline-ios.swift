@@ -40,18 +40,16 @@ private struct WalletState: Equatable {
     }
 }
 
-private func createAndBackUp(
-    in directory: URL, keys: Keys, backup: URL, password: String
-) throws -> (firstAddress: String, state: WalletState) {
+private func openWallet(in directory: URL, network: BitcoinNetwork, keys: Keys) throws -> Wallet {
     let data = WalletData(
         dataDir: directory.path,
-        bitcoinNetwork: .regtest,
+        bitcoinNetwork: network,
         databaseType: .sqlite,
         maxAllocationsPerUtxo: 5,
         supportedSchemas: [.nia, .bfa],
         allowRecklessSchemas: false
     )
-    let wallet = try Wallet(walletData: data, keys: SinglesigKeys(
+    return try Wallet(walletData: data, keys: SinglesigKeys(
         accountXpubVanilla: keys.accountXpubVanilla,
         accountXpubColored: keys.accountXpubColored,
         vanillaKeychain: nil,
@@ -59,6 +57,12 @@ private func createAndBackUp(
         mnemonic: keys.mnemonic,
         witnessVersion: keys.witnessVersion
     ))
+}
+
+private func createAndBackUp(
+    in directory: URL, keys: Keys, backup: URL, password: String
+) throws -> (firstAddress: String, state: WalletState) {
+    let wallet = try openWallet(in: directory, network: .regtest, keys: keys)
     let firstAddress = try wallet.getAddress()
     try check(firstAddress.hasPrefix("bcrt1"), "The fresh wallet did not return a Regtest address.")
     try check(wallet.getWalletData().supportedSchemas.contains(.bfa), "The native wallet did not enable BFA.")
@@ -83,52 +87,135 @@ private func nextAddress(in directory: URL, keys: Keys, expected: WalletState) t
     return try wallet.getAddress()
 }
 
+private func checkOffline(root: URL, stage: inout String) throws {
+    stage = "decode the WASM beta.4 proxy v1 invoice"
+    try checkWasmInvoice()
+    print("PASS decoded the WASM beta.4 proxy v1 invoice and preserved its encryption fields")
+
+    stage = "prepare scratch directories"
+    let files = FileManager.default
+    let original = root.appendingPathComponent("original", isDirectory: true)
+    try files.createDirectory(at: original, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+    let subdir = "rate-bfa-probe-\(UUID().uuidString)"
+    let restored = try DataDirs.dataDir(subdir)
+    defer { try? files.removeItem(at: restored) }
+    try files.setAttributes([.posixPermissions: 0o700], ofItemAtPath: restored.path)
+
+    let keys = generateKeys(bitcoinNetwork: .regtest, witnessVersion: .taproot)
+    let password = UUID().uuidString
+    let backup = root.appendingPathComponent("wallet.rgbbackup")
+    let walletDir = try DataDirs.walletDir(subdir, keys.masterFingerprint)
+
+    stage = "create and back up the fresh Regtest wallet"
+    let expected = try createAndBackUp(in: original, keys: keys, backup: backup, password: password)
+    print("PASS created a Regtest wallet with BFA support and encrypted its backup")
+
+    stage = "open the original wallet on disk"
+    let reopenedAddress = try nextAddress(in: original, keys: keys, expected: expected.state)
+    try check(reopenedAddress != expected.firstAddress, "The reopened wallet reused its first address.")
+    print("PASS reopened the same wallet and advanced its address index")
+
+    func restore(network: BitcoinNetwork, password: String) throws {
+        try DataDirs.restoreBackupForWallet(
+            path: backup.path, password: password, subdir: subdir, fingerprint: keys.masterFingerprint,
+            network: network, vanillaXpub: keys.accountXpubVanilla, coloredXpub: keys.accountXpubColored,
+            witnessVersion: keys.witnessVersion
+        )
+    }
+
+    stage = "reject the wrong backup password through Rate’s staged restore"
+    do {
+        try restore(network: .regtest, password: UUID().uuidString)
+        throw CheckFailed(message: "The wrong backup password was accepted.")
+    } catch RgbLibError.WrongPassword {
+        try check(try files.contentsOfDirectory(atPath: restored.path).isEmpty, "The failed restore left wallet data on disk.")
+    }
+    print("PASS rejected a wrong backup password and cleared staged data")
+
+    stage = "reject the wrong network through Rate’s staged restore"
+    do {
+        try restore(network: Mappers.network("SIGNET"), password: password)
+        throw CheckFailed(message: "The Regtest backup was accepted for Signet.")
+    } catch let failure as InvalidArgument {
+        try check(failure.description == "This RGB backup belongs to a different Bitcoin network.", "The Regtest backup failed for a reason other than its network.")
+        try check(try files.contentsOfDirectory(atPath: restored.path).isEmpty, "The failed restore left wallet data on disk.")
+    }
+    print("PASS rejected a Regtest backup for Signet and cleared staged data")
+
+    stage = "retry Rate’s staged restore with the matching network"
+    try restore(network: .regtest, password: password)
+    try check(try files.contentsOfDirectory(atPath: restored.path) == [walletDir.lastPathComponent], "The restore left unexpected staged data.")
+    let restoredAddress = try nextAddress(in: restored, keys: keys, expected: expected.state)
+    try check(restoredAddress == reopenedAddress, "The restored address index differs from the original.")
+    print("PASS restored matching wallet state and address index after the rejected attempts")
+}
+
+private func checkSignet(root: URL, output: URL, stage: inout String) throws {
+    // Match the app's default Signet endpoints in services/protocols/rgbL1.ts.
+    let indexer = "https://mempool.space/signet/api"
+    let proxy = "rpcs://proxy.iriswallet.com/1.0/json-rpc"
+    let directory = root.appendingPathComponent("signet", isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+
+    stage = "open the fresh Signet wallet"
+    let network = try Mappers.network("SIGNET")
+    let keys = generateKeys(bitcoinNetwork: network, witnessVersion: .taproot)
+    let wallet = try openWallet(in: directory, network: network, keys: keys)
+    try check(wallet.getWalletData().supportedSchemas.contains(.bfa), "The native wallet did not enable BFA.")
+
+    stage = "connect to Signet Esplora and verify the Arbitrum One RPC"
+    let online = try wallet.goOnline(onlineOptions: Mappers.onlineOptions(Args([
+        "indexerUrl": indexer, "skipConsistencyCheck": false, "vanillaSyncLookback": 20,
+        "evmChains": ["42161": [
+            "rpcUrl": "https://arb1.arbitrum.io/rpc", "minMintLockBlocks": 1_200, "maxMintLockBlocks": 28_800,
+        ]],
+    ])))
+    print("PASS connected a fresh BFA-enabled wallet to Signet Esplora and verified the Arbitrum One RPC")
+
+    stage = "reserve a required-encrypted witness invoice on the Iris v1 proxy"
+    let amount: UInt64 = 25
+    let expiry = UInt64(Date().timeIntervalSince1970) + 3_600
+    let assignment = try Mappers.assignment(Args(["type": "FUNGIBLE", "amount": NSNumber(value: amount)]))
+    let receive = try wallet.witnessReceive(
+        online: online, assetId: nil, assignment: assignment, expirationTimestamp: expiry,
+        transportEndpoints: [proxy], minConfirmations: 1, encryption: Mappers.encryption("REQUIRED")
+    )
+    print("PASS reserved a witness invoice on the Iris v1 proxy")
+
+    stage = "check the Signet invoice returned by the native library"
+    let invoice = try Invoice(invoiceString: receive.invoice).invoiceData()
+    try check(invoice.network == network && invoice.recipientId == receive.recipientId && invoice.recipientId.contains(":wvout:"), "The invoice network or witness recipient changed.")
+    try check(invoice.assignment == assignment && invoice.assetId == nil, "The invoice amount or asset restriction changed.")
+    try check(invoice.expirationTimestamp == expiry && receive.expirationTimestamp == expiry, "The invoice expiration changed.")
+    try check(invoice.encryption == .required && invoice.publicKey == receive.publicKey, "The invoice encryption fields changed.")
+    try check(receive.publicKey.count == 64 && receive.publicKey.allSatisfy(\.isHexDigit), "The invoice public key is invalid.")
+    try check(invoice.transportEndpoints == [proxy], "The invoice proxy changed.")
+
+    stage = "export the public invoice fields for the WASM decoder"
+    let publicInvoice: [String: Any] = [
+        "invoice": receive.invoice, "recipientId": invoice.recipientId,
+        "network": Mappers.networkName(invoice.network), "encryption": Mappers.encryptionName(invoice.encryption),
+        "transportEndpoints": invoice.transportEndpoints, "expirationTimestamp": expiry,
+        "publicKey": receive.publicKey, "assignment": ["type": "FUNGIBLE", "amount": NSNumber(value: amount)],
+    ]
+    let data = try JSONSerialization.data(withJSONObject: publicInvoice, options: [.sortedKeys])
+    try data.write(to: output, options: .withoutOverwriting)
+    print("PASS exported the public invoice fields for the WASM decoder")
+}
+
 @main
 struct OfflineBfaProbe {
     static func main() {
         var stage = "prepare scratch directories"
         do {
-            try check(CommandLine.arguments.count == 2, "Pass the private scratch directory created by run-ios.sh.")
-            stage = "decode the WASM beta.4 proxy v1 invoice"
-            try checkWasmInvoice()
-            print("PASS decoded the WASM beta.4 proxy v1 invoice and preserved its encryption fields")
-
-            stage = "prepare scratch directories"
-            let root = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
-            let original = root.appendingPathComponent("original", isDirectory: true)
-            let restored = root.appendingPathComponent("restored", isDirectory: true)
-            let rejected = root.appendingPathComponent("wrong-password", isDirectory: true)
-            for directory in [original, restored, rejected] {
-                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+            let args = CommandLine.arguments
+            try check(args.count == 2 || (args.count == 4 && args[2] == "--signet"), "Run the probe through run-ios.sh.")
+            let root = URL(fileURLWithPath: args[1], isDirectory: true)
+            if args.count == 2 {
+                try checkOffline(root: root, stage: &stage)
+            } else {
+                try checkSignet(root: root, output: URL(fileURLWithPath: args[3]), stage: &stage)
             }
-            let keys = generateKeys(bitcoinNetwork: .regtest, witnessVersion: .taproot)
-            let password = UUID().uuidString
-            let backup = root.appendingPathComponent("wallet.rgbbackup")
-
-            stage = "create and back up the fresh Regtest wallet"
-            let expected = try createAndBackUp(in: original, keys: keys, backup: backup, password: password)
-            print("PASS created a Regtest wallet with BFA support and encrypted its backup")
-
-            stage = "open the original wallet on disk"
-            let reopenedAddress = try nextAddress(in: original, keys: keys, expected: expected.state)
-            try check(reopenedAddress != expected.firstAddress, "The reopened wallet reused its first address.")
-            print("PASS reopened the same wallet and advanced its address index")
-
-            stage = "reject the wrong backup password"
-            do {
-                try restoreBackup(backupPath: backup.path, password: UUID().uuidString, dataDir: rejected.path)
-                throw CheckFailed(message: "The wrong backup password was accepted.")
-            } catch RgbLibError.WrongPassword {
-                let wrongWallet = rejected.appendingPathComponent(keys.masterFingerprint)
-                try check(!FileManager.default.fileExists(atPath: wrongWallet.path), "The failed restore created a wallet directory.")
-            }
-            print("PASS rejected a wrong backup password without creating a wallet")
-
-            stage = "restore and open in a clean directory"
-            try restoreBackup(backupPath: backup.path, password: password, dataDir: restored.path)
-            let restoredAddress = try nextAddress(in: restored, keys: keys, expected: expected.state)
-            try check(restoredAddress == reopenedAddress, "The restored address index differs from the original.")
-            print("PASS restored matching wallet state and address index in a clean directory")
         } catch let failure as CheckFailed {
             fputs("FAIL \(stage): \(failure.message)\n", stderr)
             exit(1)

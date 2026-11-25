@@ -1,6 +1,22 @@
 #!/usr/bin/env bash
-# Test the pinned bfa.8 iOS simulator library with one fresh, unfunded Regtest wallet.
+# Test the pinned bfa.8 iOS simulator library with a fresh, unfunded wallet.
 set -euo pipefail
+
+case "$#:${1:-}" in
+  0:) ;;
+  2:--signet)
+    output_dir="$(cd -- "$(dirname "$2")" && pwd)"
+    invoice_output="$output_dir/$(basename "$2")"
+    if [[ -e "$invoice_output" || -L "$invoice_output" ]]; then
+      echo 'Choose a new file for the public invoice output.' >&2
+      exit 1
+    fi
+    ;;
+  *)
+    echo 'Usage: run-ios.sh [--signet <public-invoice.json>]' >&2
+    exit 1
+    ;;
+esac
 
 if [[ "$(uname -s)" != Darwin || "$(uname -m)" != arm64 ]]; then
   echo 'The bfa.8 probe requires macOS on Apple Silicon and a booted iOS simulator.' >&2
@@ -31,7 +47,12 @@ xcrun --sdk iphonesimulator swiftc \
   -target arm64-apple-ios16.0-simulator \
   -I "$slice/Headers" -L "$slice" -lrgblibuniffi -lc++ -lsqlite3 \
   -framework Security -framework SystemConfiguration \
-  "$rgb_module/ios/RgbLib.swift" "$script_dir/offline-ios.swift" \
+  "$rgb_module/ios/RgbLib.swift" "$rgb_module/ios/Mappers.swift" "$rgb_module/ios/DataDirs.swift" \
+  "$script_dir/offline-ios.swift" \
   -o "$scratch/bfa8-probe"
 
-xcrun simctl spawn "${SIMULATOR_UDID:-booted}" "$scratch/bfa8-probe" "$scratch"
+probe_args=("$scratch")
+if [[ -n "${invoice_output:-}" ]]; then
+  probe_args+=(--signet "$invoice_output")
+fi
+xcrun simctl spawn "${SIMULATOR_UDID:-booted}" "$scratch/bfa8-probe" "${probe_args[@]}"
