@@ -17,6 +17,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.kaleidoswap.wallet",
+      "associatedDomains": ["webcredentials:kaleidoswap.com"],
       "buildNumber": "655",
       "infoPlist": {
         "NSCameraUsageDescription": "This app uses the camera to scan QR codes for Bitcoin addresses and Lightning invoices.",

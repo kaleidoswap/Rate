@@ -1,4 +1,5 @@
 import React from 'react';
+import { withRgbApproval } from '../services/rgbApproval';
 import { act, cleanup, fireEvent, render } from '@testing-library/react-native';
 import { setAppUnlocked } from '../services/appLockState';
 import * as transport from '../services/webrgb/nwc';
@@ -114,4 +115,21 @@ it('cancels pending approval when changing wallets and unregisters on unmount', 
   ui.unmount();
   await expect(pending).resolves.toBe(false);
   expect(transport.setWebRgbReviewer).toHaveBeenLastCalledWith(undefined);
+});
+
+it('keeps the dApp consent and the browser passkey prompt mutually exclusive', async () => {
+  const ui = render(<WebRgbApprover />);
+  const onBusy = jest.fn(() => false);
+  const first = present(request());
+  const passkey = jest.fn(async () => true);
+  await expect(withRgbApproval(passkey, onBusy)).resolves.toBe(false);
+  expect(passkey).not.toHaveBeenCalled();
+  fireEvent.press(ui.getByLabelText('Decline'));
+  await expect(first).resolves.toBe(false);
+
+  await withRgbApproval(async () => {
+    await expect(present(request())).resolves.toBe(false);
+    expect(ui.queryByText('Approve this request?')).toBeNull();
+  }, () => { throw new Error('Previous review was not released'); });
+  await expect(withRgbApproval(passkey, onBusy)).resolves.toBe(true);
 });

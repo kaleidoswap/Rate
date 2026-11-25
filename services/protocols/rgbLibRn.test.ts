@@ -576,6 +576,21 @@ test('preserves the invoice deadline in native send', async () => {
   expect(wallet.send).toHaveBeenCalledWith(expect.anything(), false, 2, 1, deadline);
 });
 
+test('phone requests use the bound native wallet, recheck approval at dispatch and schedule its normal backup', async () => {
+  const { lib, wallet } = fakeLib();
+  const backup = jest.fn();
+  const manager = new (createRgbLibRnModule(() => lib as any, { onChange: backup }).WalletManagerRgb)('seed', options);
+  const account = await manager.getAccount();
+  const request = { token: 'rgb:asset', recipient: 'invoice', amount: 25 };
+  await expect(account.transfer(request, () => { throw new Error('revoked'); })).rejects.toThrow('revoked');
+  expect(wallet.send).not.toHaveBeenCalled();
+  expect(backup).not.toHaveBeenCalled();
+  await account.transfer(request, () => undefined);
+  expect(wallet.send).toHaveBeenCalledTimes(1);
+  expect(backup).toHaveBeenCalledTimes(1);
+  await manager.dispose();
+});
+
 test('an invoice expiring while queued behind a backup is never sent', async () => {
   const { lib, wallet } = fakeLib();
   const account = await open(lib);

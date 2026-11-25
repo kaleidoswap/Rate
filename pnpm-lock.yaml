@@ -101,6 +101,9 @@ importers:
       '@kaleidorg/wdk-wallet-rln':
         specifier: 1.0.0-beta.5
         version: 1.0.0-beta.5(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))))(typescript@5.9.3)
+      '@levischuck/tiny-cbor':
+        specifier: ^0.3.6
+        version: 0.3.6
       '@noble/curves':
         specifier: ^1.9.0
         version: 1.9.7
@@ -293,6 +296,9 @@ importers:
       react-native-markdown-display:
         specifier: ^7.0.2
         version: 7.0.2(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)
+      react-native-passkey:
+        specifier: ^3.6.2
+        version: 3.6.2(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)
       react-native-qrcode-svg:
         specifier: ^6.3.21
         version: 6.3.21(react-native-svg@15.15.5(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)
@@ -1554,6 +1560,9 @@ packages:
 
   '@keyv/serialize@1.1.1':
     resolution: {integrity: sha512-dXn3FZhPv0US+7dtJsIi2R+c7qWYiReoEh5zUntWCf4oSpMNib8FDhSoed6m3QyZdx5hK7iLFkYk3rNxwt8vTA==}
+
+  '@levischuck/tiny-cbor@0.3.6':
+    resolution: {integrity: sha512-uh1K62xhRZbEbnXEPUJ1WHd7uJTAKg65EX/7S/DDX3u2lexCvSjqrOOR3rb+5TDhCyGVHflu/HEtFjuEQ6y+qw==}
 
   '@lightsparkdev/core@1.5.2':
     resolution: {integrity: sha512-7EiV/Ld+IqAQJYvSLN2gS6E/UrcCCQ/H4voUz+nAPUDSk8U1P06afTKALh1FeizAXIzqxt1jFQWmQlXPSXmxIA==}
@@ -6000,6 +6009,12 @@ packages:
       react: '>=16.2.0'
       react-native: '>=0.50.4'
 
+  react-native-passkey@3.6.2:
+    resolution: {integrity: sha512-3x7uS0EYx3KkHYdYDvDOOmw5DVrKqqDDJxP9Lwph922EwHJT6HR5/2cQs4+MfK6iE/N0FCCNjUJEvQ8XuYj+/A==}
+    peerDependencies:
+      react: '*'
+      react-native: '*'
+
   react-native-qr-svg@1.5.0:
     resolution: {integrity: sha512-Pk/QeZ9OHiDgbhU0xSCoXAn5/EIbhVJ5nNpZQ5AJ+uoFbmkwLndPdQXE6deSsYAXY7mZReQuftPRR5N4iJd3WQ==}
     peerDependencies:
@@ -8685,6 +8700,8 @@ snapshots:
       keyv: 5.6.0
 
   '@keyv/serialize@1.1.1': {}
+
+  '@levischuck/tiny-cbor@0.3.6': {}
 
   '@lightsparkdev/core@1.5.2':
     dependencies:
@@ -15328,6 +15345,11 @@ snapshots:
       react: 19.1.4
       react-native: 0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)
       react-native-fit-image: 1.5.5
+
+  react-native-passkey@3.6.2(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4):
+    dependencies:
+      react: 19.1.4
+      react-native: 0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)
 
   react-native-qr-svg@1.5.0(react-native-svg@15.15.5(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4):
     dependencies:

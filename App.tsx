@@ -23,6 +23,8 @@ import { ToastContainer } from './components/Toast';
 import { PersistenceLoading } from './components/PersistenceLoading';
 import { AppLockGate } from './components/AppLockGate';
 import { KaleidoPayRecovery } from './components/KaleidoPayRecovery';
+import { PhoneWalletApprover } from './components/PhoneWalletApprover';
+import PhoneWalletScreen from './screens/PhoneWalletScreen';
 import { NwcPaymentApprover } from './components/NwcPaymentApprover';
 import ChatNotifications from './components/ChatNotifications';
 import PaymentNotifications from './components/PaymentNotifications';
@@ -81,7 +83,7 @@ import { WebRgbApprover } from './components/WebRgbApprover';
 import NWCConnectScreen from './screens/NWCConnectScreen';
 import RgbNodeScreen from './screens/RgbNodeScreen';
 
-type RootStackParamList = {
+export type RootStackParamList = {
   InitialLoad: undefined;
   WalletSetup: undefined;
   WalletRestore: undefined;
@@ -92,7 +94,7 @@ type RootStackParamList = {
   MerchantOffer: undefined;
   Receive: import('./utils/receive-routes').ReceiveParams | undefined;
   Bridge: undefined;
-  QRScanner: { mode?: 'payment' | 'contact'; returnScreen?: string } | undefined;
+  QRScanner: { mode?: 'payment' | 'contact' | 'browser'; returnScreen?: string } | undefined;
   Assets: { issue?: boolean } | undefined;
   DesignSystem: undefined;
   WalletReview: undefined;
@@ -111,6 +113,7 @@ type RootStackParamList = {
   AgentWallet: undefined;
   LightningAddress: undefined;
   WebRgbConnections: undefined;
+  PhoneWallet: { scanned?: string } | undefined;
   NWCConnect: { scanned?: string } | undefined;
   RgbNode: undefined;
   Chat: { pubkey: string; name?: string; npub?: string; avatarUrl?: string };
@@ -279,6 +282,7 @@ function AppNavigator() {
         {/* Settings and its pages: full screen, slide in sideways, back arrow. */}
         <Stack.Screen name="Settings" component={SettingsScreen} />
         <Stack.Screen name="Profile" component={ProfileScreen} />
+        <Stack.Screen name="PhoneWallet" component={PhoneWalletScreen} />
         <Stack.Screen name="NostrSettings" component={NostrSettingsScreen} />
         {features.prismo && <Stack.Screen name="MindSettings" component={MindSettingsScreen} />}
         {features.prismo && <Stack.Screen name="AgentWallet" component={AgentWalletScreen} />}
@@ -393,6 +397,7 @@ export default function App() {
                     <ToastContainer />
                     <NwcPaymentApprover />
                     <WebRgbApprover />
+                    <PhoneWalletApprover />
                     <AppLockGate />
                   </ThemeProvider>
                 </KaleidoThemeProvider>

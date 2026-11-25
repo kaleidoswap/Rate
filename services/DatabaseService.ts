@@ -2,6 +2,7 @@
 import * as SQLite from 'expo-sqlite';
 import * as SecureStore from 'expo-secure-store';
 import CryptoJS from 'crypto-js';
+import { phoneBrowserStorageKey } from './nwc/connectionStore';
 import { SecurityService } from './SecurityService';
 
 /** Wallet layers the app supports. Rows of any other type (e.g. a removed layer) are ignored on read. */
@@ -66,6 +67,7 @@ export class DatabaseService {
   private static instance: DatabaseService;
   private db: SQLite.SQLiteDatabase | null = null;
   private encryptionKey: string | null = null;
+  private browserReviewRecovery?: Promise<void>;
 
   public static getInstance(): DatabaseService {
     if (!DatabaseService.instance) {
@@ -163,6 +165,16 @@ export class DatabaseService {
         FOREIGN KEY (wallet_id) REFERENCES wallets(id) ON DELETE CASCADE
       )`,
 
+      // An RGB recipient may only be paid once, including after a restart or re-pair.
+      `CREATE TABLE IF NOT EXISTS browser_rgb_payments (
+        wallet_id INTEGER NOT NULL REFERENCES wallets(id) ON DELETE CASCADE,
+        client TEXT NOT NULL, payment_id TEXT NOT NULL, recipient_hash TEXT NOT NULL, invoice_hash TEXT NOT NULL,
+        state TEXT NOT NULL CHECK(state IN ('reviewing','pending','succeeded','failed','unknown')), txid TEXT,
+        PRIMARY KEY(wallet_id, client, payment_id)
+      )`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS browser_rgb_recipient ON browser_rgb_payments
+        (wallet_id,recipient_hash) WHERE state != 'failed'`,
+
       // App settings table
       `CREATE TABLE IF NOT EXISTS app_settings (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -185,6 +197,54 @@ export class DatabaseService {
     for (const query of queries) {
       await this.db.execAsync(query);
     }
+  }
+
+  // A process death dismisses every unconfirmed review. A submitted operation's
+  // outcome can still be unknown and remains reserved until reconciled.
+  private recoverBrowserReviews() {
+    if (!this.db) throw new Error('Database not initialized');
+    this.browserReviewRecovery ??= this.db.runAsync(
+      "UPDATE browser_rgb_payments SET state='failed' WHERE state='reviewing'",
+    ).then(() => undefined).catch(error => {
+      this.browserReviewRecovery = undefined;
+      throw error;
+    });
+    return this.browserReviewRecovery;
+  }
+
+  async browserPayment(walletId: number, client: string, id: string) {
+    if (!this.db) throw new Error('Database not initialized');
+    await this.recoverBrowserReviews();
+    return this.db.getFirstAsync<{ state: 'reviewing' | 'pending' | 'succeeded' | 'failed' | 'unknown'; txid: string | null; recipient_hash: string; invoice_hash: string }>(
+      'SELECT state,txid,recipient_hash,invoice_hash FROM browser_rgb_payments WHERE wallet_id=? AND client=? AND payment_id=?', walletId, client, id,
+    );
+  }
+
+  async claimBrowserPayment(walletId: number, client: string, id: string, recipientHash: string, invoiceHash: string) {
+    if (!this.db) throw new Error('Database not initialized');
+    await this.recoverBrowserReviews();
+    const result = await this.db.runAsync(
+      "INSERT OR IGNORE INTO browser_rgb_payments (wallet_id,client,payment_id,recipient_hash,invoice_hash,state) VALUES (?,?,?,?,?,'reviewing')",
+      walletId, client, id, recipientHash, invoiceHash,
+    );
+    return result.changes === 1;
+  }
+
+  async beginBrowserSubmission(walletId: number, client: string, id: string) {
+    if (!this.db) throw new Error('Database not initialized');
+    const result = await this.db.runAsync(
+      "UPDATE browser_rgb_payments SET state='pending' WHERE wallet_id=? AND client=? AND payment_id=? AND state='reviewing'",
+      walletId, client, id,
+    );
+    if (result.changes !== 1) throw new Error('Payment claim is no longer available.');
+  }
+
+  async finishBrowserPayment(walletId: number, client: string, id: string, state: 'failed' | 'succeeded' | 'unknown', txid: string | null = null) {
+    if (!this.db) throw new Error('Database not initialized');
+    await this.db.runAsync(
+      "UPDATE browser_rgb_payments SET state=?,txid=? WHERE wallet_id=? AND client=? AND payment_id=? AND state IN ('reviewing','pending')",
+      state, txid, walletId, client, id,
+    );
   }
 
   // Wallet operations
@@ -317,6 +377,7 @@ export class DatabaseService {
 
   async deleteWallet(walletId: number): Promise<void> {
     if (!this.db) throw new Error('Database not initialized');
+    await SecureStore.deleteItemAsync(phoneBrowserStorageKey(walletId));
     await this.db.runAsync('DELETE FROM wallets WHERE id = ?', [walletId]);
     // Also purge the seed from the secure enclave so nothing is left behind.
     await SecurityService.getInstance().deleteMnemonic(walletId);
