@@ -1,7 +1,7 @@
 import { runReceiveOperation as boundedBalanceRead } from '../utils/receive-session';
 import { WalletSetupPrompt } from '../components/WalletSetupPrompt';
 import { useAppSelector } from '../store/hooks';
-import { bitcoinByNetwork, btcBalanceFromProtocols, summarizeBitcoinBalances, withProtocolBalance } from '../utils/wallet-balance-summary';
+import { bitcoinByNetwork, btcBalanceFromProtocols, mainnetBitcoinByNetwork, summarizeBitcoinBalances, withProtocolBalance } from '../utils/wallet-balance-summary';
 import { loadBalanceSnapshot, saveBalanceSnapshot, snapshotWalletKey, type SnapshotChannel } from '../services/balanceSnapshot';
 import { receiveAccountChain } from '../services/kaleidoPay/connect';
 import { chainLabel } from '../utils/receive-routes';
@@ -117,6 +117,10 @@ function testNetworkLabels(): Partial<Record<AccountId, string>> {
     if (chain && chain !== 'mainnet') out[account] = chainLabel(chain);
   }
   return out;
+}
+
+function btcNetworkChains(testNetworks: ReturnType<typeof testNetworkLabels>) {
+  return { onchain: testNetworks.RGB, lightning: testNetworks.RGB, spark: testNetworks.SPARK, arkade: testNetworks.ARKADE, bark: testNetworks.BARK };
 }
 
 const EMPTY_BTC_BALANCE = {
@@ -484,11 +488,14 @@ export default function DashboardScreen({ navigation }: Props) {
       setBtcBalanceState(balance);
       setShowingSnapshot(false);
       const rgbIsLightning = typeof (rgbAdapter as any)?.walletType === 'function';
+      const testNetworks = testNetworkLabels();
+      const testProtocols = new Set(Object.keys(testNetworks));
       dispatch(setBtcBalance({
         ...balance,
-        summary: summarizeBitcoinBalances(byProtocol, channelsList, rgbIsLightning, new Set(Object.keys(testNetworkLabels()))),
+        summary: summarizeBitcoinBalances(byProtocol, channelsList, rgbIsLightning, testProtocols),
         networks: bitcoinByNetwork(byProtocol, channelsList, rgbIsLightning),
-        networkChains: { onchain: testNetworkLabels().RGB, lightning: testNetworkLabels().RGB, spark: testNetworkLabels().SPARK, arkade: testNetworkLabels().ARKADE, bark: testNetworkLabels().BARK },
+        mainnetNetworks: mainnetBitcoinByNetwork(byProtocol, channelsList, rgbIsLightning, testProtocols),
+        networkChains: btcNetworkChains(testNetworks),
       }));
       if (connectedCount > 0 && okBalances.length === connectedCount && offlineAccounts.length === 0) void saveBalanceSnapshot(walletAtStart, {
         byProtocol, assets, channels: channelsList, btcPriceUSD: btcPriceRef.current,
@@ -713,7 +720,7 @@ export default function DashboardScreen({ navigation }: Props) {
   const liteUsdAssetIds = liteUsdIdsOf(tokens);
   // Dollar stablecoins (and whatever Lite folds into its USD line) join the total
   // at $1, as sats at the live price — the extension's totalBTC = btc + tokenValueSats.
-  const tokenValueSats = priceTokensInSats(tokens, btcPriceUSD, liteUsdAssetIds);
+  const tokenValueSats = priceTokensInSats(tokens, btcPriceUSD, testProtocols);
   const liveTotalBalance = bitcoinSummary.total + tokenValueSats;
   const lastCompleteTotal = useRef<{ wallet: string | null; value: number } | null>(null);
   const balanceRefreshing = isConnecting || isUpdating || loading || pendingBalanceAccounts.length > 0;
@@ -735,13 +742,8 @@ export default function DashboardScreen({ navigation }: Props) {
   const showAssets = showBtcAsset || tokens.length > 0;
   const assetItems = buildAssetListItems({
     btcNetworks: btcEntry.networks,
-    btcMainnetNetworks: testProtocols.size > 0
-      ? bitcoinByNetwork(
-        Object.fromEntries(Object.entries(protocolBalances ?? {}).filter(([protocol]) => !testProtocols.has(protocol))),
-        testProtocols.has('RGB') ? [] : summaryChannels,
-        rgbBalanceIsLightning,
-      )
-      : undefined,
+    btcMainnetNetworks: mainnetBitcoinByNetwork(protocolBalances ?? {}, summaryChannels, rgbBalanceIsLightning, testProtocols),
+    btcNetworkChains: btcNetworkChains(testNetworks),
     btcAvailable: btcEntry.balance,
     showBtc: showBtcAsset,
     // Keep Lite's dollar row based on settled and channel amounts.
@@ -749,6 +751,7 @@ export default function DashboardScreen({ navigation }: Props) {
       ? { ...token, balance: assetTotalBaseUnits(token) } : token) : tokens,
     btcPriceUSD,
     liteUsdAssetIds: isLite ? liteUsdAssetIds : undefined,
+    testProtocols,
   });
 
   const renderChannelModal = () => (
@@ -979,7 +982,7 @@ export default function DashboardScreen({ navigation }: Props) {
             lastUpdatedAt={balanceUpdatedAt}
             testBtc={bitcoinSummary.test}
             testNetworks={testNetworks}
-            assetRows={breakdownAssetRows(tokens, liteUsdAssetIds, { foldDollars: isLite })}
+            assetRows={breakdownAssetRows(tokens, { foldedUsdAssetIds: isLite ? liteUsdAssetIds : undefined, testProtocols })}
             rgbBalanceIsLightning={rgbBalanceIsLightning}
             showLightning={hasChannelCapableNode}
             bitcoinUnit={bitcoinUnit}

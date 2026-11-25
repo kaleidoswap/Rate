@@ -2,12 +2,15 @@ jest.mock('@react-native-async-storage/async-storage', () => require('@react-nat
 const mockDownload = jest.fn(async (): Promise<any> => undefined);
 const mockWrites: Uint8Array[] = [];
 const mockManifest = jest.fn(async (): Promise<any> => undefined);
+const mockVersioned = jest.fn(async (): Promise<any> => null);
 const mockUpload = jest.fn(async (_c: any, _p: string, data: Uint8Array) => ({ version: 1, size: data.length, chunks: 1, sha256: 'x', createdAt: 123 }));
 jest.mock('./rgbVss', () => ({
   createVssClient: jest.fn(() => ({})),
   uploadBackupFile: (...a: any[]) => (mockUpload as any)(...a),
   downloadBackupFile: (...a: any[]) => (mockDownload as any)(...a),
   readBackupManifest: (...a: any[]) => (mockManifest as any)(...a),
+  readVersionedBackupManifest: (...a: any[]) => (mockVersioned as any)(...a),
+  RGB_BACKUP_CONFLICT: 'Another device changed this RGB backup.',
   vssSigningKey: () => new Uint8Array(32),
 }));
 jest.mock('./bark', () => ({ toFilesystemPath: (uri: string) => uri.replace('file://', '') }));
@@ -16,7 +19,7 @@ jest.mock('expo-file-system', () => ({
   File: class { exists = true; uri: string; constructor(d: any, n: string) { this.uri = `${d.uri}/${n}`; } async bytes() { return new Uint8Array([1, 2, 3]); } write(d: Uint8Array) { mockWrites.push(d); } delete() {} },
 }));
 import { createVssClient } from './rgbVss';
-import { restoreRgbFromCloud, rgbBackupStatus, rgbBackupStoreId, runRgbBackup, scheduleRgbBackup, setRgbBackupContext } from './rgbBackup';
+import { exportRgbBackupFile, resetRgbBackupLineage, restoreRgbFromCloud, rgbBackupStatus, rgbBackupStoreId, runRgbBackup, scheduleRgbBackup, setRgbBackupContext } from './rgbBackup';
 
 // Like rgb-lib: a backup clears "changed since the last backup".
 let changed = true;
@@ -25,6 +28,7 @@ const account = { backupRequired: jest.fn(async () => changed), backup: jest.fn(
 beforeEach(async () => {
   await require('@react-native-async-storage/async-storage').clear();
   jest.clearAllMocks();
+  mockVersioned.mockResolvedValue(null);
   changed = true;
   setRgbBackupContext({ mnemonic: 'seed', network: 'mutinynet', account: () => account });
 });
@@ -43,7 +47,7 @@ test('a change backs up once after the burst settles, to the wallet’s own stor
   // Mutinynet is rgb-lib's custom signet now: its own store, never the old SIGNET wallet's.
   expect(createVssClient).toHaveBeenCalledWith('https://vss.kaleidoswap.com/vss', rgbBackupStoreId('seed', 'mutinynet-signetcustom'), expect.any(Uint8Array));
   expect(createVssClient).not.toHaveBeenCalledWith(expect.anything(), rgbBackupStoreId('seed', 'mutinynet'), expect.anything());
-  expect(mockUpload).toHaveBeenCalledWith({}, 'rgb-backup-file', new Uint8Array([1, 2, 3]));
+  expect(mockUpload).toHaveBeenCalledWith({}, 'rgb-backup-file', new Uint8Array([1, 2, 3]), expect.any(Number), expect.objectContaining({ previous: null }));
   expect(rgbBackupStatus()).toEqual({ state: 'done', lastBackupAt: 123 });
 });
 
@@ -100,14 +104,14 @@ describe('restore from a file', () => {
   const { restoreRgbFromFile } = require('./rgbBackup');
   test('hands the file to rgb-lib with the seed-derived password', async () => {
     const restore = jest.fn(async () => undefined);
-    await restoreRgbFromFile({ mnemonic: 'seed', path: '/docs/kaleidoswap-rgb.rgbbackup', restore });
+    await restoreRgbFromFile({ mnemonic: 'seed', network: 'mutinynet', path: '/docs/kaleidoswap-rgb.rgbbackup', restore });
     expect(restore).toHaveBeenCalledWith('/docs/kaleidoswap-rgb.rgbbackup', expect.stringMatching(/^[0-9a-f]{64}$/));
   });
   test('explains the usual failures', async () => {
     const exists = jest.fn(async () => { throw Object.assign(new Error('x'), { code: 'WalletDirAlreadyExists' }); });
-    await expect(restoreRgbFromFile({ mnemonic: 'seed', path: '/f', restore: exists })).rejects.toThrow(/already has RGB data/);
+    await expect(restoreRgbFromFile({ mnemonic: 'seed', network: 'mutinynet', path: '/f', restore: exists })).rejects.toThrow(/already has RGB data/);
     const wrong = jest.fn(async () => { throw new Error('Invalid password'); });
-    await expect(restoreRgbFromFile({ mnemonic: 'seed', path: '/f', restore: wrong })).rejects.toThrow(/isn’t for this wallet/);
+    await expect(restoreRgbFromFile({ mnemonic: 'seed', network: 'mutinynet', path: '/f', restore: wrong })).rejects.toThrow(/isn’t for this wallet/);
   });
 });
 
@@ -174,4 +178,38 @@ test('remembers the successful upload time only for the matching wallet and netw
   setRgbBackupContext({ mnemonic: 'seed', network: 'mutinynet', account: () => account });
   await new Promise(resolve => setTimeout(resolve, 0));
   expect(rgbBackupStatus().lastBackupAt).toBe(123);
+});
+
+
+test('a stale device cannot rebase upon retry or silently overwrite after starting empty', async () => {
+  await runRgbBackup();
+  changed = true;
+  mockVersioned.mockResolvedValue({ manifest: { sha256: 'other', createdAt: 100 }, objectVersion: 2 });
+  await runRgbBackup();
+  await runRgbBackup(true);
+  expect(mockUpload).toHaveBeenCalledTimes(1);
+  expect(rgbBackupStatus()).toEqual(expect.objectContaining({ state: 'failed', error: expect.stringMatching(/Another device/) }));
+  await resetRgbBackupLineage('seed', 'mutinynet');
+  await runRgbBackup(true);
+  expect(mockUpload).toHaveBeenCalledTimes(1);
+});
+
+test('a local export keeps the cloud upload pending even after the native dirty flag clears', async () => {
+  await exportRgbBackupFile('seed', 'mutinynet', account, '/cache/export.rgbbackup');
+  expect(changed).toBe(false);
+  await runRgbBackup();
+  expect(mockUpload).toHaveBeenCalledTimes(1);
+});
+
+test('a lost response is recovered only when the cloud points at this device’s recorded candidate', async () => {
+  const candidate = { version: 2, size: 3, chunks: 1, sha256: 'pending', createdAt: 135 };
+  mockUpload.mockImplementationOnce(async (...args: any[]) => {
+    await args[4].recordCandidate(candidate);
+    throw new Error('Response interrupted');
+  });
+  await runRgbBackup();
+  mockVersioned.mockResolvedValue({ manifest: candidate, objectVersion: 1 });
+  await runRgbBackup();
+  expect(mockUpload).toHaveBeenCalledTimes(1);
+  expect(rgbBackupStatus()).toEqual({ state: 'done', lastBackupAt: 135 });
 });

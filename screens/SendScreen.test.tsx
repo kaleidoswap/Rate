@@ -31,7 +31,7 @@ jest.mock('../services/contactHistory', () => ({ contactKeyFor: (d: string) => d
 jest.mock('../services/kaleidoPay', () => ({
   paymentAccountNetwork: jest.fn(() => undefined), PaymentNotSentError: class extends Error {}, KALEIDOPAY_DEMO: false, prepareKaleidoPay: async () => {}, railLabel: (r: string) => r,
   decodeTarget: (text: string) => {
-    if (text === 'alice@example.com') return { kind: 'lnurl', raw: text, lnurl: text };
+    if (text === 'alice@example.com' || text === 'mario@getalby.com') return { kind: 'lnurl', raw: text, lnurl: text };
     if (text.startsWith('rgb:')) return { kind: 'rgb', raw: text, rgbInvoice: text };
     if (text.startsWith('spark1')) return { kind: 'spark', raw: text, sparkAddress: text };
     if (!text.startsWith('ln')) throw new Error('not payable');
@@ -93,6 +93,32 @@ test('anything that is not payable cannot be reviewed', async () => {
   expect(screen.getByText('Continue')).toBeTruthy();
   await act(async () => { fireEvent.press(screen.getByText('Continue')); });
   expect(previewInput).not.toHaveBeenCalled();
+});
+
+test('an amountless request stays dismissed and Continue can reopen the editor', async () => {
+  (quotePaymentOffers as jest.Mock).mockResolvedValue([offer('Spark', 1010)]);
+  const screen = render(<SendScreen navigation={nav()} route={{ params: { prefilledAddress: 'spark1recipient' } }} />);
+  await act(async () => {});
+  expect(screen.getByText('Amount to send')).toBeTruthy();
+  fireEvent.press(screen.getAllByLabelText('Close')[0]);
+  expect(screen.queryByText('Amount to send')).toBeNull();
+  expect(previewInput).not.toHaveBeenCalled();
+  fireEvent.press(screen.getByText('Continue'));
+  expect(screen.getByText('Amount to send')).toBeTruthy();
+  fireEvent.press(screen.getByLabelText('2'));
+  await act(async () => { fireEvent.press(screen.getByText('Set amount')); });
+  expect(previewInput).toHaveBeenCalledWith('spark1recipient', 2, 'test-uuid', { asset: undefined });
+});
+
+test('another valid payment request opens the dismissed amount editor again', async () => {
+  const screen = render(<SendScreen navigation={nav()} route={{ params: { prefilledAddress: 'spark1recipient' } }} />);
+  await act(async () => {});
+  fireEvent.press(screen.getAllByLabelText('Close')[0]);
+  fireEvent.changeText(screen.getByLabelText('Payment request'), 'spark');
+  fireEvent.changeText(screen.getByLabelText('Payment request'), 'spark1recipient');
+  expect(screen.queryByText('Amount to send')).toBeNull();
+  fireEvent.changeText(screen.getByLabelText('Payment request'), 'spark1another');
+  expect(screen.getByText('Amount to send')).toBeTruthy();
 });
 
 test('a request with no compatible account exposes the reason and opens Settings', async () => {
@@ -298,6 +324,9 @@ test('typing a name autocompletes contacts and jumps straight to the amount', as
   fireEvent.press(screen.getByLabelText('Pay Mario Rossi'));
   // Amount-first: the keypad opens without pressing Continue.
   expect(screen.getByText('Amount to send')).toBeTruthy();
+  fireEvent.press(screen.getAllByLabelText('Close')[0]);
+  expect(screen.queryByText('Amount to send')).toBeNull();
+  fireEvent.press(screen.getByText('Continue'));
   fireEvent.press(screen.getByLabelText('2'));
   await act(async () => { fireEvent.press(screen.getByText('Set amount')); });
   expect(previewInput).toHaveBeenCalledWith('mario@getalby.com', 2, 'test-uuid', { asset: undefined });

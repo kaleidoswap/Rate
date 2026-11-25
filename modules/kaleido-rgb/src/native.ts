@@ -14,6 +14,7 @@ export interface KaleidoRgbNative {
   /** The backup's name, or '' when there was no cache to move. */
   moveAsideLegacyBdkCache(args: Args): Promise<string>
   restoreBackup(args: Args): Promise<void>
+  restoreBackupForWallet?(args: Args): Promise<void>
   openWallet(args: Args): Promise<number>
   closeWallet(handle: number): Promise<void>
   /** Every wallet call: `(handle, args)`, run in order on that wallet's own thread. */

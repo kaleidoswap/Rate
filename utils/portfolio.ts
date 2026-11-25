@@ -8,22 +8,32 @@
  */
 import { formatAssetAmount, getAssetBaseUnitBalance, type AssetBalanceLike } from './assetAmount';
 import { getAssetFamily } from './account-routing';
+import { LIQUID_USDT_ASSET_ID } from '@kaleidorg/wallet-engine';
+import { USDB_TOKEN_ADDRESS } from './flashnet';
 
 const SATS_PER_BTC = 100_000_000;
 
-export const USD_STABLECOIN_TICKERS: ReadonlySet<string> = new Set(['USDT', 'USDC', 'USDB', 'DAI', 'BUSD', 'USD']);
-
 export interface PricedAsset {
   asset_id?: string;
+  protocol?: string | null;
   ticker?: string | null;
   name?: string | null;
   precision?: number | null;
   balance: AssetBalanceLike;
 }
 
-/** USD price of one whole token, or null when there is none. */
-export function tokenUsdPrice(ticker?: string | null): number | null {
-  return USD_STABLECOIN_TICKERS.has(String(ticker ?? '').trim().toUpperCase()) ? 1 : null;
+/** Only known mainnet assets receive a fixed USD price. Tickers are issuer-controlled. */
+export function tokenUsdPrice(
+  asset: Pick<PricedAsset, 'asset_id' | 'protocol'>,
+  testProtocols?: ReadonlySet<string>,
+): number | undefined {
+  const id = asset.asset_id?.toLowerCase();
+  if (!id) return undefined;
+  const protocol = asset.protocol?.toUpperCase() ?? getAssetFamily(id);
+  if (testProtocols?.has(protocol)) return undefined;
+  if (id === LIQUID_USDT_ASSET_ID && (!asset.protocol || protocol === 'LIQUID')) return 1;
+  if (protocol === 'SPARK' && id === USDB_TOKEN_ADDRESS.mainnet) return 1;
+  return undefined;
 }
 
 /** Whole-token amount of an asset row (base units divided by its precision). */
@@ -33,11 +43,10 @@ export function assetDisplayAmount(asset: PricedAsset): number {
 
 /**
  * Dollar value of an asset's balance, or undefined when it has no price.
- * `usdAssetIds` marks assets known to be dollars whatever their ticker says.
  */
-export function assetUsdValue(asset: PricedAsset, usdAssetIds?: ReadonlySet<string>): number | undefined {
-  const price = asset.asset_id && usdAssetIds?.has(asset.asset_id) ? 1 : tokenUsdPrice(asset.ticker);
-  if (price == null) return undefined;
+export function assetUsdValue(asset: PricedAsset, testProtocols?: ReadonlySet<string>): number | undefined {
+  const price = tokenUsdPrice(asset, testProtocols);
+  if (price === undefined) return undefined;
   const value = assetDisplayAmount(asset) * price;
   return Number.isFinite(value) ? value : undefined;
 }
@@ -48,11 +57,11 @@ export function usdToSats(usd: number, btcPriceUSD: number): number {
 }
 
 /** Total dollar value of the priced tokens. */
-export function tokenValueUsd(assets: readonly PricedAsset[], usdAssetIds?: ReadonlySet<string>): number {
+export function tokenValueUsd(assets: readonly PricedAsset[], testProtocols?: ReadonlySet<string>): number {
   let usd = 0;
   for (const asset of assets) {
     if (asset.asset_id === 'BTC') continue;
-    const value = assetUsdValue(asset, usdAssetIds);
+    const value = assetUsdValue(asset, testProtocols);
     if (value && value > 0) usd += value;
   }
   return usd;
@@ -62,9 +71,9 @@ export function tokenValueUsd(assets: readonly PricedAsset[], usdAssetIds?: Read
 export function tokenValueSats(
   assets: readonly PricedAsset[],
   btcPriceUSD: number,
-  usdAssetIds?: ReadonlySet<string>,
+  testProtocols?: ReadonlySet<string>,
 ): number {
-  return usdToSats(tokenValueUsd(assets, usdAssetIds), btcPriceUSD);
+  return usdToSats(tokenValueUsd(assets, testProtocols), btcPriceUSD);
 }
 
 /** "$1,234.50"; sub-cent values keep up to four decimals so they don't read as $0.00. */
@@ -88,18 +97,17 @@ export interface BreakdownAssetRow {
   usdValue?: number;
 }
 
-const NETWORK_LABEL: Record<string, string> = { RGB: 'RGB', SPARK: 'Spark', ARKADE: 'Arkade' };
+const NETWORK_LABEL: Record<string, string> = { RGB: 'RGB', SPARK: 'Spark', ARKADE: 'Arkade', LIQUID: 'Liquid' };
 
 /**
  * The non-bitcoin assets for the balance breakdown, one row each: priced ones
  * first (largest value first), then the unpriced ones, which carry no fiat value
- * and stay out of the total. Empty balances are left out. In Lite, the dollar
- * tokens fold into one "US Dollar" row, as in the asset list.
+ * and stay out of the total. Empty balances are left out. In Lite, the
+ * designated holding folds into one "US Dollar" row, as in the asset list.
  */
 export function breakdownAssetRows(
   assets: readonly PricedAsset[],
-  usdAssetIds?: ReadonlySet<string>,
-  opts: { foldDollars?: boolean } = {},
+  opts: { foldedUsdAssetIds?: ReadonlySet<string>; testProtocols?: ReadonlySet<string> } = {},
 ): BreakdownAssetRow[] {
   const rows: BreakdownAssetRow[] = [];
   let dollars = 0;
@@ -109,16 +117,16 @@ export function breakdownAssetRows(
     if (!id || id === 'BTC') continue;
     const baseUnits = getAssetBaseUnitBalance(asset.balance);
     if (!(baseUnits > 0)) continue;
-    const usdValue = assetUsdValue(asset, usdAssetIds);
-    if (opts.foldDollars && usdValue !== undefined) {
+    const usdValue = assetUsdValue(asset, opts.testProtocols);
+    if (opts.foldedUsdAssetIds?.has(id) && usdValue !== undefined) {
       dollars += usdValue;
       hasDollars = true;
       continue;
     }
-    const family = getAssetFamily(id, asset.ticker);
+    const family = asset.protocol?.toUpperCase() ?? getAssetFamily(id, asset.ticker);
     const ticker = String(asset.ticker ?? '').trim() || String(asset.name ?? '').trim() || 'Asset';
     rows.push({
-      key: id,
+      key: `${family}:${id}`,
       ticker,
       name: String(asset.name ?? '').trim() || ticker,
       network: family.toLowerCase(),

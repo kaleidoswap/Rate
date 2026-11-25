@@ -3,12 +3,13 @@ import { fireEvent, render } from '@testing-library/react-native';
 import AssetDetailScreen from './AssetDetailScreen';
 
 let mockAssets: any[] = [];
+let mockBtc: any;
 let mockLevel = 'lite';
 const mockWatch = jest.fn();
 const mockOpenUtxos = jest.fn();
 jest.mock('../store/hooks', () => ({
   useAppDispatch: () => jest.fn(),
-  useAppSelector: (f: any) => f({ assets: { rgbAssets: mockAssets }, settings: { disclosureLevel: mockLevel } }),
+  useAppSelector: (f: any) => f({ assets: { rgbAssets: mockAssets }, wallet: { btcBalance: mockBtc }, settings: { disclosureLevel: mockLevel } }),
 }));
 jest.mock('../hooks/useRgbTransferWatch', () => ({ useRgbTransferWatch: (args: any) => { mockWatch(args); return []; } }));
 jest.mock('../components/rgb/RgbWalletTools', () => ({ useRgbWalletSheets: () => ({ sheets: null, openUtxos: mockOpenUtxos, openIssue: jest.fn() }) }));
@@ -35,7 +36,7 @@ const usdt = {
 const open = (asset: any, navigation: any = { navigate: jest.fn(), goBack: jest.fn() }) =>
   ({ navigation, screen: render(<AssetDetailScreen navigation={navigation} route={{ params: { asset } }} />) });
 
-beforeEach(() => { mockAssets = []; mockLevel = 'lite'; mockWatch.mockClear(); mockMetadata = null; mockRights = 0; mockCaps = {}; });
+beforeEach(() => { mockAssets = []; mockBtc = undefined; mockLevel = 'lite'; mockWatch.mockClear(); mockMetadata = null; mockRights = 0; mockCaps = {}; });
 
 test('shows the balance in the asset unit, its breakdown and details', () => {
   const { screen } = open(usdt);
@@ -51,7 +52,9 @@ test('shows the balance in the asset unit, its breakdown and details', () => {
 test('actions open Receive and Send for this asset', () => {
   const { screen, navigation } = open(usdt);
   fireEvent.press(screen.getByLabelText('Receive USDT'));
-  expect(navigation.navigate).toHaveBeenCalledWith('Receive', { selectedAsset: { asset_id: usdt.asset_id, ticker: 'USDT', name: 'Tether USD', isRGB: true }, prefilledAssetTicker: 'USDT' });
+  expect(navigation.navigate).toHaveBeenCalledWith('Receive', {
+    selectedAsset: { asset_id: usdt.asset_id, ticker: 'USDT', name: 'Tether USD', isRGB: true, protocol: 'RGB' },
+  });
   fireEvent.press(screen.getByLabelText('Send USDT'));
   expect(navigation.navigate).toHaveBeenCalledWith('Send', expect.anything());
 });
@@ -60,6 +63,30 @@ test('bitcoin shows the unit and dollar value it was opened with, and no asset i
   const { screen } = open({ asset_id: 'BTC', ticker: 'BTC', name: 'Bitcoin', precision: 0, unit: 'sats', balance: { spendable: 125_430 }, fiatValue: 125.43 });
   expect(screen.getByLabelText('Balance 125,430 sats, about $125.43')).toBeTruthy();
   expect(screen.queryByText('Asset ID')).toBeNull();
+});
+
+test('Bitcoin detail uses the selected test network for the balance, fiat and breakdown', () => {
+  mockBtc = {
+    summary: { total: 15_000, available: 10_000, test: 125_000 },
+    networks: { spark: 125_000, onchain: 10_000 },
+    mainnetNetworks: { onchain: 10_000 },
+    networkChains: { spark: 'Regtest' },
+  };
+  const { screen } = open({ asset_id: 'BTC', ticker: 'BTC', name: 'Bitcoin', unit: 'sats', btcNetwork: 'spark', btcUnitUsd: 0.001,
+    balance: { spendable: 100_000 } });
+  expect(screen.getByLabelText('Balance 125,000 sats')).toBeTruthy();
+  expect(screen.getAllByText('Spark · Regtest (test)').length).toBeGreaterThan(0);
+  expect(screen.queryByText('Bitcoin on-chain')).toBeNull();
+  expect(screen.queryByText(/\$/)).toBeNull();
+});
+
+test('a live balance with the same ID on another protocol cannot replace the selected holding', () => {
+  mockAssets = [
+    { asset_id: usdt.asset_id, protocol: 'SPARK', balance: 22_000_000 },
+    { asset_id: usdt.asset_id, protocol: 'RGB', balance: 3_000_000 },
+  ];
+  const { screen } = open(usdt);
+  expect(screen.getByLabelText('Balance 3 USDT')).toBeTruthy();
 });
 
 test('a live balance from the store replaces the one it was opened with', () => {

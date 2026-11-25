@@ -23,6 +23,7 @@
 import { sha256 } from '@noble/hashes/sha2.js'
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js'
 import DatabaseService from '../DatabaseService'
+import { libNetwork } from './rgbLibRn'
 
 export const RGB_L1_ENABLED = process.env.EXPO_PUBLIC_RGB_L1 !== '0'
 
@@ -234,14 +235,16 @@ export async function claimRgbL1DataFolder(mnemonic: string, network: RgbL1Netwo
   return rgbL1DataFolder(mnemonic, network)
 }
 
-/** rgb-lib's `restoreBackup`, into `folder` (null: the original folder). */
-export function rgbL1NativeRestore(folder: string | null): (path: string, password: string) => Promise<void> {
-  return (path, password) => rgbLibModule().restoreBackup(path, password, folder)
-}
-
-/** A restore for `network`'s RGB data: picks (and claims) its folder right before rgb-lib writes it. */
+/** A checked restore for this wallet and network. A failed backup cannot claim the folder. */
 export function rgbL1Restorer(mnemonic: string, network: RgbL1Network): (path: string, password: string) => Promise<void> {
-  return async (path, password) => rgbL1NativeRestore(await claimRgbL1DataFolder(mnemonic, network))(path, password)
+  return async (path, password) => {
+    const lib = rgbLibModule()
+    const nativeNetwork = libNetwork(network)
+    const keys = await lib.restoreKeys(nativeNetwork, mnemonic)
+    const folder = await rgbL1DataFolder(mnemonic, network)
+    await lib.restoreBackupForWallet(path, password, folder, nativeNetwork, keys)
+    await claimRgbL1DataFolder(mnemonic, network)
+  }
 }
 
 /**

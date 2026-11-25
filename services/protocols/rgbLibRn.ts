@@ -547,7 +547,7 @@ export interface RgbLibRnHooks {
   clearStaleLock?: (subdir: string | null, masterFingerprint: string) => Promise<boolean>
   openTimeoutMs?: number
   /** Trusted proxy and chain options for the BFA wallet to validate transfers. */
-  onlineOptions?: RgbLib.OnlineOptions
+  onlineOptions?: (network: string) => RgbLib.OnlineOptions | undefined
 }
 
 /**
@@ -619,13 +619,14 @@ export function createRgbLibRnModule(load: () => RgbModule, hooks: RgbLibRnHooks
         }
       }
       const supportsBfa = lib.supportsBfa?.() === true
+      const onlineOptions = supportsBfa ? hooks.onlineOptions?.(this.options.network) : undefined
       const supportedSchemas = rgbLibSchemas(this.options.network, supportsBfa)
       const wallet = new lib.Wallet(keys, subdir ? { network, subdir, supportedSchemas } : { network, supportedSchemas })
       markOpen(key)
       const started = Date.now()
       try {
-        if (supportsBfa && hooks.onlineOptions) {
-          await wallet.goOnline(this.options.indexerUrl, false, undefined, hooks.onlineOptions)
+        if (onlineOptions) {
+          await wallet.goOnline(this.options.indexerUrl, false, undefined, onlineOptions)
         } else {
           await wallet.goOnline(this.options.indexerUrl)
         }

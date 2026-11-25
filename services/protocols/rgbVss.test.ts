@@ -1,7 +1,7 @@
 import { secp256k1 } from '@noble/curves/secp256k1';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { hexToBytes, utf8ToBytes } from '@noble/hashes/utils.js';
-import { VSS_CHUNK_SIZE, createVssClient, decodeGetObject, downloadBackupFile, encodePutObjects, uploadBackupFile, vssAuthToken, vssSigningKey, type VssClient } from './rgbVss';
+import { VSS_CHUNK_SIZE, RGB_BACKUP_CONFLICT, RGB_BACKUP_LEGACY_CONFLICT, createVssClient, decodeGetObject, downloadBackupFile, encodePutObjects, uploadBackupFile, vssAuthToken, vssSigningKey, type VssClient } from './rgbVss';
 
 const MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
 
@@ -27,6 +27,17 @@ test('putObjects encodes store id and items with version -1 as int64', () => {
   expect(Array.from(decodeGetObject(new Uint8Array([0x12, 4, 0x1a, 2, 9, 8]))!)).toEqual([9, 8]);
 });
 
+test('a versioned read supplies the server version used for a conditional write', async () => {
+  const response = new Uint8Array([0x12, 6, 0x10, 7, 0x1a, 2, 9, 8]);
+  const fetchImpl: any = async () => ({ ok: true, status: 200, arrayBuffer: async () => response.buffer });
+  const client = createVssClient('https://vss.example', 's', vssSigningKey(MNEMONIC), fetchImpl);
+  const object = await client.getVersioned('k');
+  expect(object).toEqual({ value: new Uint8Array([9, 8]), version: 7 });
+  expect(Array.from(encodePutObjects('s', [{ key: 'k', value: object!.value, version: object!.version }]))).toEqual([
+    0x0a, 1, 0x73, 0x1a, 9, 0x0a, 1, 0x6b, 0x10, 7, 0x1a, 2, 9, 8,
+  ]);
+});
+
 test('a backup uploads its chunks before the manifest, signed, to the store', async () => {
   const calls: { url: string; auth: string; body: Uint8Array }[] = [];
   const fetchImpl: any = async (url: string, init: any) => {
@@ -37,11 +48,13 @@ test('a backup uploads its chunks before the manifest, signed, to the store', as
   const data = new Uint8Array(VSS_CHUNK_SIZE + 10).fill(7);
   const manifest = await uploadBackupFile(client, 'rgb-backup-file', data, 42);
   expect(manifest).toEqual(expect.objectContaining({ size: VSS_CHUNK_SIZE + 10, chunks: 2, createdAt: 42 }));
-  expect(calls.map((c) => c.url)).toEqual(Array(3).fill('https://vss.example/vss/putObjects'));
-  const keys = calls.map((c) => Buffer.from(c.body).toString('latin1'));
+  const writes = calls.filter(call => call.url.endsWith('/putObjects'));
+  expect(writes).toHaveLength(4);
+  const keys = writes.map((c) => Buffer.from(c.body).toString('latin1'));
   expect(keys[0]).toContain(`rgb-backup-file/versions/${manifest.sha256}/chunk/0`);
   expect(keys[1]).toContain(`rgb-backup-file/versions/${manifest.sha256}/chunk/1`);
-  expect(keys[2]).toContain('rgb-backup-file/manifest');
+  expect(keys[2]).toContain(`rgb-backup-file/versions/${manifest.sha256}/manifest`);
+  expect(keys[3]).toContain('rgb-backup-file/current');
   expect(calls.every((c) => /^[0-9a-f]{194}\d+$/.test(c.auth))).toBe(true);
 });
 
@@ -57,6 +70,7 @@ test('a download is the uploaded file, checked against its manifest', async () =
   const client: VssClient = {
     async put(items) { for (const i of items) store.set(i.key, i.value); },
     async get(key) { return store.get(key); },
+    async getVersioned(key) { const value = store.get(key); return value && { value, version: 1 }; },
   };
   expect(await downloadBackupFile(client, 'rgb-backup-file')).toBeUndefined();
   const data = new Uint8Array(VSS_CHUNK_SIZE * 2 + 3).map((_, i) => i % 251);
@@ -77,6 +91,7 @@ test('a download is the uploaded file, checked against its manifest', async () =
   const client: VssClient = {
     async put(items) { if (--remaining < 0) throw new Error('offline'); for (const item of items) store.set(item.key, item.value); },
     async get(key) { return store.get(key); },
+    async getVersioned(key) { const value = store.get(key); return value && { value, version: 1 }; },
   };
   const original = new Uint8Array(VSS_CHUNK_SIZE + 1).fill(1);
   await uploadBackupFile(client, 'backup', original);
@@ -88,7 +103,7 @@ test('a download is the uploaded file, checked against its manifest', async () =
 test('legacy v1 backups remain readable', async () => {
   const data = new Uint8Array([4, 5]);
   const manifest = { version: 1, size: 2, chunks: 1, sha256: Buffer.from(sha256(data)).toString('hex'), createdAt: 1 };
-  const client: VssClient = { put: async () => {}, get: async key => key.endsWith('/manifest') ? utf8ToBytes(JSON.stringify(manifest)) : key === 'old/chunk/0' ? data : undefined };
+  const client: VssClient = { put: async () => {}, getVersioned: async () => undefined, get: async key => key.endsWith('/manifest') ? utf8ToBytes(JSON.stringify(manifest)) : key === 'old/chunk/0' ? data : undefined };
   expect((await downloadBackupFile(client, 'old'))?.data).toEqual(data);
 });
 
@@ -103,4 +118,60 @@ test('a stalled backup request times out and aborts instead of returning no back
     await pending;
     expect(signal?.aborted).toBe(true);
   } finally { jest.useRealTimers(); }
+});
+
+
+test('a late upload loses the CAS, and a later legacy write pauses restore with both snapshots intact', async () => {
+  const objects = new Map<string, { value: Uint8Array; version: number }>();
+  const client: VssClient = {
+    async put(items) {
+      for (const item of items) {
+        const current = objects.get(item.key);
+        if (item.version !== undefined && item.version !== (current?.version ?? 0)) throw new Error(RGB_BACKUP_CONFLICT);
+        objects.set(item.key, { value: item.value, version: (item.version ?? 0) + 1 });
+      }
+    },
+    async get(key) { return objects.get(key)?.value; },
+    async getVersioned(key) { return objects.get(key); },
+  };
+  const legacyData = new Uint8Array([1]);
+  const legacy = { version: 1, size: 1, chunks: 1, sha256: Buffer.from(sha256(legacyData)).toString('hex'), createdAt: 1 };
+  await client.put([
+    { key: 'backup/manifest', value: utf8ToBytes(JSON.stringify(legacy)) },
+    { key: 'backup/chunk/0', value: legacyData },
+  ]);
+  let allowStale!: () => void;
+  let staleStarted!: () => void;
+  const waiter = new Promise<void>(resolve => { allowStale = resolve; });
+  const staleWriting = new Promise<void>(resolve => { staleStarted = resolve; });
+  const stale = uploadBackupFile({
+    ...client,
+    async put(items) {
+      if (items.some(item => item.key === 'backup/current')) {
+        staleStarted();
+        await waiter;
+      }
+      await client.put(items);
+    },
+  }, 'backup', new Uint8Array([2]), 2);
+  const staleFails = expect(stale).rejects.toThrow(RGB_BACKUP_CONFLICT);
+  await staleWriting;
+  const newest = new Uint8Array([3]);
+  await uploadBackupFile(client, 'backup', newest, 3);
+  allowStale();
+  await staleFails;
+
+  const oldClientData = new Uint8Array([99]);
+  const oldClientManifest = { ...legacy, createdAt: 4, sha256: Buffer.from(sha256(oldClientData)).toString('hex') };
+  const priorCurrent = await client.get('backup/current');
+  expect((await downloadBackupFile(client, 'backup'))?.data).toEqual(newest);
+  await client.put([
+    { key: 'backup/manifest', value: utf8ToBytes(JSON.stringify(oldClientManifest)) },
+    { key: 'backup/chunk/0', value: oldClientData },
+  ]);
+  await expect(downloadBackupFile(client, 'backup')).rejects.toThrow(RGB_BACKUP_LEGACY_CONFLICT);
+  await expect(uploadBackupFile(client, 'backup', new Uint8Array([88]))).rejects.toThrow(RGB_BACKUP_LEGACY_CONFLICT);
+  expect(await client.get('backup/current')).toEqual(priorCurrent);
+  expect(await client.get('backup/manifest')).toEqual(utf8ToBytes(JSON.stringify(oldClientManifest)));
+  expect(await client.get(`backup/versions/${legacy.sha256}/chunk/0`)).toEqual(legacyData);
 });

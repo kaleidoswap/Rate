@@ -63,20 +63,32 @@ export default function AssetsScreen({ navigation, route }: Props) {
 
   // Lite folds its dollar assets into one USD line on the dashboard; do the same here.
   const liteUsdAssetIds = useMemo(() => (isLite ? liteUsdIdsOf(tokens) : undefined), [tokens, isLite]);
+  const testProtocols = useMemo(() => {
+    const { onchain, lightning, spark, arkade, bark } = btcBalance?.networkChains ?? {};
+    return new Set([
+      ...(onchain || lightning ? ['RGB'] : []),
+      ...(spark ? ['SPARK'] : []),
+      ...(arkade ? ['ARKADE'] : []),
+      ...(bark ? ['BARK'] : []),
+    ]);
+  }, [btcBalance?.networkChains]);
 
   const items = useMemo(() => buildAssetListItems({
     btcNetworks: btc.networks,
+    btcMainnetNetworks: btcBalance?.mainnetNetworks,
+    btcNetworkChains: btcBalance?.networkChains,
     btcAvailable: btc.balance,
     // Before any balance is known, bitcoin isn't listed as zero.
     showBtc: btcBalance != null,
     assets: tokens,
     btcPriceUSD,
     liteUsdAssetIds,
-  }), [btc, btcBalance, tokens, btcPriceUSD, liteUsdAssetIds]);
+    testProtocols,
+  }), [btc, btcBalance, tokens, btcPriceUSD, liteUsdAssetIds, testProtocols]);
 
   // The headline matches the dashboard's: bitcoin held plus dollar tokens at $1.
   const totalSats = (btcBalance?.summary?.total ?? btcBalance?.vanilla?.spendable ?? 0)
-    + tokenValueSats(tokens, btcPriceUSD, liteUsdAssetIds);
+    + tokenValueSats(tokens, btcPriceUSD, testProtocols);
   const total = formatDisplayAmount(totalSats);
 
   // A refresh ends when the dashboard writes new balances (or after a while).

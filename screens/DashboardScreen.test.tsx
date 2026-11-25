@@ -189,7 +189,7 @@ describe('fast first balance', () => {
   });
 });
 
-test('shows the grouped cached portfolio inline and opens details on the selected account', async () => {
+test('shows the cached portfolio inline and opens details on the selected account', async () => {
   mockLevel = 'advanced';
   const wallet = { id: 9, created_at: 1, encrypted_mnemonic: 'test-only-seed' };
   mockState.wallet.activeWallet = wallet;
@@ -206,7 +206,8 @@ test('shows the grouped cached portfolio inline and opens details on the selecte
   });
   const navigate = jest.fn();
   const screen = render(<DashboardScreen navigation={{ navigate, getParent: () => ({ navigate }) }} />);
-  await waitFor(() => expect(screen.getByLabelText(/^Tether USD, 40 USDT/)).toBeTruthy());
+  await waitFor(() => expect(screen.getByLabelText(/^Tether USD, 30 USDT, on RGB/)).toBeTruthy());
+  expect(screen.getByLabelText(/^Tether USD, 10 USDT, on Spark/)).toBeTruthy();
   expect(screen.getAllByText(/^(Balance ready|Assets|Insights)$/).map(text => text.props.children))
     .toEqual(['Balance ready', 'Assets', 'Insights']);
   fireEvent.changeText(screen.getByLabelText('Search assets'), 'tether');

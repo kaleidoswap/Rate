@@ -26,9 +26,11 @@ import {
   formatRecordAmount,
   type CrossChainRecord,
 } from '../utils/crosschain-history';
-import { chainLabel } from '../utils/orchestra-ui';
+import { chainLabel, formatSmallUnits } from '../utils/orchestra-ui';
 import { isPreimage } from '../utils/payment-proofs';
 import { isExpiredRgbInvoice, normalizeRgbTransfers, type RgbTransfer } from '../utils/rgb-wallet';
+import { isBtcTicker } from '../utils/swap-model';
+import type { SwapExecution } from '../store/slices/swapSlice';
 
 export type ActivityLayer = 'L1' | 'RGB-L1' | 'LN' | 'RGB-LN' | 'Spark' | 'Arkade' | 'Bark' | 'Bark Signet' | 'Swap' | 'Cross-chain';
 
@@ -93,17 +95,9 @@ export interface AssetMeta {
   protocol?: 'RGB' | 'SPARK' | 'ARKADE';
 }
 
-export interface SwapActivityInput {
-  rfq_id: string;
-  status: 'completed' | 'pending' | 'failed' | 'whitelisted' | 'executing';
-  created_at: number;
-  txid?: string;
-  from_asset?: string;
-  to_asset?: string;
-  from_amount?: number;
-  to_amount?: number;
-  venue?: 'kaleidoswap' | 'flashnet';
-}
+export type SwapActivityInput = Pick<SwapExecution,
+  'rfq_id' | 'status' | 'created_at' | 'txid' | 'from_asset' | 'to_asset'
+  | 'from_amount' | 'to_amount' | 'btc_amount_unit' | 'to_amount_estimated' | 'executed_token_output' | 'venue'>;
 
 /** An Electrum swap that paid an on-chain address (see services/kaleidoPay/activity.ts). */
 export interface SwapAttemptActivityInput {
@@ -421,15 +415,26 @@ function protocolItems(proto: 'SPARK' | 'ARKADE' | 'BARK', txs: any[], network: 
 }
 
 function swapItems(swaps: SwapActivityInput[]): ActivityItem[] {
-  const trimNum = (n: number) => parseFloat(n.toFixed(8)).toString();
-  // BTC swap legs are stored in satoshis — label them "sats", not "BTC", so a
-  // 801-sat leg reads "801 sats" instead of the misleading "801 BTC".
-  const legTicker = (asset?: string | null) => (asset === 'BTC' ? 'sats' : asset || '');
-  const fmtLeg = (amt: number, asset?: string | null) => `${trimNum(amt)} ${legTicker(asset)}`.trim();
   return swaps.map((swap) => {
-    const hasLegs =
-      swap.from_asset != null && swap.to_asset != null &&
-      swap.from_amount != null && swap.to_amount != null;
+    const leg = (asset: string | undefined, amount: number | undefined, estimated = false, exactValue?: string) => {
+      const btc = isBtcTicker(asset ?? '');
+      // Legacy BTC amounts inherited the display setting at execution time.
+      // The saved value alone cannot tell us whether it meant BTC or sats.
+      const known = typeof amount === 'number' && Number.isFinite(amount) && (!btc || swap.btc_amount_unit === 'sats');
+      const value = known
+        ? `${estimated ? '≈ ' : ''}${exactValue ?? amount.toLocaleString('en-US', { useGrouping: false, maximumFractionDigits: btc ? 3 : 18 })}`
+        : '';
+      const ticker = btc && known ? 'sats' : asset ?? '';
+      return { value, ticker, label: known ? `${value} ${ticker}`.trim() : `${ticker} (amount unavailable)` };
+    };
+    const from = leg(swap.from_asset, swap.from_amount);
+    const exactOutput = swap.executed_token_output;
+    const exactValue = exactOutput && !isBtcTicker(swap.to_asset ?? '') && typeof exactOutput.raw === 'string' &&
+      /^\d{1,20}$/.test(exactOutput.raw) &&
+      Number.isInteger(exactOutput.precision) && exactOutput.precision >= 0 && exactOutput.precision <= 18
+      ? formatSmallUnits(exactOutput.raw, exactOutput.precision) : undefined;
+    const to = leg(swap.to_asset, swap.to_amount, swap.to_amount_estimated ?? swap.venue === 'flashnet', exactValue);
+    const hasLegs = !!swap.from_asset && !!swap.to_asset;
     const venueName = swap.venue === 'flashnet' ? 'Flashnet Swap' : 'Atomic Swap';
     return {
       id: `swap-${swap.rfq_id}`,
@@ -439,11 +444,11 @@ function swapItems(swaps: SwapActivityInput[]): ActivityItem[] {
       // Full route lives in the subtitle (assetName); the right-hand column shows
       // only the *received* leg, so the ticker is no longer duplicated.
       assetName: hasLegs
-        ? `${fmtLeg(swap.from_amount as number, swap.from_asset)} → ${fmtLeg(swap.to_amount as number, swap.to_asset)}`
+        ? `${from.label} → ${to.label}`
         : venueName,
-      assetTicker: hasLegs ? legTicker(swap.to_asset) : '',
+      assetTicker: hasLegs ? to.ticker : '',
       assetPrecision: 0,
-      amount: hasLegs ? trimNum(swap.to_amount as number) : '',
+      amount: hasLegs ? to.value : '',
       status: normalizeSwapStatus(swap.status),
       timestamp: swap.created_at,
       txid: swap.txid || swap.rfq_id,

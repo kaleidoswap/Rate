@@ -1,15 +1,14 @@
 /**
- * The "all assets" list: one row per asset, merged across the networks it lives
- * on (the extension's buildDashboardAssetItems), with network filters and search.
+ * One row per contract and network, with network filters and search.
  *
  * Bitcoin is one row whose "All" figure is the dashboard's BTC row (available
- * bitcoin); a network filter shows that network's share instead. Tokens with the
- * same ticker on several networks (e.g. USDT on RGB and Spark) are one row whose
- * amount is the sum. Pure: the screen passes in redux data.
+ * bitcoin); a network filter shows that network's share instead. The verified
+ * Lite USD balance is folded explicitly. Tickers are display labels.
  */
 import { getAssetBaseUnitBalance, type AssetBalanceLike } from './assetAmount';
 import { tokenUsdPrice } from './portfolio';
 import { getAssetFamily } from './account-routing';
+import { shortContractId } from './rgb-receive';
 import type { BtcNetwork } from './wallet-balance-summary';
 
 export type AssetNetwork = BtcNetwork | 'rgb';
@@ -44,6 +43,7 @@ export interface AssetHolding {
   amount: number;
   /** Bitcoin's fiat value on this network, excluding test funds. */
   btcUsdValue?: number;
+  chain?: string;
   /** The record behind it (for the detail screen); undefined for bitcoin. */
   token?: AssetListToken;
 }
@@ -59,6 +59,8 @@ export interface AssetListItem {
   networks: AssetNetwork[];
   holdings: AssetHolding[];
   isBtc: boolean;
+  btcNetwork?: BtcNetwork;
+  assetIdLabel?: string;
   /** Dollar value of `amount`, when the asset has a price. */
   usdValue?: number;
   /** Dollars per unit of `amount` (per sat for bitcoin), when priced. */
@@ -71,6 +73,7 @@ export interface BuildAssetListArgs {
   btcNetworks?: Partial<Record<BtcNetwork, number>>;
   /** Mainnet portion of each Bitcoin network balance when test funds are present. */
   btcMainnetNetworks?: Partial<Record<BtcNetwork, number>>;
+  btcNetworkChains?: Partial<Record<BtcNetwork, string>>;
   /** The dashboard's BTC row figure in sats (summary.available). */
   btcAvailable: number;
   /** Show bitcoin at all (false before any balance is known and nothing is held). */
@@ -79,6 +82,7 @@ export interface BuildAssetListArgs {
   btcPriceUSD: number;
   /** Assets the dashboard folds into its "USD" line (Lite). */
   liteUsdAssetIds?: ReadonlySet<string>;
+  testProtocols?: ReadonlySet<string>;
 }
 
 const BTC_NETWORK_ORDER: BtcNetwork[] = ['onchain', 'lightning', 'spark', 'arkade', 'bark'];
@@ -94,6 +98,22 @@ export function networkOfProtocol(protocol?: string | null): AssetNetwork {
 }
 
 const wholeAmount = (t: AssetListToken) => getAssetBaseUnitBalance(t.balance) / Math.pow(10, t.precision || 0);
+
+function tokenItem(holding: AssetHolding & { token: AssetListToken }, unitUsd?: number): AssetListItem {
+  const { token, network, amount } = holding;
+  return {
+    key: `asset:${network}:${token.asset_id}`,
+    ticker: token.ticker,
+    name: token.name || token.ticker,
+    precision: token.precision || 0,
+    amount,
+    networks: [network],
+    holdings: [holding],
+    isBtc: false,
+    icon: token.icon,
+    ...priced(amount, unitUsd),
+  };
+}
 
 export function buildAssetListItems(args: BuildAssetListArgs): AssetListItem[] {
   const items: AssetListItem[] = [];
@@ -112,8 +132,10 @@ export function buildAssetListItems(args: BuildAssetListArgs): AssetListItem[] {
       networks: held.length ? held : present,
       holdings: present.map((network) => {
         const amount = btcNetworks[network] ?? 0;
-        const mainnetSats = args.btcMainnetNetworks ? args.btcMainnetNetworks[network] ?? 0 : amount;
-        return { network, amount, btcUsdValue: btcUnitUsd === undefined ? undefined : mainnetSats * btcUnitUsd };
+        const mainnetSats = args.btcMainnetNetworks ? args.btcMainnetNetworks[network] ?? 0
+          : args.btcNetworkChains?.[network] ? 0 : amount;
+        return { network, amount, chain: args.btcNetworkChains?.[network],
+          btcUsdValue: btcUnitUsd === undefined ? undefined : mainnetSats * btcUnitUsd };
       }),
       isBtc: true,
       ...priced(Math.max(0, args.btcAvailable), btcUnitUsd),
@@ -121,10 +143,26 @@ export function buildAssetListItems(args: BuildAssetListArgs): AssetListItem[] {
   }
 
   // Lite's single USD line, as on the dashboard.
-  const liteUsd = args.assets.filter((a) => args.liteUsdAssetIds?.has(a.asset_id));
-  const rest = args.assets.filter((a) => a.asset_id !== 'BTC' && !args.liteUsdAssetIds?.has(a.asset_id));
-  if (liteUsd.length) {
-    const holdings = liteUsd.map((token) => ({ network: networkOfProtocol(token.protocol), amount: wholeAmount(token), token }));
+  const rest: AssetListItem[] = [];
+  const holdings: AssetHolding[] = [];
+  const tickerCounts = new Map<string, number>();
+  const seen = new Set<string>();
+  for (const token of args.assets) {
+    if (token.asset_id === 'BTC') continue;
+    const holding = { network: networkOfProtocol(token.protocol), amount: wholeAmount(token), token };
+    const price = tokenUsdPrice(token, args.testProtocols);
+    const item = tokenItem(holding, price);
+    if (seen.has(item.key)) continue;
+    seen.add(item.key);
+    if (price === 1 && args.liteUsdAssetIds?.has(token.asset_id)) {
+      holdings.push(holding);
+      continue;
+    }
+    const ticker = item.ticker.trim().toUpperCase();
+    tickerCounts.set(ticker, (tickerCounts.get(ticker) ?? 0) + 1);
+    rest.push(item);
+  }
+  if (holdings.length) {
     const amount = holdings.reduce((s, h) => s + h.amount, 0);
     if (amount > 0) {
       items.push({
@@ -134,38 +172,11 @@ export function buildAssetListItems(args: BuildAssetListArgs): AssetListItem[] {
     }
   }
 
-  const byTicker = new Map<string, AssetListItem>();
-  for (const token of rest) {
-    const tickerKey = String(token.ticker || token.asset_id).trim().toUpperCase();
-    const holding: AssetHolding = { network: networkOfProtocol(token.protocol), amount: wholeAmount(token), token };
-    const existing = byTicker.get(tickerKey);
-    if (!existing) {
-      const item: AssetListItem = {
-        key: `asset:${tickerKey}`,
-        ticker: token.ticker,
-        name: token.name || token.ticker,
-        precision: token.precision || 0,
-        amount: holding.amount,
-        networks: [holding.network],
-        holdings: [holding],
-        isBtc: false,
-        icon: token.icon,
-      };
-      byTicker.set(tickerKey, item);
-      items.push(item);
-      continue;
+  for (const item of rest) {
+    if ((tickerCounts.get(item.ticker.trim().toUpperCase()) ?? 0) > 1) {
+      item.assetIdLabel = shortContractId(item.holdings[0].token!.asset_id);
     }
-    existing.holdings.push(holding);
-    existing.amount += holding.amount;
-    existing.precision = Math.max(existing.precision, token.precision || 0);
-    if (!existing.networks.includes(holding.network)) existing.networks.push(holding.network);
-    existing.icon = existing.icon ?? token.icon;
-  }
-  for (const item of byTicker.values()) {
-    // The name follows the largest holding.
-    const top = dominantHolding(item)?.token;
-    if (top?.name) item.name = top.name;
-    Object.assign(item, priced(item.amount, tokenUsdPrice(item.ticker) ?? undefined));
+    items.push(item);
   }
   return items;
 }
@@ -190,6 +201,9 @@ export function assetDetailForItem(item: AssetListItem, bitcoinUnit: 'BTC' | 'sa
       asset_id: 'BTC', ticker: 'BTC', name: 'Bitcoin', isRGB: false, protocol: 'BTC' as const,
       precision: bitcoinUnit === 'BTC' ? 8 : 0, unit: bitcoinUnit,
       balance: { spendable: item.amount }, fiatValue: item.usdValue,
+      btcNetwork: item.btcNetwork,
+      btcUnitUsd: item.unitUsd,
+      locations: item.holdings.map(h => ({ label: btcNetworkLabel(h.network, h.chain), amount: h.amount, unit: 'sats' })),
     };
   }
   const holding = dominantHolding(item);
@@ -206,6 +220,7 @@ export function assetDetailForItem(item: AssetListItem, bitcoinUnit: 'BTC' | 'sa
     protocol: family,
     locations: item.holdings.map(h => ({ label: networkLabel(h.network), amount: h.amount, unit: item.ticker })),
     fiatValue: item.unitUsd === undefined ? undefined : holding.amount * item.unitUsd,
+    unitUsd: item.unitUsd,
   };
 }
 
@@ -221,13 +236,22 @@ export function availableAssetFilters(items: readonly AssetListItem[]): AssetFil
  * that network's amount (and value); rows with nothing there are dropped.
  */
 export function filterAssetItems(items: readonly AssetListItem[], filter: AssetFilter, query = ''): AssetListItem[] {
-  const q = query.trim().toLowerCase();
-  const matches = (item: AssetListItem) =>
-    !q || item.ticker.toLowerCase().includes(q) || item.name.toLowerCase().includes(q)
-    || item.holdings.some((h) => h.token?.asset_id.toLowerCase() === q);
+  const typedId = query.trim();
+  const q = typedId.toLowerCase();
+  const matchesId = (h: AssetHolding): h is AssetHolding & { token: AssetListToken } => {
+    const id = h.token?.asset_id;
+    return !!id && (id.startsWith('rgb:') ? id === typedId : id.toLowerCase() === q);
+  };
+  const exactSearch = !!q && items.some((item) => item.holdings.some(matchesId));
   const out: AssetListItem[] = [];
   for (const item of items) {
-    if (!matches(item)) continue;
+    if (exactSearch) {
+      const matching = item.holdings.filter(matchesId).filter(h => filter === 'all' || h.network === filter);
+      if (matching.length && item.key === LITE_USD_KEY) out.push(...matching.map(h => tokenItem(h, item.unitUsd)));
+      else if (matching.length) out.push(item);
+      continue;
+    }
+    if (q && !item.ticker.toLowerCase().includes(q) && !item.name.toLowerCase().includes(q)) continue;
     if (filter === 'all') { out.push(item); continue; }
     const holdings = item.holdings.filter((h) => h.network === filter);
     if (!holdings.length) continue;
@@ -237,6 +261,7 @@ export function filterAssetItems(items: readonly AssetListItem[], filter: AssetF
       amount,
       holdings,
       networks: [filter],
+      btcNetwork: item.isBtc && filter !== 'rgb' ? filter : undefined,
       usdValue: item.isBtc
         ? holdings.reduce((sum, holding) => sum + (holding.btcUsdValue ?? 0), 0) || undefined
         : item.unitUsd !== undefined ? amount * item.unitUsd : undefined,
@@ -256,6 +281,11 @@ const NETWORK_LABELS: Record<AssetNetwork, string> = {
 
 export function networkLabel(network: AssetNetwork): string {
   return NETWORK_LABELS[network] ?? network;
+}
+
+export function btcNetworkLabel(network: AssetNetwork, testChain?: string): string {
+  const label = network === 'onchain' ? 'Bitcoin on-chain' : networkLabel(network);
+  return testChain ? `${label} · ${testChain} (test)` : label;
 }
 
 /** A whole-token amount with thousands separators and at most `precision` decimals: 1234.5 → "1,234.5". */

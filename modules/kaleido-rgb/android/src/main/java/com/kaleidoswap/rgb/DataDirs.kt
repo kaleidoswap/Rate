@@ -1,6 +1,11 @@
 package com.kaleidoswap.rgb
 
+import com.utexo.BitcoinNetwork
+import com.utexo.RgbLibException
+import com.utexo.WitnessVersion
 import java.io.File
+import java.util.UUID
+import org.json.JSONObject
 
 /**
  * Where rgb-lib keeps wallets: the app's files folder (the folder react-native-rgb
@@ -30,6 +35,50 @@ object DataDirs {
   fun walletDir(base: File, subdir: String?, fingerprint: String): File {
     if (!fingerprintPattern.matches(fingerprint)) throw InvalidArgument("Invalid master fingerprint")
     return File(dataDir(base, subdir), fingerprint)
+  }
+
+  /** The decrypted backup stays in a temporary directory until its identity is verified. */
+  fun restoreBackupForWallet(
+    base: File, path: String, password: String, subdir: String?, fingerprint: String,
+    network: BitcoinNetwork, vanillaXpub: String, coloredXpub: String, witnessVersion: WitnessVersion,
+  ) {
+    val destination = walletDir(base, subdir, fingerprint)
+    if (destination.exists()) throw RgbLibException.WalletDirAlreadyExists(destination.absolutePath)
+    val parent = checkNotNull(destination.parentFile)
+    // The native files dispatcher is serial, so a previous staging directory is orphaned.
+    val stagingPrefix = ".rgb-restore-"
+    parent.listFiles()?.filter { file ->
+      file.name.startsWith(stagingPrefix) && runCatching {
+        UUID.fromString(file.name.removePrefix(stagingPrefix))
+      }.isSuccess
+    }?.forEach { it.deleteRecursively() }
+    val staging = File(parent, stagingPrefix + UUID.randomUUID())
+    if (!staging.mkdir()) throw IllegalStateException("Could not stage the RGB backup")
+    try {
+      com.utexo.restoreBackup(path, password, staging.absolutePath)
+      val source = File(staging, fingerprint)
+      if (!source.isDirectory) throw InvalidArgument("This RGB backup belongs to another wallet.")
+      val info = runCatching { JSONObject(File(source, MANIFEST).readText()) }.getOrNull()
+        ?: throw InvalidArgument("This RGB backup has no readable wallet manifest. Export a newer backup from the original wallet.")
+      if (info.optInt("version") != 1 || info.optString("database_type") != "Sqlite" || !File(source, "rgb_lib_db").isFile) {
+        throw InvalidArgument("This RGB backup is missing supported wallet data.")
+      }
+      if (!info.optString("bitcoin_network").equals(network.name.replace("_", ""), ignoreCase = true)) {
+        throw InvalidArgument("This RGB backup belongs to a different Bitcoin network.")
+      }
+      if (!info.optString("witness_version").equals(witnessVersion.name.replace("_", ""), ignoreCase = true) ||
+          info.optInt("vanilla_keychain", -1) != 0) {
+        throw InvalidArgument("This RGB backup uses different wallet key settings.")
+      }
+      if (info.optString("master_fingerprint") != fingerprint ||
+          info.optString("account_xpub_vanilla") != vanillaXpub ||
+          info.optString("account_xpub_colored") != coloredXpub) {
+        throw InvalidArgument("This RGB backup belongs to another wallet.")
+      }
+      if (!source.renameTo(destination)) throw IllegalStateException("Could not move the restored RGB wallet into place")
+    } finally {
+      staging.deleteRecursively()
+    }
   }
 
   fun state(walletDir: File): Map<String, Any?> = mapOf(

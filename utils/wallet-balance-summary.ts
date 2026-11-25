@@ -95,3 +95,18 @@ export function bitcoinByNetwork(
   if (balances.BARK) out.bark = nonNegative(balances.BARK.total);
   return out;
 }
+
+/** Mainnet-only balances for fiat values, even on layers with both real and test funds. */
+export function mainnetBitcoinByNetwork(
+  balances: Record<string, BitcoinBalance>,
+  channels: ChannelBalance[],
+  rgbBalanceIsLightning: boolean,
+  testProtocols: ReadonlySet<string>,
+): Partial<Record<BtcNetwork, number>> | undefined {
+  if (!testProtocols.size) return undefined;
+  return bitcoinByNetwork(
+    Object.fromEntries(Object.entries(balances).filter(([protocol]) => !testProtocols.has(protocol))),
+    testProtocols.has('RGB') ? [] : channels,
+    rgbBalanceIsLightning,
+  );
+}

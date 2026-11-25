@@ -86,6 +86,20 @@ class KaleidoRgbModule : Module() {
       }
     }
 
+    AsyncFunction("restoreBackupForWallet") Coroutine { args: Map<String, Any?> ->
+      withContext(files) {
+        guarded {
+          val a = Args(args)
+          DataDirs.restoreBackupForWallet(
+            base(), a.string("backupPath"), a.string("password"), a.stringOrNull("subdir"),
+            a.string("masterFingerprint"), Mappers.network(a.string("network")),
+            a.string("accountXpubVanilla"), a.string("accountXpubColored"),
+            Mappers.witnessVersion(a.stringOrNull("witnessVersion")),
+          )
+        }
+      }
+    }
+
     AsyncFunction("openWallet") Coroutine { args: Map<String, Any?> ->
       withContext(files) {
         guarded {

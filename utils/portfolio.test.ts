@@ -1,23 +1,30 @@
 import { assetUsdValue, breakdownAssetRows, tokenUsdPrice, tokenValueSats, tokenValueUsd, usdToSats } from './portfolio';
+import { LIQUID_USDT_ASSET_ID } from '@kaleidorg/wallet-engine';
+import { USDB_TOKEN_ADDRESS } from './flashnet';
 
 const asset = (ticker: string, baseUnits: number, precision = 6, asset_id = ticker) =>
   ({ asset_id, ticker, precision, balance: { spendable: baseUnits } });
 
-test('every dollar stablecoin is worth $1, whatever the case', () => {
-  for (const t of ['USDT', 'USDt', 'usdc', 'USDB', 'DAI', 'BUSD', 'USD']) expect(tokenUsdPrice(t)).toBe(1);
-  expect(tokenUsdPrice('XAUT')).toBeNull();
-  expect(tokenUsdPrice(undefined)).toBeNull();
+test('prices only trusted mainnet asset IDs', () => {
+  expect(tokenUsdPrice({ asset_id: LIQUID_USDT_ASSET_ID })).toBe(1);
+  expect(tokenUsdPrice({ asset_id: LIQUID_USDT_ASSET_ID, protocol: 'RGB' })).toBeUndefined();
+  expect(tokenUsdPrice({ asset_id: USDB_TOKEN_ADDRESS.mainnet, protocol: 'SPARK' })).toBe(1);
+  expect(tokenUsdPrice({ asset_id: USDB_TOKEN_ADDRESS.mainnet, protocol: 'RGB' })).toBeUndefined();
+  expect(tokenUsdPrice({ asset_id: USDB_TOKEN_ADDRESS.mainnet }, new Set(['SPARK']))).toBeUndefined();
+  expect(tokenUsdPrice({ asset_id: 'rgb:usdt' })).toBeUndefined();
+  expect(tokenUsdPrice({})).toBeUndefined();
 });
 
 test('an asset is valued from the same balance its row shows', () => {
-  expect(assetUsdValue(asset('USDT', 12_500_000))).toBe(12.5);
+  expect(assetUsdValue(asset('USDT', 12_500_000, 6, LIQUID_USDT_ASSET_ID))).toBe(12.5);
   expect(assetUsdValue(asset('XAUT', 1_000_000))).toBeUndefined();
   // Known dollar assets count even when their ticker says otherwise.
-  expect(assetUsdValue(asset('L-USD', 2_000_000, 6, 'liquid-usdt'), new Set(['liquid-usdt']))).toBe(2);
+  expect(assetUsdValue(asset('L-USD', 2_000_000, 6, LIQUID_USDT_ASSET_ID))).toBe(2);
+  expect(assetUsdValue(asset('USDT', 2_000_000, 6, 'rgb:unverified'))).toBeUndefined();
 });
 
 test('the token value joins the total as sats at the live price', () => {
-  const assets = [asset('USDT', 30_000_000), asset('USDB', 20_000_000, 6), asset('XAUT', 5)];
+  const assets = [asset('USDT', 30_000_000, 6, LIQUID_USDT_ASSET_ID), asset('USDB', 20_000_000, 6, USDB_TOKEN_ADDRESS.mainnet), asset('XAUT', 5)];
   expect(tokenValueUsd(assets)).toBe(50);
   // $50 at $100,000/BTC = 50,000 sats.
   expect(tokenValueSats(assets, 100_000)).toBe(50_000);
@@ -36,8 +43,8 @@ describe('breakdownAssetRows', () => {
   const assets = [
     { asset_id: 'BTC', ticker: 'BTC', precision: 0, balance: { spendable: 1000 } },
     { asset_id: 'rgb:gold', ticker: 'XAUT', name: 'Gold', precision: 0, balance: { spendable: 3 } },
-    { asset_id: 'rgb:usdt', ticker: 'USDT', name: 'Tether USD', precision: 6, balance: { spendable: 12_500_000 } },
-    { asset_id: 'btkn1usdb', ticker: 'USDB', name: 'USDB', precision: 6, balance: { spendable: 40_000_000 } },
+    { asset_id: LIQUID_USDT_ASSET_ID, ticker: 'USDT', name: 'Tether USD', precision: 6, balance: { spendable: 12_500_000 }, protocol: 'LIQUID' },
+    { asset_id: USDB_TOKEN_ADDRESS.mainnet, ticker: 'USDB', name: 'USDB', precision: 6, balance: { spendable: 40_000_000 } },
     { asset_id: 'rgb:empty', ticker: 'NIL', precision: 0, balance: { spendable: 0 } },
   ];
 
@@ -45,7 +52,7 @@ describe('breakdownAssetRows', () => {
     const rows = breakdownAssetRows(assets);
     expect(rows.map((r) => r.ticker)).toEqual(['USDB', 'USDT', 'XAUT']);
     expect(rows[0]).toMatchObject({ network: 'spark', networkLabel: 'Spark', amount: '40', usdValue: 40 });
-    expect(rows[1]).toMatchObject({ network: 'rgb', networkLabel: 'RGB', amount: '12.5', usdValue: 12.5, name: 'Tether USD' });
+    expect(rows[1]).toMatchObject({ network: 'liquid', networkLabel: 'Liquid', amount: '12.5', usdValue: 12.5, name: 'Tether USD' });
     expect(rows[2]).toMatchObject({ amount: '3', usdValue: undefined });
   });
 
@@ -54,10 +61,10 @@ describe('breakdownAssetRows', () => {
     expect(sum).toBe(tokenValueUsd(assets));
   });
 
-  test('Lite folds the dollar tokens into one US Dollar row', () => {
-    const rows = breakdownAssetRows(assets, undefined, { foldDollars: true });
-    expect(rows.map((r) => r.ticker)).toEqual(['USD', 'XAUT']);
-    expect(rows[0]).toMatchObject({ name: 'US Dollar', amount: '52.50', usdValue: 52.5 });
+  test('Lite folds just the designated dollar holding', () => {
+    const rows = breakdownAssetRows(assets, { foldedUsdAssetIds: new Set([LIQUID_USDT_ASSET_ID]) });
+    expect(rows.map((r) => r.ticker)).toEqual(['USD', 'USDB', 'XAUT']);
+    expect(rows[0]).toMatchObject({ name: 'US Dollar', amount: '12.50', usdValue: 12.5 });
     expect(rows[0].network).toBeUndefined();
   });
 });
