@@ -86,6 +86,7 @@ import { Sheet } from '../components/Sheet';
 import { SegmentedControl } from '../components/SegmentedControl';
 import { arkadeReceiveOptions, receiveAccountChain } from '../services/kaleidoPay/connect';
 import { rgbLibModule } from '../services/protocols/rgbL1';
+import { rgbOnlineOptions } from '../services/protocols/rgbOnlineOptions';
 import { claimArkadeLightningReceive, createArkadeLightningReceive, type ArkadeLightningReceive } from '../services/kaleidoPay/arkadeIntents';
 import { BarkBoardingPanel } from '../components/receive/BarkBoardingPanel';
 import NostrContactsSelector from '../components/NostrContactsSelector';
@@ -181,7 +182,7 @@ export default function ReceiveScreen(props: Props) {
   // If navigation reuses Receive for a new request, discard the previous code and its work together.
   const requestKey = JSON.stringify([
     asset?.asset_id, asset && receiveAssetFamily(asset),
-    params?.prefilledAmountSat, params?.prefilledNetwork, params?.prefilledAssetTicker,
+    params?.prefilledAmountSat, params?.prefilledNetwork, params?.prefilledAssetTicker, params?.rgbInvoicePreset,
   ]);
   return <ReceiveRequestScreen key={requestKey} {...props} />;
 }
@@ -219,7 +220,10 @@ function ReceiveRequestScreen({ navigation, route: navRoute }: Props) {
   const backup = React.useSyncExternalStore(onRgbBackupStatus, rgbBackupStatus);
   const getProtocolStatus = useRefreshableProtocolStatus();
 
-  const passedAsset = navRoute?.params?.selectedAsset;
+  const mintInvoice = navRoute?.params?.rgbInvoicePreset === 'utexoMint';
+  const passedAsset = navRoute?.params?.selectedAsset ?? (mintInvoice
+    ? { asset_id: NEW_RGB_ASSET_ID, ticker: 'RGB', name: 'Any RGB asset', protocol: 'RGB' as const }
+    : undefined);
   const startRoute = initialReceiveRoute(passedAsset);
   const [selectedAsset, setSelectedAsset] = useState<ReceiveAsset>(() => passedAsset ?? btcAsset());
   const [awaitingPrefilledAsset, setAwaitingPrefilledAsset] = useState(() => !passedAsset && !!navRoute?.params?.prefilledAssetTicker);
@@ -267,7 +271,7 @@ function ReceiveRequestScreen({ navigation, route: navRoute }: Props) {
   const requestEventId = useRef<string | null>(null);
   const requestScrollView = useRef<ScrollView>(null);
   const [amount, setAmount] = useState('');
-  const [expirySeconds, setExpirySeconds] = useState(3600);
+  const [expirySeconds, setExpirySeconds] = useState(mintInvoice ? 86_400 : 3600);
   const [showCountdown, setShowCountdown] = useState(false);
 
   const [loading, setLoading] = useState(false);
@@ -844,6 +848,18 @@ function ReceiveRequestScreen({ navigation, route: navRoute }: Props) {
             support: rgbReceiveSupport(rgbAssetAdapter),
             proxyV1: rgbReceiveUsesProxyV1(rgbAssetAdapter, nativeRgbSupportsBfa),
           });
+          if (mintInvoice && (!rgbAccountIsOnDevice() || receiveAccountChain('RGB') !== 'signet')) {
+            throw new Error('Utexo Mint requires RGB on this phone on public Signet.');
+          }
+          if (mintInvoice) {
+            if (!nativeRgbSupportsBfa() || !rgbOnlineOptions('signet')?.evmChains?.['42161']) {
+              throw new Error('This build needs the public Signet bridge configuration to receive a Utexo mint.');
+            }
+            const validity = Number(params.duration_seconds);
+            if (params.amount !== undefined || validity <= 43_200 || validity > 90_000) {
+              throw new Error('Leave the amount open and select a one-day expiry for Utexo Mint.');
+            }
+          }
           const issuedAt = Date.now();
           const rgbInvoice = await runReceiveOperation('Create RGB asset invoice', (signal) =>
             callAbortableAdapterMethod<any>(rgbAssetAdapter, 'createRgbInvoice', [params], signal));

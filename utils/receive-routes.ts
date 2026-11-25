@@ -20,6 +20,7 @@ export interface ReceiveAsset {
 }
 
 export interface ReceiveParams {
+  rgbInvoicePreset?: 'utexoMint';
   selectedAsset?: ReceiveAsset;
   prefilledAmountSat?: number;
   prefilledNetwork?: 'lightning' | 'onchain';

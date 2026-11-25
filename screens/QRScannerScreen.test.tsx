@@ -4,6 +4,8 @@ import { Clipboard, Animated, AppState } from 'react-native';
 import { useCameraPermissions, scanFromURLAsync } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import QRScannerScreen from './QRScannerScreen';
+import { pairWebRgb } from '../services/webrgb/nwc';
+jest.mock('../services/webrgb/nwc', () => ({ pairWebRgb: jest.fn() }));
 let mockFocused = true;
 jest.mock('@react-navigation/native', () => ({ useIsFocused: () => mockFocused, useFocusEffect: (cb: any) => require('react').useEffect(() => mockFocused ? cb() : undefined, [cb, mockFocused]) }));
 jest.mock('react-redux', () => ({ useSelector: (cb: any) => cb({ settings: { bitcoinUnit: 'sats' } }) }));
@@ -154,4 +156,39 @@ test('releases camera on blur and background, and returns with torch off', () =>
   mockFocused = true;
   screen.rerender(<QRScannerScreen navigation={navigation} />);
   expect(screen.UNSAFE_getByType('CameraView' as any)).toBeTruthy();
+});
+
+test('scanning a Nostr wallet authorization pairs once and keeps its secret out of navigation state', async () => {
+  (useCameraPermissions as jest.Mock).mockReturnValue([{ granted: true }, jest.fn()]);
+  (pairWebRgb as jest.Mock).mockResolvedValue(undefined);
+  const navigation = { navigate: jest.fn(), replace: jest.fn(), goBack: jest.fn() };
+  const screen = render(<QRScannerScreen navigation={navigation} />);
+  const scanned = screen.UNSAFE_getByType('CameraView' as any).props.onBarcodeScanned;
+  const uri = `nostr+walletauth://${'a'.repeat(64)}?state=${'b'.repeat(32)}`;
+  await act(async () => { await Promise.all([scanned({ data: uri }), scanned({ data: uri })]); });
+  expect(pairWebRgb).toHaveBeenCalledTimes(1);
+  expect(pairWebRgb).toHaveBeenCalledWith(uri);
+  expect(navigation.replace).toHaveBeenCalledWith('WebRgbConnections');
+});
+
+test('a Nostr wallet authorization is never forwarded as a contact', async () => {
+  const navigation = { navigate: jest.fn(), replace: jest.fn(), goBack: jest.fn() };
+  const screen = render(<QRScannerScreen navigation={navigation} route={{ params: { mode: 'contact' } }} />);
+  (Clipboard.getString as jest.Mock).mockResolvedValue('nostr+walletauth://client?state=private');
+  await act(async () => { fireEvent.press(screen.getByText('Paste')); });
+  expect(screen.getByText(/Open Scan from the wallet to connect/)).toBeTruthy();
+  expect(pairWebRgb).not.toHaveBeenCalled();
+  expect(navigation.navigate).not.toHaveBeenCalled();
+  expect(navigation.replace).not.toHaveBeenCalled();
+});
+
+test('explains which Nostr QR to use when a dApp shows a WalletConnect v2 invitation', async () => {
+  const navigation = { navigate: jest.fn(), replace: jest.fn(), goBack: jest.fn() };
+  const view = render(<QRScannerScreen navigation={navigation} />);
+  (Clipboard.getString as jest.Mock).mockResolvedValue('wc:example@2?symKey=private');
+  await act(async () => { fireEvent.press(view.getByText('Paste')); });
+  expect(view.getByText(/Choose Nostr Wallet Connect/)).toBeTruthy();
+  expect(pairWebRgb).not.toHaveBeenCalled();
+  expect(navigation.navigate).not.toHaveBeenCalled();
+  expect(navigation.replace).not.toHaveBeenCalled();
 });

@@ -125,6 +125,7 @@
     "@types/jest": "^29.5.14",
     "@types/markdown-it": "^14.2.0",
     "@types/react": "~19.1.17",
+    "@utexo/webrgb": "0.2.0",
     "babel-jest": "^29.7.0",
     "babel-preset-expo": "^54.0.10",
     "eslint": "^10.14.0",

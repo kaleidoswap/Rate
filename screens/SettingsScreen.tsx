@@ -171,6 +171,7 @@ export default function SettingsScreen({ navigation }: Props) {
     ...(!RGB_VIA_NWC ? [{ page: 'advanced', terms: 'direct node connectivity url' }] : []),
     { page: 'connections', terms: 'prismo kaleidomind ai assistant mind personalize voice memory budget model' },
     { page: 'connections', terms: 'wallet connection lightning nwc rgb node' },
+    { page: 'connections', terms: 'connected apps webrgb nostr nwc qr' },
     { page: 'security', terms: APP_LOCK_TERMS },
     { page: 'security', terms: 'security backup view recovery phrase seed words mnemonic' },
     { page: 'preferences', terms: 'preferences bitcoin balance unit sats satoshis btc denomination sound sounds payment currency fiat notifications language lingua italiano english crash reports bugs privacy' },
@@ -783,6 +784,13 @@ export default function SettingsScreen({ navigation }: Props) {
             }
             onPress={() => navigation.navigate('NWCConnect')}
           />
+        </Group>
+        </>}
+
+        {showSection('connected apps webrgb nostr nwc qr') && <>
+        <SectionLabel>WebRGB</SectionLabel>
+        <Group>
+          <Row first icon="link-outline" label="Connected apps" description="Manage WebRGB connections" onPress={() => navigation.navigate('WebRgbConnections')} />
         </Group>
         </>}
 

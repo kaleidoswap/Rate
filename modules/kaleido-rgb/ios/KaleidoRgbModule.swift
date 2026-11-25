@@ -280,6 +280,36 @@ public class KaleidoRgbModule: Module {
     walletOp("createUtxos") { s, a in
       Int(try s.wallet.createUtxos(online: try s.requireOnline(), upTo: a.bool("upTo", true), num: try a.u8OrNil("num"), size: try a.u32OrNil("size"), feeRate: try a.u64("feeRate"), skipSync: a.bool("skipSync", false)))
     }
+    walletOp("checkedMint") { s, a in
+      guard let mint = try s.wallet.getReceivedMint(recipientId: try a.string("recipientId")) else { return nil }
+      guard let path = a.stringOrNil("consignmentPath") else { throw InvalidArgument(description: "Missing mint consignment") }
+      let proof = try inspectConsignment(consignmentPath: path, bundleFilter: .terminals)
+      let matches = proof.isTransfer && proof.witnesses.contains { witness in
+        witness.operations.contains { operation in
+          operation.assetId == proof.assetId && operation.transitions.contains { $0.opid == mint.opid && $0.type == .mint }
+        }
+      }
+      guard matches else { throw InvalidArgument(description: "Mint does not match the received consignment") }
+      return ["assetId": proof.assetId, "opid": mint.opid, "lockId": mint.lockId,
+              "amount": String(mint.amount), "beforeBlock": String(mint.beforeBlock),
+              "evmChainId": String(mint.evmChainId), "bridgeContract": mint.bridgeContract]
+    }
+    walletOp("previewCreateUtxos") { s, a in
+      // Dry-run does not reserve spending inputs while the owner reviews the exact transaction.
+      let psbt = try s.wallet.createUtxosBegin(online: try s.requireOnline(), upTo: false, num: try a.u8("num"), size: try a.u32("size"), feeRate: try a.u64("feeRate"), skipSync: false, dryRun: true)
+      let tx = try s.wallet.inspectPsbt(psbt: psbt)
+      let outputs: [[String: Any]] = try tx.outputs.map { output in
+        guard output.isMine, let address = output.address else {
+          throw InvalidArgument(description: "Unexpected destination for a colorable output")
+        }
+        return ["address": address, "amountSat": Double(output.amountSat)]
+      }
+      return ["psbt": psbt, "feeSat": Double(tx.feeSat), "outputs": outputs] as [String: Any]
+    }
+    walletOp("finishCreateUtxos") { s, a in
+      let signed = try s.wallet.signPsbt(unsignedPsbt: try a.string("psbt"))
+      return Int(try s.wallet.createUtxosEnd(online: try s.requireOnline(), signedPsbt: signed))
+    }
     walletOp("failTransfers") { s, a in
       try s.wallet.failTransfers(online: try s.requireOnline(), batchTransferIdx: a.i32OrNil("batchTransferIdx"), noAssetOnly: a.bool("noAssetOnly", false), skipSync: a.bool("skipSync", false))
     }

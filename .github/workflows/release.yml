@@ -44,7 +44,9 @@ env:
   # and Settings hides the opt-in switch.
   EXPO_PUBLIC_SENTRY_DSN: ${{ vars.SENTRY_DSN }}
   EXPO_PUBLIC_RGB_L1_MUTINYNET_EVM_CHAINS: ${{ vars.RGB_L1_MUTINYNET_EVM_CHAINS }}
-  EXPO_PUBLIC_RGB_L1_SIGNET_EVM_CHAINS: ${{ vars.RGB_L1_SIGNET_EVM_CHAINS }}
+  # Utexo's public Bitcoin Signet bridge settles via Arbitrum One.
+  EXPO_PUBLIC_RGB_L1_SIGNET_EVM_CHAINS: >-
+    ${{ vars.RGB_L1_SIGNET_EVM_CHAINS || '{"42161":{"rpcUrl":"https://arb1.arbitrum.io/rpc","minMintLockBlocks":1200,"maxMintLockBlocks":28800}}' }}
 
 permissions:
   contents: read

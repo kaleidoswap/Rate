@@ -440,7 +440,7 @@ Provide a JSON object keyed by decimal EVM chain IDs. Each entry has `rpcUrl`,
 the bridge being tested and a trusted HTTPS RPC that serves state at finalized
 blocks. These values ship in the public app bundle. Keep API secrets out of them.
 
-For UTEXO's public Signet profile, its SDK uses Arbitrum One (`42161`) with
+The release build defaults to UTEXO’s public Signet profile when the Signet override is empty. Its SDK uses Arbitrum One (`42161`) with
 `https://arb1.arbitrum.io/rpc` and mint lock limits of 1200 and 28800 blocks.
 Use a compatible test asset from the deployment. [UTEXO Signet quickstart](https://docs.utexo.com/getting-started/quickstart/node-js) · [SDK mint lock defaults](https://github.com/UTEXO-Protocol/rgb-sdk-web/blob/c0f3b02a69918ef8066e38d2839e3f56cd73a7ad/src/config.ts#L147-L161)
 
@@ -448,6 +448,18 @@ Select the matching network under Settings → RGB on this phone and receive a
 test asset using an invoice from Rate. Refresh RGB activity and verify that
 the transfer settles and the asset appears in Assets after restarting the app.
 Regular RGB transfers can still run with the chain configuration omitted.
+
+### Connect an RGB dApp over Nostr Wallet Connect
+
+On a fresh beta install, open **Settings → Advanced → RGB → This phone**, select the dApp’s network, then tap **Connect**. For the Mosaik Signet preview, select **Mutinynet**. In Mosaik choose the phone wallet, then open **Scan** in Rate and scan the Nostr wallet authorization QR. Review the app’s public key, permissions, network and expiry. Revoke its access under **Settings → Connected apps**.
+
+Mosaik can read balances and request **Prepare wallet**. Rate shows the Bitcoin outputs and mining fee and asks for approval before signing. Taking a P2P order still requires the extension’s swap interface.
+
+Rate serves WebRGB operations over encrypted NIP-47 requests on the KaleidoSwap Nostr relay. A compatible app requests the required methods through a NWC-08 authorization QR. Operations that create invoices, send RGB assets, create outputs or sign messages require approval on the unlocked phone. The standard Lightning NWC client remains available for connecting an external wallet.
+
+#### Receive a Utexo Mint transfer
+
+Utexo Mint’s current wallet picker supports WalletConnect v2 and selected browser extensions. To use Rate, select **Signet** on the phone, then open **Settings → Connected apps → Create Utexo Mint invoice**. Rate prepares an amountless invoice valid for one day. Copy it while at least 12 hours remain. In Mint select **Paste invoice** with the receiving wallet disconnected. Check the bridge details in Mint and authorize the deposit in your EVM wallet. This path does not establish an NWC session or provide phone verification of the prepared mint.
 
 ### AI library baseline
 

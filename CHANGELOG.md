@@ -11,12 +11,19 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 ## [Unreleased]
 
 ### Added
+- **WebRGB over Nostr Wallet Connect.** Scan a compatible dApp’s authorization
+  QR to use the on-device RGB wallet. Review transfers, invoice requests and
+  message signatures on the phone. Mosaik on Mutinynet also shows the Bitcoin
+  outputs and mining fee before signing a wallet preparation transaction.
+- **Utexo Mint invoices.** Connected apps can prepare an amountless, one-day
+  public Signet invoice for Mint’s manual receive flow.
 - **Settings → Labs.** Experimental features have a switch each: Arkade,
   Prismo, contacts and chat, places to pay, wallet connections, the RGB
   Lightning node and Lightning channels. Beta and store builds start them
   off; development builds start them on.
 - **Build channels.** A build is `dev`, `beta` or `store`. Beta and store
-  builds leave out maker swaps, RGB on this phone, Bark and merchant offers.
+  builds leave out maker swaps, Bark and merchant offers. On beta, users can
+  enable RGB on this phone in Settings after wallet setup.
 - **Profile sharing.** The Nostr QR card explains how to add the profile and
   has labeled copy and share actions.
 
