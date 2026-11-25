@@ -58,6 +58,13 @@ export function activityNetwork(layer: ActivityLayer): ActivityNetwork | null {
   }
 }
 
+/** Pending RGB payments stay in the asset history and payment recovery flows. */
+export function isRgbPaymentInProgress(item: Pick<ActivityItem, 'type' | 'status' | 'layer'>): boolean {
+  return item.status === 'pending'
+    && (item.type === 'send' || item.type === 'receive')
+    && activityNetwork(item.layer) === 'rgb';
+}
+
 /** The networks present in a list, in a fixed order. */
 export function activityNetworks(items: { layer: ActivityLayer }[]): ActivityNetwork[] {
   const present = new Set(items.map((i) => activityNetwork(i.layer)));

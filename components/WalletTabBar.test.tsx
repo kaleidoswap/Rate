@@ -1,8 +1,10 @@
+import type { ActivityItem } from '../services/ActivityService';
+
 let mockLanguage = 'en';
-let mockPending = 0;
-jest.mock('../store/hooks', () => ({ useAppSelector: (selector: any) => selector({ settings: { language: mockLanguage }, wallet: mockPending ? { activeWallet: { id: 1 } } : {} }) }));
-jest.mock('../services/kaleidoPay/activity', () => ({ loadPendingPaymentActivity: async () => Array.from({ length: mockPending }) }));
-beforeEach(() => { mockLanguage = 'en'; mockPending = 0; });
+let mockPending: Pick<ActivityItem, 'type' | 'layer' | 'status'>[] = [];
+jest.mock('../store/hooks', () => ({ useAppSelector: (selector: any) => selector({ settings: { language: mockLanguage }, wallet: mockPending.length > 0 ? { activeWallet: { id: 1 } } : {} }) }));
+jest.mock('../services/kaleidoPay/activity', () => ({ loadPendingPaymentActivity: async () => mockPending }));
+beforeEach(() => { mockLanguage = 'en'; mockPending = []; });
 import React from 'react';
 import { render, fireEvent, act } from '@testing-library/react-native';
 import { WalletTabBar } from './WalletTabBar';
@@ -59,13 +61,17 @@ it('exposes the selected destination when the navigation state changes', () => {
 });
 
 it('the Activity tab wears the count of payments that need attention', async () => {
-  mockPending = 2;
+  mockPending = [
+    { type: 'send', layer: 'RGB-LN', status: 'pending' },
+    { type: 'send', layer: 'RGB-LN', status: 'unknown' },
+    { type: 'send', layer: 'Spark', status: 'pending' },
+  ];
   const screen = render(<WalletTabBar {...props()} />);
   await act(async () => {});
   expect(screen.getByText('2')).toBeTruthy();
   expect(screen.getByLabelText('Activity, 2 payments need attention')).toBeTruthy();
   // No badge without pending payments, and never on other tabs.
-  mockPending = 0;
+  mockPending = [];
   screen.rerender(<WalletTabBar {...props()} />);
   await act(async () => {});
   expect(screen.queryByLabelText(/needs attention/)).toBeNull();

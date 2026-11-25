@@ -33,12 +33,16 @@ export interface SwapExecution {
   updated_at: number;
   txid?: string;
   error_message?: string;
-  // Display metadata so the History screen can show "X BTC → Y USDB" without
-  // re-deriving from the (already-cleared) quote.
+  // History metadata. Token amounts are display units. New BTC legs are
+  // satoshis, including fractional sats for Lightning quotes.
   from_asset?: string;
   to_asset?: string;
   from_amount?: number;
   to_amount?: number;
+  btc_amount_unit?: 'sats';
+  to_amount_estimated?: boolean;
+  // The provider's exact token output, used for display without rounding.
+  executed_token_output?: { raw: string; precision: number };
   venue?: SwapVenue;
 }
 
@@ -274,4 +278,4 @@ export const {
   resetForm,
 } = swapSlice.actions;
 
-export default swapSlice.reducer; 
+export default swapSlice.reducer;

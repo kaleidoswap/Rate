@@ -367,6 +367,7 @@ export default function SendScreen({ navigation, route }: Props) {
   // A request that arrives whole (scanned, pasted, a contact, another screen)
   // goes straight to review: the quotes load while the user reads the target.
   const autoQuoted = useRef<string | null>(null);
+  const lastAmountTarget = useRef<string | null>(null);
 
   useEffect(() => {
     if (continueNow.current && amountSat) { continueNow.current = false; void getOffers(); }
@@ -376,14 +377,21 @@ export default function SendScreen({ navigation, route }: Props) {
   // amount (Lightning invoice, BIP21 with amount), there is nothing to ask —
   // the routes and fees appear immediately.
   useEffect(() => {
-    if (!target || busy || preview) return;
+    if (!target) {
+      if (!input.trim()) lastAmountTarget.current = null;
+      return;
+    }
+    if (busy || preview) return;
+    const targetKey = `${target.kind}:${target.raw}`;
+    const newTarget = lastAmountTarget.current !== targetKey;
+    lastAmountTarget.current = targetKey;
     const hasAmount = fixedSat !== undefined || amountSat !== undefined;
     const isRgbComplete = target.kind === 'rgb' && !!rgbAsset && (rgbAsset?.amount !== undefined || Number(assetAmount) > 0);
     const isComplete = target.kind === 'rgb' ? isRgbComplete : (!sparkToken && hasAmount);
     if (!isComplete) {
-      // Auto-open the amount editor: the user has a target, just needs the amount.
-      // This eliminates the "tap on 0 to enter an amount" step for scanned/pasted requests.
-      if (target.kind !== 'rgb' && !sparkToken && fixedSat === undefined && !amountSat && !showAmountEditor) {
+      // Prompt once for a new amountless request. A contact can already have
+      // opened the editor, so remember the target even when it is visible.
+      if (newTarget && target.kind !== 'rgb' && !sparkToken && !hasAmount && !showAmountEditor) {
         continueAfterAmount.current = true;
         setAmountEditorFor('btc');
         setShowAmountEditor(true);
@@ -398,7 +406,12 @@ export default function SendScreen({ navigation, route }: Props) {
 
   function review() {
     if (!target) { setError(decodeError ?? 'Paste or scan something to pay.'); return; }
-    if (target.kind !== 'rgb' && !sparkToken && fixedSat === undefined && !amountSat) { continueAfterAmount.current = true; setShowAmountEditor(true); return; }
+    if (target.kind !== 'rgb' && !sparkToken && fixedSat === undefined && !amountSat) {
+      continueAfterAmount.current = true;
+      setAmountEditorFor('btc');
+      setShowAmountEditor(true);
+      return;
+    }
     void getOffers();
   }
 

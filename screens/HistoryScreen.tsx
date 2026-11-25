@@ -28,6 +28,7 @@ import {
     ACTIVITY_NETWORK_LABEL,
     LAYER_LABEL,
     activityNetworks,
+    isRgbPaymentInProgress,
     layerNetworkIcon,
     matchesActivityFilter,
     type ActivityNetwork,
@@ -143,17 +144,7 @@ export default function HistoryScreen({ previewItems, previewPeriod }: { preview
             precision: a.precision ?? 0,
             protocol: a.protocol,
         })),
-        swaps: (swapHistory || []).map((s: any) => ({
-            rfq_id: s.rfq_id,
-            status: s.status,
-            created_at: s.created_at,
-            txid: s.txid,
-            from_asset: s.from_asset,
-            to_asset: s.to_asset,
-            from_amount: s.from_amount,
-            to_amount: s.to_amount,
-            venue: s.venue,
-        })),
+        swaps: swapHistory ?? [],
         loadSwapAttempts: () => loadSwapAttemptActivity(),
         walletId,
     }), [rgbAssets, swapHistory, walletId]);
@@ -190,8 +181,9 @@ export default function HistoryScreen({ previewItems, previewPeriod }: { preview
             (event.attemptId && item.id === `payment-attempt-${event.attemptId}`)));
         return contact ? { ...item, contactName: contact.contactName } : item;
     }), [demo, pendingPayment, feed.items, agentEntries, contactEvents]);
+    const visibleItems = useMemo(() => items.filter(item => !isRgbPaymentInProgress(item)), [items]);
     const agentItems = useMemo(() => agentActivityItems(agentEntries), [agentEntries]);
-    const loadingFirst = !demo && feed.updating && items.length === 0;
+    const loadingFirst = !demo && feed.updating && visibleItems.length === 0;
 
     const softError = useMemo(() => {
         if (demo || !result) return null;
@@ -206,7 +198,7 @@ export default function HistoryScreen({ previewItems, previewPeriod }: { preview
     }, [refresh, demo]);
 
     // Which network a payment used is Advanced detail: Lite has no network filter.
-    const networks = useMemo(() => (policy.showNetworks ? activityNetworks(items) : []), [items, policy.showNetworks]);
+    const networks = useMemo(() => (policy.showNetworks ? activityNetworks(visibleItems) : []), [visibleItems, policy.showNetworks]);
     const activeNetwork = networks.includes(network as ActivityNetwork) ? network : 'all';
     const networkOptions = useMemo((): FilterOption<ActivityNetwork | 'all'>[] => [
         { key: 'all' as const, label: 'All networks' },
@@ -224,7 +216,7 @@ export default function HistoryScreen({ previewItems, previewPeriod }: { preview
         ...(activeNetwork !== 'all' ? [{ key: 'network', label: ACTIVITY_NETWORK_LABEL[activeNetwork], onRemove: () => setNetwork('all') }] : []),
     ];
 
-    const filtered = (filter === 'agent' ? agentItems : items)
+    const filtered = (filter === 'agent' ? agentItems : visibleItems)
         .filter((it) => matchesActivityFilter(it, filter, activeNetwork) && matchesActivityPeriod(it, period))
         .sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0));
     const searched = query.trim()
@@ -370,7 +362,7 @@ export default function HistoryScreen({ previewItems, previewPeriod }: { preview
                 </View>
             )}
 
-            {!demo && feed.updating && !refreshing && items.length > 0 && (
+            {!demo && feed.updating && !refreshing && visibleItems.length > 0 && (
                 <View style={styles.updatingRow}>
                     <ActivityIndicator size="small" color={theme.colors.text.tertiary} />
                     <Text style={styles.loadingText}>Updating…</Text>

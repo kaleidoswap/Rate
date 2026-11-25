@@ -29,7 +29,9 @@ import {
 import { loadSwapAttemptActivity, PAYMENT_ATTEMPT_KIND } from '../services/kaleidoPay/activity';
 import { useActivityFeed } from '../hooks/useActivityFeed';
 import { ACTIVITY_STATUS_VISUAL } from '../utils/paymentStatus';
+import { isRgbPaymentInProgress } from '../utils/activity-layers';
 import { activityAmountIsIncoming, activityAmountPrefix, activityIcon, activityShortTime, activityTypeLabel, activityToneColor } from '../utils/activity-presentation';
+import { rgbTransferProgressLabel } from '../utils/rgb-wallet';
 import { useFiatRates } from '../hooks/useFiatRates';
 import { formatSatoshisToUSD } from '../utils/bitcoinUnits';
 
@@ -74,17 +76,7 @@ export const RecentActivityWidget: React.FC<Props> = ({ onViewAll, onOpenPayment
             precision: a.precision ?? 0,
             protocol: a.protocol,
         })),
-        swaps: (swapHistory || []).map((s: any) => ({
-            rfq_id: s.rfq_id,
-            status: s.status,
-            created_at: s.created_at,
-            txid: s.txid,
-            from_asset: s.from_asset,
-            to_asset: s.to_asset,
-            from_amount: s.from_amount,
-            to_amount: s.to_amount,
-            venue: s.venue,
-        })),
+        swaps: swapHistory ?? [],
         loadSwapAttempts: () => loadSwapAttemptActivity(),
         walletId,
     }), [rgbAssets, swapHistory, walletId]);
@@ -96,7 +88,8 @@ export const RecentActivityWidget: React.FC<Props> = ({ onViewAll, onOpenPayment
     const items = useMemo(() => {
         const list = assetId
             ? feed.items.filter(item => item.asset === assetId || (!!assetTicker && item.type === 'swap' && item.asset === assetTicker))
-            : [...feed.items].sort((a, b) => Number(['pending', 'unknown'].includes(b.status)) - Number(['pending', 'unknown'].includes(a.status)));
+            : feed.items.filter(item => !isRgbPaymentInProgress(item))
+                .sort((a, b) => Number(['pending', 'unknown'].includes(b.status)) - Number(['pending', 'unknown'].includes(a.status)));
         return list.slice(0, limit ?? (assetId ? 25 : MAX_ITEMS));
     }, [feed.items, assetId, assetTicker, limit]);
     const loading = feed.updating && items.length === 0;
@@ -110,6 +103,8 @@ export const RecentActivityWidget: React.FC<Props> = ({ onViewAll, onOpenPayment
         const v = activityIcon(item.type);
         const vColor = activityToneColor(v.tone, theme);
         const st = ACTIVITY_STATUS_VISUAL[item.status];
+        const progressLabel = item.status === 'pending' && item.rgbTransfer
+            ? rgbTransferProgressLabel(item.rgbTransfer) : st.label;
         const hasAmount = item.amount !== '';
         const label = activityTypeLabel(item);
         const fiat = hasAmount && item.rawSats != null && usdRate ? `≈ $${formatSatoshisToUSD(item.rawSats, usdRate)}` : '';
@@ -120,7 +115,7 @@ export const RecentActivityWidget: React.FC<Props> = ({ onViewAll, onOpenPayment
                 activeOpacity={0.7}
                 style={styles.row}
                 accessibilityRole="button"
-                accessibilityLabel={`${label}${item.contactName ? ` · ${item.contactName}` : ''}, ${item.amount} ${item.assetTicker}${fiat ? `, ${fiat}` : ''}, ${st.label}. Open details`}
+                accessibilityLabel={`${label}${item.contactName ? ` · ${item.contactName}` : ''}, ${item.amount} ${item.assetTicker}${fiat ? `, ${fiat}` : ''}, ${progressLabel}. Open details`}
                 onPress={() => item.kind === PAYMENT_ATTEMPT_KIND && onOpenPaymentAttempt ? onOpenPaymentAttempt(item.id.replace('payment-attempt-', '')) : setSelected(item)}
             >
                 <View style={[styles.iconWrap, { backgroundColor: vColor + '1A' }]}>
@@ -132,7 +127,7 @@ export const RecentActivityWidget: React.FC<Props> = ({ onViewAll, onOpenPayment
                     <View style={styles.rowMeta}>
                         {item.timestamp != null && <Text style={styles.rowSubtitle}>{activityShortTime(item.timestamp)}</Text>}
                         <View style={[styles.statusDot, { backgroundColor: st.color }]} />
-                        <Text style={[styles.statusText, { color: st.color }]}>{st.label}</Text>
+                        <Text style={[styles.statusText, { color: st.color }]}>{progressLabel}</Text>
                     </View>
                 </View>
 
@@ -191,7 +186,7 @@ export const RecentActivityWidget: React.FC<Props> = ({ onViewAll, onOpenPayment
                 <View style={styles.list}>{items.map(renderRow)}</View>
             )}
 
-            <ActivityDetailSheet onRefresh={feed.refresh} item={items.find(item => item.id === selected?.id) ?? selected} onClose={() => setSelected(null)} />
+            <ActivityDetailSheet onRefresh={feed.refresh} item={feed.items.find(item => item.id === selected?.id) ?? selected} onClose={() => setSelected(null)} />
         </View>
     );
 };

@@ -1,6 +1,8 @@
 import {
   assetDetailForItem, assetListUsdTotal, availableAssetFilters, buildAssetListItems, dominantHolding, filterAssetItems, LITE_USD_KEY,
 } from './asset-list-model';
+import { LIQUID_USDT_ASSET_ID } from '@kaleidorg/wallet-engine';
+import { USDB_TOKEN_ADDRESS } from './flashnet';
 
 const token = (asset_id: string, ticker: string, protocol: string, baseUnits: number, precision = 6, name = ticker) =>
   ({ asset_id, ticker, name, precision, protocol, balance: baseUnits });
@@ -24,24 +26,25 @@ test('bitcoin is one row matching the dashboard, with the networks that hold it'
   expect(btc.usdValue).toBeCloseTo(14);
 });
 
-test('the same token on two networks is one row with the sum', () => {
+test('the same ticker on two networks keeps separate holdings and no ticker-based price', () => {
   const items = buildAssetListItems(base);
-  const usdt = items.find((i) => i.ticker.toUpperCase() === 'USDT')!;
-  expect(usdt.amount).toBe(40);
-  expect(usdt.networks).toEqual(['rgb', 'spark']);
-  expect(usdt.usdValue).toBe(40);
-  expect(usdt.name).toBe('Tether USD');
-  expect(dominantHolding(usdt)?.token?.asset_id).toBe('rgb-usdt');
+  const usdts = items.filter((i) => i.ticker.toUpperCase() === 'USDT');
+  expect(usdts).toMatchObject([
+    { amount: 30, networks: ['rgb'], name: 'Tether USD', assetIdLabel: 'rgb-usdt' },
+    { amount: 10, networks: ['spark'], name: 'USDT on Spark', assetIdLabel: 'spark-usdt' },
+  ]);
+  expect(usdts.map(i => i.usdValue)).toEqual([undefined, undefined]);
+  expect(dominantHolding(usdts[0])?.token?.asset_id).toBe('rgb-usdt');
   expect(items.find((i) => i.ticker === 'XAUT')?.usdValue).toBeUndefined();
-  expect(items).toHaveLength(3);
+  expect(items).toHaveLength(4);
 });
 
 test('a network filter shows only what lives there', () => {
   const items = buildAssetListItems(base);
   const spark = filterAssetItems(items, 'spark');
-  expect(spark.map((i) => [i.ticker, i.amount])).toEqual([['BTC', 5_000], ['USDT', 10]]);
+  expect(spark.map((i) => [i.ticker, i.amount])).toEqual([['BTC', 5_000], ['USDt', 10]]);
   expect(spark[0].usdValue).toBeCloseTo(5);
-  expect(spark[1].usdValue).toBe(10);
+  expect(spark[1].usdValue).toBeUndefined();
   expect(filterAssetItems(items, 'rgb').map((i) => i.ticker)).toEqual(['USDT', 'XAUT']);
   expect(filterAssetItems(items, 'bark')).toEqual([]);
 });
@@ -55,19 +58,35 @@ test('search matches ticker, name or an exact asset id', () => {
   const items = buildAssetListItems(base);
   expect(filterAssetItems(items, 'all', 'gold').map((i) => i.ticker)).toEqual(['XAUT']);
   expect(filterAssetItems(items, 'all', 'btc').map((i) => i.ticker)).toEqual(['BTC']);
-  expect(filterAssetItems(items, 'all', 'spark-usdt').map((i) => i.ticker)).toEqual(['USDT']);
+  expect(filterAssetItems(items, 'all', 'spark-usdt').map((i) => i.ticker)).toEqual(['USDt']);
+});
+
+test('exact RGB contract searches open the requested holding even with the same ticker and network', () => {
+  const first = token('rgb:Abc', 'USDT', 'RGB', 2_000_000);
+  const second = token('rgb:aBc', 'USDT', 'RGB', 80_000_000);
+  const items = buildAssetListItems({ ...base, assets: [first, second] });
+  expect(filterAssetItems(items, 'rgb', 'usdt').map(item => item.amount)).toEqual([2, 80]);
+  const matches = filterAssetItems(items, 'rgb', 'rgb:Abc');
+  expect(matches).toHaveLength(1);
+  expect(assetDetailForItem(matches[0], 'sats')).toMatchObject({ asset_id: first.asset_id, balance: 2_000_000 });
+  expect(filterAssetItems(items, 'spark', 'rgb:Abc')).toEqual([]);
 });
 
 test('Lite folds its dollar assets into one USD row, like the dashboard', () => {
-  const items = buildAssetListItems({ ...base, liteUsdAssetIds: new Set(['rgb-usdt']) });
+  const assets = [token(LIQUID_USDT_ASSET_ID, 'USDt', 'LIQUID', 30_000_000), ...base.assets];
+  const items = buildAssetListItems({ ...base, assets, liteUsdAssetIds: new Set([LIQUID_USDT_ASSET_ID, 'rgb-usdt']) });
   const usd = items.find((i) => i.key === LITE_USD_KEY)!;
   expect(usd).toMatchObject({ ticker: 'USD', amount: 30, usdValue: 30 });
   // The rest stays as it was.
-  expect(items.find((i) => i.key === 'asset:USDT')?.amount).toBe(10);
+  expect(items.find((i) => i.key === 'asset:rgb:rgb-usdt')?.amount).toBe(30);
+  const [exact] = filterAssetItems(items, 'all', LIQUID_USDT_ASSET_ID);
+  expect(assetDetailForItem(exact, 'sats')).toMatchObject({ asset_id: LIQUID_USDT_ASSET_ID });
 });
 
 test('the header total adds up every priced row', () => {
-  expect(assetListUsdTotal(buildAssetListItems(base))).toBeCloseTo(54);
+  const assets = [...base.assets, token(USDB_TOKEN_ADDRESS.mainnet, 'USDB', 'SPARK', 20_000_000)];
+  expect(assetListUsdTotal(buildAssetListItems({ ...base, assets }))).toBeCloseTo(34);
+  expect(assetListUsdTotal(buildAssetListItems({ ...base, assets, testProtocols: new Set(['SPARK']) }))).toBeCloseTo(14);
 });
 
 test('no bitcoin row before any balance is known', () => {
@@ -92,9 +111,9 @@ test('network filters do not assign fiat value to test bitcoin', () => {
 
 test('asset detail uses the account of the selected holding', () => {
   const [btc, usdt] = filterAssetItems(buildAssetListItems(base), 'spark');
-  expect(assetDetailForItem(btc, 'BTC')).toMatchObject({ precision: 8, unit: 'BTC', protocol: 'BTC', balance: { spendable: 5000 } });
+  expect(assetDetailForItem(btc, 'BTC')).toMatchObject({ precision: 8, unit: 'BTC', protocol: 'BTC', btcNetwork: 'spark', balance: { spendable: 5000 } });
   expect(assetDetailForItem(usdt, 'sats')).toMatchObject({
-    asset_id: 'spark-usdt', isRGB: false, protocol: 'SPARK', fiatValue: 10,
-    locations: [{ label: 'Spark', amount: 10, unit: 'USDT' }],
+    asset_id: 'spark-usdt', isRGB: false, protocol: 'SPARK', fiatValue: undefined,
+    locations: [{ label: 'Spark', amount: 10, unit: 'USDt' }],
   });
 });

@@ -60,6 +60,7 @@ import {
   loadChannelLiquidity, quoteChannelShortfall, type ChannelLiquidity,
 } from '../services/swapQuotes';
 import { BTC_ASSET_PUBKEY } from '../utils/flashnet';
+import { formatSmallUnits } from '../utils/orchestra-ui';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring, ZoomIn, FadeInDown } from 'react-native-reanimated';
 import { theme, motion } from '../theme';
 import { feedback } from '../utils/feedback';
@@ -154,7 +155,7 @@ export default function SwapScreen({ navigation, route }: Props) {
   // Set once a swap settles so the confirm modal shows a success screen instead
   // of silently closing (the Flashnet path had no confirmation at all).
   const [swapSuccess, setSwapSuccess] = useState<
-    { fromAmount: number; fromTicker: string; toAmount: number; toTicker: string; txid?: string } | null
+    { fromAmount: number; fromTicker: string; toAmount: number; toTicker: string; toLabel?: string; toEstimated?: boolean; txid?: string } | null
   >(null);
   // Set when a swap fails or never confirms, so the sheet ends on a result either way.
   // `unconfirmed`: no final status yet, so the swap may still complete.
@@ -191,7 +192,16 @@ export default function SwapScreen({ navigation, route }: Props) {
     txid?: string,
     swapString?: string,
     errorMessage?: string,
+    received?: { raw: string; precision: number },
   ) => {
+    const historyAmount = (ticker: string, amount: number, raw?: number) => {
+      if (!isBtcTicker(ticker)) return amount;
+      return raw == null
+        ? btcDisplayToSats(amount)
+        : raw / (q.venue === 'flashnet' ? 1 : MSATS_PER_SAT);
+    };
+    const outputRaw = received ? Number(received.raw) : q.to_amount_raw;
+    const output = received && !isBtcTicker(q.to_asset) ? Number(received.raw) / 10 ** received.precision : q.to_amount;
     dispatch(addToHistory({
       rfq_id: q.rfq_id,
       swap_string: swapString || '',
@@ -202,8 +212,11 @@ export default function SwapScreen({ navigation, route }: Props) {
       error_message: errorMessage,
       from_asset: q.from_asset,
       to_asset: q.to_asset,
-      from_amount: q.from_amount,
-      to_amount: q.to_amount,
+      from_amount: historyAmount(q.from_asset, q.from_amount, q.from_amount_raw),
+      to_amount: historyAmount(q.to_asset, output, outputRaw),
+      btc_amount_unit: 'sats',
+      to_amount_estimated: q.venue === 'flashnet' && !received,
+      executed_token_output: received && !isBtcTicker(q.to_asset) ? received : undefined,
       venue: q.venue,
     }));
   };
@@ -519,6 +532,26 @@ export default function SwapScreen({ navigation, route }: Props) {
           minAmountOut: String(minimumSwapOutput(rawToAmount, DEFAULT_FLASHNET_SLIPPAGE_BPS)),
           maxSlippageBps: DEFAULT_FLASHNET_SLIPPAGE_BPS,
         });
+        if (result?.accepted === false) {
+          // The current SDK throws here. Treat explicit declines the same if
+          // a client reports its rejection by returning the provider response.
+          feedback.error();
+          setSwapProgress('idle');
+          recordSwapHistory(quote, 'failed', undefined, undefined, result.error || 'Flashnet declined the swap.');
+          setSwapFailure({ title: 'Swap rejected', message: 'Flashnet declined the swap. Check your balance before trying again.' });
+          dispatch(setExecuting(false));
+          refreshAfterSwap();
+          return;
+        }
+        const toBtc = isBtcTicker(quote.to_asset);
+        const rawOutput = result?.amountOut;
+        const precision = toBtc ? 0 : toPrecision;
+        const received = result?.accepted === true && typeof rawOutput === 'string' && /^\d{1,20}$/.test(rawOutput) &&
+          Number(rawOutput) > 0 && Number.isInteger(precision) && precision >= 0 && precision <= 18 &&
+          (!toBtc || Number.isSafeInteger(Number(rawOutput)))
+          ? { raw: rawOutput, precision } : undefined;
+        const receiptPrecision = toBtc && bitcoinUnit === 'BTC' ? 8 : precision;
+        const toLabel = received ? `${formatSmallUnits(received.raw, receiptPrecision)} ${unitLabelFor(quote.to_asset)}` : undefined;
 
         setSwapProgress('done');
         feedback.swap();
@@ -528,7 +561,7 @@ export default function SwapScreen({ navigation, route }: Props) {
           txid: result?.outboundTransferId || '',
         }));
         // Flashnet settles instantly (no status polling), so record history here.
-        recordSwapHistory(quote, 'completed', result?.outboundTransferId || '');
+        recordSwapHistory(quote, 'completed', result?.outboundTransferId || '', undefined, undefined, received);
         dispatch(setExecuting(false));
         // Keep the modal open and show a success screen (Flashnet settles
         // instantly — no status polling — so this is the only confirmation).
@@ -537,6 +570,8 @@ export default function SwapScreen({ navigation, route }: Props) {
           fromTicker: quote.from_asset,
           toAmount: quote.to_amount,
           toTicker: quote.to_asset,
+          toLabel,
+          toEstimated: !received,
           txid: result?.outboundTransferId || '',
         });
         refreshAfterSwap();
@@ -1240,7 +1275,7 @@ export default function SwapScreen({ navigation, route }: Props) {
             <Text style={{ color: theme.colors.text.secondary, marginTop: theme.spacing[1.5], textAlign: 'center' }}>
               {formatDisplayAmount(swapSuccess.fromAmount, swapSuccess.fromTicker)} {unitLabelFor(swapSuccess.fromTicker)}
               {'  →  '}
-              {formatDisplayAmount(swapSuccess.toAmount, swapSuccess.toTicker)} {unitLabelFor(swapSuccess.toTicker)}
+              {swapSuccess.toEstimated ? '≈ ' : ''}{swapSuccess.toLabel ?? quoteLegLabel(swapSuccess.toAmount, swapSuccess.toTicker)}
             </Text>
             {!!swapSuccess.txid && (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing[2], marginTop: theme.spacing[2] }}>

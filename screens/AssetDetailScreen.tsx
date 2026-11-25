@@ -17,11 +17,14 @@ import { AmountText } from '../components/AmountText';
 import { AssetIcon } from '../components/AssetIcon';
 import { PressableScale } from '../components/PressableScale';
 import { RecentActivityWidget } from '../components/RecentActivityWidget';
-import { formatUsd } from '../components/AssetList';
+import { formatUsd } from '../utils/portfolio';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { loadBtcBalance } from '../store/slices/walletSlice';
 import { feedback } from '../utils/feedback';
 import { formatAssetAmount } from '../utils/assetAmount';
+import { btcNetworkLabel } from '../utils/asset-list-model';
+import { getAssetFamily } from '../utils/account-routing';
+import type { BtcNetwork } from '../utils/wallet-balance-summary';
 import { useRgbTransferWatch } from '../hooks/useRgbTransferWatch';
 import { useRgbWalletSheets } from '../components/rgb/RgbWalletTools';
 import { refreshRgbAssets } from '../store/slices/assetsSlice';
@@ -39,6 +42,7 @@ interface AssetParam {
   precision?: number;
   issued_supply?: number;
   balance?: number | Record<string, number | undefined>;
+  balanceDetail?: Record<string, number | undefined>;
   isRGB?: boolean;
   protocol?: Protocol;
   icon?: string;
@@ -46,6 +50,9 @@ interface AssetParam {
   unit?: string;
   /** USD value of the balance, when known. */
   fiatValue?: number;
+  unitUsd?: number;
+  btcUnitUsd?: number;
+  btcNetwork?: BtcNetwork;
   locations?: Array<{ label: string; amount: number; unit?: string }>;
 }
 
@@ -96,8 +103,9 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
   // Prefer the live record (balances refresh in the store) over the snapshot we were opened with.
   const asset = useMemo<AssetParam | undefined>(() => {
     if (!passed) return undefined;
-    const live = storeAssets?.find(a => a.asset_id === passed.asset_id);
-    return live ? { ...passed, balance: live.balance ?? passed.balance } : passed;
+    const live = storeAssets?.find(a => a.asset_id === passed.asset_id
+      && (a.protocol ?? getAssetFamily(a.asset_id)) === (passed.protocol ?? getAssetFamily(passed.asset_id)));
+    return live ? { ...passed, balance: live.balanceDetail ?? live.balance ?? passed.balance } : passed;
   }, [passed, storeAssets]);
 
   // An RGB asset's pending transfers move forward while this screen is open; history and balance follow.
@@ -147,17 +155,31 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
   const precision = asset.precision ?? 0;
   const unit = asset.unit ?? asset.ticker;
   const fmt = (baseUnits: number) => grouped(formatAssetAmount(baseUnits, precision));
-  const bal = readBalance(isBTC && btc?.summary ? { spendable: btc.summary.total } : asset.balance);
-  const fiat = asset.fiatValue !== undefined && asset.fiatValue > 0 ? formatUsd(asset.fiatValue) : null;
-  const subtitle = isBTC ? 'Bitcoin across your accounts' : `${NETWORK_LABEL[protocol]} asset`;
+  const scope = asset.btcNetwork;
+  const liveSats = isBTC ? scope ? btc?.networks?.[scope] : btc?.summary?.available : undefined;
+  const bal = readBalance(liveSats === undefined ? asset.balance : { spendable: liveSats });
+  const mainnetSats = scope && liveSats !== undefined
+    ? btc?.mainnetNetworks ? btc.mainnetNetworks[scope] ?? 0 : btc?.networkChains?.[scope] ? 0 : liveSats
+    : liveSats;
+  const btcFiat = mainnetSats !== undefined && asset.btcUnitUsd !== undefined ? mainnetSats * asset.btcUnitUsd : asset.fiatValue;
+  const fiatValue = isBTC ? btcFiat : asset.unitUsd === undefined ? asset.fiatValue : bal.available / 10 ** precision * asset.unitUsd;
+  const fiat = fiatValue !== undefined && fiatValue > 0 ? formatUsd(fiatValue) : null;
+  const subtitle = isBTC
+    ? scope ? asset.locations?.[0]?.label ?? btcNetworkLabel(scope, btc?.networkChains?.[scope]) : 'Bitcoin across your accounts'
+    : `${NETWORK_LABEL[protocol]} asset`;
 
-  const networkNames: Record<string, string> = { onchain: 'Bitcoin on-chain', lightning: 'Lightning', spark: 'Spark', arkade: 'Arkade', bark: 'Bark' };
-  const locations = isBTC && btc?.networks
-    ? Object.entries(btc.networks).map(([key, amount]) => ({ label: `${networkNames[key] || key}${btc.networkChains?.[key as keyof typeof btc.networkChains] ? ` · ${btc.networkChains[key as keyof typeof btc.networkChains]} (test)` : ''}`, amount: amount ?? 0, unit: 'sats' }))
-    : asset.locations ?? (isBTC ? [] : [{ label: NETWORK_LABEL[protocol], amount: bal.available / 10 ** precision, unit }]);
+  const btcLocations = Object.entries(btc?.networks ?? {}).filter(([key]) => !scope || scope === key)
+    .map(([key, amount]) => {
+      const network = key as BtcNetwork;
+      return { label: btcNetworkLabel(network, btc?.networkChains?.[network]), amount, unit: 'sats' };
+    });
+  const locations = isBTC
+    ? btcLocations.length ? btcLocations : asset.locations ?? []
+    : asset.locations && asset.locations.length > 1 ? asset.locations
+      : [{ label: NETWORK_LABEL[protocol], amount: bal.available / 10 ** precision, unit }];
   const selectedAsset = { asset_id: asset.asset_id, ticker: asset.ticker, name: asset.name, isRGB };
   const actions: Array<{ key: string; label: string; icon: keyof typeof Ionicons.glyphMap; tint: string; onPress: () => void }> = [
-    { key: 'receive', label: 'Receive', icon: 'arrow-down', tint: theme.colors.success[500], onPress: () => navigation.navigate('Receive', { selectedAsset, prefilledAssetTicker: isRGB ? asset.ticker : undefined }) },
+    { key: 'receive', label: 'Receive', icon: 'arrow-down', tint: theme.colors.success[500], onPress: () => navigation.navigate('Receive', { selectedAsset: { ...selectedAsset, protocol } }) },
     { key: 'swap', label: 'Swap', icon: 'swap-horizontal', tint: theme.colors.brand.violet, onPress: () => navigation.navigate('Swap') },
     { key: 'send', label: 'Send', icon: 'arrow-up', tint: theme.colors.primary[500], onPress: () => navigation.navigate('Send', { selectedAsset }) },
   ];

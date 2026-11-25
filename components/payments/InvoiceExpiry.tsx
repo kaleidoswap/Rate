@@ -16,12 +16,14 @@ export function invoiceExpiry(invoice: string): number | null {
       ? (timestamp + duration) * 1000 : null;
   } catch { return null; }
 }
-export function InvoiceExpiry({ invoice, onRefresh, showCountdown = true }: { invoice: string; onRefresh?: () => void; showCountdown?: boolean }) {
+export function InvoiceExpiry({ invoice, expiresAt, onRefresh, showCountdown = true }: {
+  invoice: string; expiresAt?: number; onRefresh?: () => void; showCountdown?: boolean;
+}) {
   const t = useAppTheme();
-  const expiresAt = useMemo(() => invoiceExpiry(invoice), [invoice]);
-  const now = useForegroundClock(expiresAt !== null);
-  if (expiresAt === null) return null;
-  const seconds = Math.max(0, Math.ceil((expiresAt - now) / 1000));
+  const deadline = useMemo(() => expiresAt ?? invoiceExpiry(invoice), [invoice, expiresAt]);
+  const now = useForegroundClock(deadline !== null);
+  if (deadline === null) return null;
+  const seconds = Math.max(0, Math.ceil((deadline - now) / 1000));
   if (seconds > 0 && !showCountdown) return null;
   return <View style={{ alignItems: 'center', padding: t.spacing[3], gap: t.spacing[2] }}>
     <Text style={{ color: seconds ? t.colors.text.secondary : t.colors.warning[500] }}>{seconds ? `Lightning invoice expires in ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}` : 'Lightning invoice expired'}</Text>

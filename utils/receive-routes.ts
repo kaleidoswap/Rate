@@ -5,11 +5,32 @@
  *
  * Pure: the screen passes in what is connected and on which chain.
  */
-import type { AccountId, AssetFamily } from './account-routing';
+import { getAssetFamily, type AccountId, type AssetFamily } from './account-routing';
 import { ANY_RGB_ASSET_ID } from './rgb-receive';
 
 export type ReceiveMethodId = 'universal' | 'lightning' | 'onchain' | 'spark' | 'ark';
 export type ReceiveChain = 'mainnet' | 'signet' | 'mutinynet' | 'testnet' | 'regtest';
+
+export interface ReceiveAsset {
+  asset_id: string;
+  ticker: string;
+  name: string;
+  protocol?: AssetFamily;
+  isRGB?: boolean;
+}
+
+export interface ReceiveParams {
+  selectedAsset?: ReceiveAsset;
+  prefilledAmountSat?: number;
+  prefilledNetwork?: 'lightning' | 'onchain';
+  prefilledAssetTicker?: string;
+}
+
+export function receiveAssetFamily(asset: ReceiveAsset): AssetFamily {
+  if (asset.asset_id === 'BTC') return 'BTC';
+  if (asset.protocol && asset.protocol !== 'BTC') return asset.protocol;
+  return asset.isRGB ? 'RGB' : getAssetFamily(asset.asset_id, asset.ticker);
+}
 
 /** A connected receive account and the chain it is on (undefined when it can't tell). */
 export interface ReceiveAccountInfo {
@@ -190,12 +211,14 @@ export function destinationsFor(
 ): ReceiveDestination[] {
   // An RGB asset only ever lands in the RGB node, on-chain or over its channels.
   if (family === 'RGB') {
+    if ((method !== 'onchain' && method !== 'lightning') || (caps.nwcWalletType === 'ln' && !caps.rgbOnDevice)) return [];
     const rgb = has(accounts, 'RGB');
     return rgb ? [{
       account: 'RGB', label: rgbAccountLabel(caps), chain: rgb.chain, needsAmount: false, available: true,
       detail: method === 'lightning' ? 'Your RGB channels' : 'Your RGB wallet',
     }] : [];
   }
+  if (family === 'ARKADE' || (family === 'SPARK' && method !== 'spark')) return [];
   if (method === 'lightning') return lightningDestinations(accounts, caps);
   if (method === 'onchain') return onchainDestinations(accounts, caps);
   if (method === 'ark') return arkDestinations(accounts);
@@ -209,9 +232,10 @@ export function destinationsFor(
 /** The ways to receive the selected asset, in display order. */
 export function methodsFor(family: AssetFamily, accounts: ReceiveAccountInfo[], caps: ReceiveCaps): ReceiveMethodId[] {
   if (family === 'RGB') {
-    if (!has(accounts, 'RGB')) return [];
+    if (!has(accounts, 'RGB') || (caps.nwcWalletType === 'ln' && !caps.rgbOnDevice)) return [];
     return caps.rgbOnDevice || caps.rgbChannels === 'none' ? ['onchain'] : ['onchain', 'lightning'];
   }
+  if (family === 'SPARK') return has(accounts, 'SPARK') ? ['spark'] : [];
   if (family !== 'BTC') return [];
   const methods: ReceiveMethodId[] = ['universal'];
   if (lightningDestinations(accounts, caps).some(d => d.available)) methods.push('lightning');
@@ -248,6 +272,13 @@ export function legacyRoute(method: ReceiveMethodId, account: AccountId | null):
       if (account === 'BARK') return { networkType: 'bark', arkadeSubMode: 'boarding', selectedAccount: 'BARK' };
       return { networkType: 'onchain', arkadeSubMode: 'ark', selectedAccount: account };
   }
+}
+
+export function initialReceiveRoute(asset?: ReceiveAsset): LegacyRoute {
+  const family = asset && receiveAssetFamily(asset);
+  if (family === 'RGB') return legacyRoute('onchain', 'RGB');
+  if (family === 'SPARK') return legacyRoute('spark', 'SPARK');
+  return legacyRoute('universal', null);
 }
 
 export function routeOf(route: LegacyRoute): { method: ReceiveMethodId; account: AccountId | null } {

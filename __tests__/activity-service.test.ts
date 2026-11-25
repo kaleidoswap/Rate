@@ -125,6 +125,43 @@ describe('ActivityService', () => {
     expect(items[0]).toMatchObject({ amount: '49,000', rawSats: 49_000, fee: 304, assetTicker: 'sats' });
     expect(items[2].txid).toBe('');
   });
+
+  it('uses explicit satoshi units and distinguishes Flashnet estimates from executed output', async () => {
+    const base = { status: 'completed' as const, created_at: 500, from_asset: 'USDB', to_asset: 'BTC', from_amount: 2 };
+    const { items } = await loadActivity({ swaps: [
+      { ...base, rfq_id: 'maker', venue: 'kaleidoswap', to_amount: 1000.125, btc_amount_unit: 'sats' },
+      { ...base, rfq_id: 'flash-actual', venue: 'flashnet', to_amount: 1200, btc_amount_unit: 'sats', to_amount_estimated: false },
+      { ...base, rfq_id: 'flash-estimate', venue: 'flashnet', to_amount: 1100, btc_amount_unit: 'sats', to_amount_estimated: true },
+    ] });
+    expect(items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'swap-maker', assetName: '2 USDB → 1000.125 sats', amount: '1000.125', assetTicker: 'sats' }),
+      expect.objectContaining({ id: 'swap-flash-actual', amount: '1200', assetTicker: 'sats' }),
+      expect.objectContaining({ id: 'swap-flash-estimate', assetName: '2 USDB → ≈ 1100 sats', amount: '≈ 1100', assetTicker: 'sats' }),
+    ]));
+  });
+
+  it('preserves legacy swaps without guessing the original BTC display unit', async () => {
+    const base = { status: 'completed' as const, created_at: 500, venue: 'flashnet' as const };
+    const { items } = await loadActivity({ swaps: [
+      { ...base, rfq_id: 'old-from', from_asset: 'BTC', to_asset: 'USDB', from_amount: 0.00001, to_amount: 2.5 },
+      { ...base, rfq_id: 'old-to', from_asset: 'USDB', to_asset: 'BTC', from_amount: 2.5, to_amount: 1500, txid: 'reference' },
+    ] });
+    expect(items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'swap-old-from', assetName: 'BTC (amount unavailable) → ≈ 2.5 USDB', amount: '≈ 2.5' }),
+      expect.objectContaining({ id: 'swap-old-to', assetName: '2.5 USDB → BTC (amount unavailable)', amount: '', status: 'confirmed', txid: 'reference' }),
+    ]));
+  });
+
+  it('keeps exact executed token amounts from Flashnet without floating point rounding', async () => {
+    const { items } = await loadActivity({ swaps: [{
+      rfq_id: 'precise', status: 'completed', created_at: 500, venue: 'flashnet', btc_amount_unit: 'sats',
+      from_asset: 'BTC', from_amount: 500, to_asset: 'TOK', to_amount: 1.2345678901234567, to_amount_estimated: false,
+      executed_token_output: { raw: '1234567890123456789', precision: 18 },
+    }] });
+    expect(items[0]).toMatchObject({
+      amount: '1.234567890123456789', assetName: '500 sats → 1.234567890123456789 TOK', assetTicker: 'TOK',
+    });
+  });
 });
 
 it('labels Bark signet history and preserves pending sends', async () => {

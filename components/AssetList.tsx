@@ -6,7 +6,7 @@ import { formatBitcoinAmount } from '../utils/bitcoinUnits';
 import { formatUsd } from '../utils/portfolio';
 import { feedback } from '../utils/feedback';
 import {
-  ASSET_FILTERS, availableAssetFilters, filterAssetItems, formatTokenAmount, networkLabel,
+  ASSET_FILTERS, availableAssetFilters, btcNetworkLabel, filterAssetItems, formatTokenAmount, networkLabel,
   type AssetFilter, type AssetListItem,
 } from '../utils/asset-list-model';
 import { AmountText } from './AmountText';
@@ -45,14 +45,20 @@ export function AssetList({ items, bitcoinUnit, showNetworks, hideBalances = fal
 
   // "Spark", or "3 networks" when it lives on several (the icons say which).
   const whereLabel = (item: AssetListItem): string =>
-    item.networks.length === 1 ? networkLabel(item.networks[0]) : `${item.networks.length} networks`;
+    item.networks.length === 1 ? locationLabel(item, item.networks[0]) : `${item.networks.length} networks`;
+
+  const locationLabel = (item: AssetListItem, network: AssetListItem['networks'][number]) => {
+    const chain = item.isBtc ? item.holdings.find(holding => holding.network === network)?.chain : undefined;
+    return chain ? btcNetworkLabel(network, chain) : networkLabel(network);
+  };
 
   const renderRow = (item: AssetListItem, index: number) => {
     const { amount, unit } = amountText(item);
     const fiat = !hideBalances && item.usdValue !== undefined && item.usdValue > 0 ? formatUsd(item.usdValue) : null;
     const empty = !hideBalances && item.amount <= 0;
     const ticker = item.ticker !== item.name ? item.ticker : '';
-    const location = showNetworks && item.networks.length ? `, on ${item.networks.map(networkLabel).join(', ')}` : '';
+    const location = showNetworks && item.networks.length ? `, on ${item.networks.map(network => locationLabel(item, network)).join(', ')}` : '';
+    const identifier = item.assetIdLabel ? `, asset ID ${item.holdings[0].token?.asset_id}` : '';
     return (
       <PressableScale
         key={item.key}
@@ -60,8 +66,8 @@ export function AssetList({ items, bitcoinUnit, showNetworks, hideBalances = fal
         onPress={() => { feedback.select(); onAssetPress(item); }}
         accessibilityRole="button"
         accessibilityLabel={hideBalances
-          ? `${item.name}${location}, balance hidden`
-          : `${item.name}, ${amount} ${unit}${fiat ? `, about ${fiat}` : ''}${location}`}
+          ? `${item.name}${location}, balance hidden${identifier}`
+          : `${item.name}, ${amount} ${unit}${fiat ? `, about ${fiat}` : ''}${location}${identifier}`}
         style={[styles.row, index < shown.length - 1 && styles.rowDivider]}
       >
         <AssetIcon ticker={item.ticker} logoUri={item.icon} size={40} showBadge={false} />
@@ -76,6 +82,7 @@ export function AssetList({ items, bitcoinUnit, showNetworks, hideBalances = fal
           ) : (
             !!ticker && <Text style={styles.subtitle} numberOfLines={1}>{ticker}</Text>
           )}
+          {item.assetIdLabel && <Text style={styles.subtitle} numberOfLines={1}>{item.assetIdLabel}</Text>}
         </View>
         <View style={styles.amounts}>
           <AmountText
