@@ -31,7 +31,11 @@ test('removing a wallet closes the Agent wallet account first', async () => {
 });
 
 test('balances clear when a wallet changes, and late results for the old identity are discarded', () => {
-  const balance = { vanilla: { settled: 20, future: 20, spendable: 20 }, colored: { settled: 0, future: 0, spendable: 0 } };
+  const balance = {
+    vanilla: { settled: 20, future: 20, spendable: 20 },
+    colored: { settled: 0, future: 0, spendable: 0 },
+    byProtocol: { SPARK: { confirmed: 20, unconfirmed: 0, total: 20 } },
+  };
   const wallet: WalletRecord = { id: 1, created_at: 1, name: 'First', is_active: true };
   let state = walletReducer(undefined, setActiveWallet(wallet));
   state = walletReducer(state, setBtcBalance({ walletKey: '1:1', balance }));
