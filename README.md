@@ -323,7 +323,7 @@ Use a native build with a credential provider and screen lock on the phone. The 
 The domain must serve the following association files over HTTPS with a 200 response, no redirects and a JSON content type.
 
 - `/.well-known/apple-app-site-association` must include `644JA45Z2S.com.kaleidoswap.wallet` in `webcredentials.apps`. Enable Associated Domains in the signing profile.
-- `/.well-known/assetlinks.json` must grant `delegate_permission/common.get_login_creds` to `com.kaleidoswap.wallet` for the SHA-256 fingerprint of the certificate signing the distributed APK. Set `EXPO_PUBLIC_PASSKEY_ANDROID_CERT_SHA256` to that public fingerprint when bundling the app. With Play App Signing, use the Play app signing certificate.
+- `/.well-known/assetlinks.json` must grant `delegate_permission/common.get_login_creds` to `com.kaleidoswap.wallet` for the SHA-256 fingerprint of the certificate signing the installed APK. The GitHub APK workflow derives `EXPO_PUBLIC_PASSKEY_ANDROID_CERT_SHA256` from the release keystore. For a Google Play build, set it to the Play app signing certificate fingerprint before bundling.
 
 ## Project structure
 
