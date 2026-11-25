@@ -13,6 +13,7 @@ import React from 'react';
 import { render } from '@testing-library/react-native';
 import * as fs from 'fs';
 import * as path from 'path';
+import { StyleSheet } from 'react-native';
 import { theme } from '../theme';
 
 jest.mock('../store/hooks', () => ({
@@ -47,12 +48,12 @@ const { RecentActivityWidget } = require('../components/RecentActivityWidget');
 type Json = { type?: string; props?: any; children?: (Json | string)[] } | string | null | undefined | false;
 
 const NO_UNIT = new Set(['flex', 'flexGrow', 'flexShrink', 'flexBasis', 'opacity', 'zIndex', 'fontWeight', 'aspectRatio']);
+const AXIS_PROPERTIES: Record<string, string> = {
+  paddingHorizontal: 'padding-inline', paddingVertical: 'padding-block',
+  marginHorizontal: 'margin-inline', marginVertical: 'margin-block',
+};
 
 const cssValue = (key: string, value: any): string => {
-  if (key === 'transform' && Array.isArray(value)) return value.map((t: any) => {
-    const [[k, v]] = Object.entries(t);
-    return `${k}(${typeof v === 'number' ? `${v}px` : v})`;
-  }).join(' ');
   if (key === 'fontVariant') return value.join(' ');
   if (key === 'shadowOffset' || key === 'elevation' || key === 'includeFontPadding' || key === 'textAlignVertical') return '';
   if (typeof value === 'number' && !NO_UNIT.has(key)) return `${value}px`;
@@ -66,14 +67,14 @@ const fontFamily = (value: string): string =>
   : value;
 
 const css = (style: any): string => {
-  const arr = (Array.isArray(style) ? style : [style]).filter(Boolean);
-  const out: string[] = [];
-  for (const s of arr) for (const [k, v] of Object.entries(s ?? {})) {
+  const out = ['border-style: solid', 'border-width: 0'];
+  for (const [k, v] of Object.entries(StyleSheet.flatten(style) ?? {})) {
     if (v == null) continue;
+    // Show the resting UI. The RN test tree includes off-screen mount transforms for sheets.
+    if (k === 'transform' || k.startsWith('shadow')) continue;
     if (k === 'fontFamily') { out.push(`font-family: ${fontFamily(String(v))}`); continue; }
-    if (k.startsWith('shadow')) continue;
     const val = cssValue(k, v);
-    if (val !== '') out.push(`${k.replace(/[A-Z]/g, m => '-' + m.toLowerCase())}: ${val}`);
+    if (val !== '') out.push(`${AXIS_PROPERTIES[k] ?? k.replace(/[A-Z]/g, m => '-' + m.toLowerCase())}: ${val}`);
   }
   return out.join('; ');
 };

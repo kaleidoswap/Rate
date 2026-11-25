@@ -48,7 +48,7 @@ export function RgbAssetSheet({ visible, onClose, accountLabel, held, selectedAs
     <Sheet visible={visible} onClose={onClose} title="Receive an RGB asset" subtitle={`Received on-chain into ${accountLabel}`}>
       <ScrollView style={{ maxHeight: 520 }} contentContainerStyle={{ gap: t.spacing[2], paddingBottom: t.spacing[2] }}>
         {row(ANY_RGB_ASSET_ID, <RgbIcon size={22} />, 'Any RGB asset', 'The sender chooses, including assets you don’t hold yet.', onPickAny)}
-        {held.length > 0 && <Text style={{ color: t.colors.text.tertiary, fontSize: t.typography.fontSize.xs, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.6, marginTop: t.spacing[2] }}>
+        {held.length > 0 && <Text style={{ color: t.colors.text.secondary, fontSize: t.typography.fontSize.xs, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.6, marginTop: t.spacing[2] }}>
           Assets you hold
         </Text>}
         {held.map(asset => {

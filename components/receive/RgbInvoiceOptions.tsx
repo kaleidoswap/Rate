@@ -31,7 +31,7 @@ export function RgbInvoiceOptions({ support, options, onChange, requestExpirySec
   if (!support.invoiceKind && !support.expiry && !support.minConfirmations) return null;
 
   const caption = (text: string) => (
-    <Text style={{ color: t.colors.text.tertiary, fontSize: t.typography.fontSize.xs, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.6 }}>{text}</Text>
+    <Text style={{ color: t.colors.text.secondary, fontSize: t.typography.fontSize.xs, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.6 }}>{text}</Text>
   );
   const hint = (text: string, warn = false) => (
     <Text style={{ color: warn ? t.colors.warning[500] : t.colors.text.secondary, fontSize: t.typography.fontSize.sm }}>{text}</Text>
