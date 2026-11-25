@@ -11,12 +11,6 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 ## [Unreleased]
 
 ### Added
-- **WebRGB over Nostr Wallet Connect.** Scan a compatible dApp’s authorization
-  QR to use the on-device RGB wallet. Review transfers, invoice requests and
-  message signatures on the phone. Mosaik on Mutinynet also shows the Bitcoin
-  outputs and mining fee before signing a wallet preparation transaction.
-- **Utexo Mint invoices.** Connected apps can prepare an amountless, one-day
-  public Signet invoice for Mint’s manual receive flow.
 - **Settings → Labs.** Experimental features have a switch each: Arkade,
   Prismo, contacts and chat, places to pay, wallet connections, the RGB
   Lightning node and Lightning channels. Beta and store builds start them
@@ -58,6 +52,18 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
   checkout credentials. The release publishing job keeps write access.
 - Opt-in JavaScript crash reports contain fixed error labels, bundle
   locations and selected build and OS fields.
+
+## [0.20.0] — 2026-11-25
+
+- Pair the browser extension with Rate on iOS by scanning its QR code. Review
+  the requesting site, asset, amount, recipient, network and fee on the phone
+  before approving each RGB payment with a passkey. Revoke the browser in
+  Settings. Android passkey approval will follow in a later release.
+- Connect compatible WebRGB dApps directly over Nostr Wallet Connect. On
+  Mutinynet, Mosaik shows the Bitcoin outputs and mining fee before you sign.
+- Utexo Mint supports a one-day, amountless invoice on Bitcoin Signet, where
+  Rate uses Arbitrum One for BFA. Rate recognizes Utexo USDT by its RGB
+  contract on Signet and mainnet. The expected contract is visible in RGB settings.
 
 ## [0.17.0] — 2026-11-15
 

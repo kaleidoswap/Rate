@@ -20,6 +20,7 @@ const mockReceive = jest.fn(async (_options: unknown, _sats: number) => ({
 }));
 const mockClaim = jest.fn(async (_wallet: unknown, _url: string, _rfqId: string): Promise<string> => 'prepared');
 const mockDetection = jest.fn();
+const mockDepositOverlay = jest.fn();
 const mockDispatch = jest.fn();
 let mockConnected: Record<'RGB' | 'SPARK' | 'ARKADE', boolean>;
 let mockAssets: InventoryAsset[];
@@ -87,7 +88,7 @@ jest.mock('../components/receive/ReceiveRoutePicker', () => ({
 }));
 jest.mock('../components/rgb/RgbUtxoSheet', () => ({ RgbUtxoSheet: () => null }));
 jest.mock('../components/NostrContactsSelector', () => () => null);
-jest.mock('../components/DepositSuccessOverlay', () => () => null);
+jest.mock('../components/DepositSuccessOverlay', () => (props: object) => { mockDepositOverlay(props); return null; });
 
 const navigation = { goBack: jest.fn(), navigate: jest.fn(), addListener: jest.fn(() => () => {}) };
 const rgbToken = { asset_id: 'rgb:correct', ticker: 'USD', name: 'USD RGB', protocol: 'RGB' as const };
@@ -319,6 +320,24 @@ test('the Utexo Mint preset issues an amountless public Signet invoice valid for
   await generate();
   expect(mockRgbInvoice).toHaveBeenCalledWith({ duration_seconds: 86_400, min_confirmations: 1 });
   expect(ui.getByLabelText('Copy RGB invoice')).toBeTruthy();
+});
+
+const signetUsdt = 'rgb:uVMNCuVU-U00Y_wv-6~7ZbW7-tEuUMcE-pB0wDzC-nt7Qsdc';
+test.each([
+  [signetUsdt, 'Utexo USDT'],
+  ['rgb:A6Nr_ndv-Cx_t3_i-YfPXoL6-pT8ibp3-CR6LH5q-fQvTsp8', 'RGB asset'],
+  ['rgb:other', 'RGB asset'],
+])('the Mint receipt identifies what was actually received: %s', async (assetId, ticker) => {
+  mockConnected.RGB = true;
+  mockRgbChain = 'signet'; mockBfa = true; mockMintBridge = true;
+  mockAssets = [{ ...rgbToken, ...tokenBalance, ticker: 'USDT', asset_id: assetId }];
+  render(<ReceiveScreen navigation={navigation} route={{ params: { rgbInvoicePreset: 'utexoMint' } }} />);
+  await generate();
+  expect(mockRgbInvoice).toHaveBeenCalledWith({
+    duration_seconds: 86_400, min_confirmations: 1, ...(assetId === signetUsdt ? { asset_id: signetUsdt } : {}),
+  });
+  act(() => mockDetection.mock.lastCall[0].onDetected({ status: 'confirmed', protocol: 'RGB', layer: 'rgb', amount: 1, assetId }));
+  expect(mockDepositOverlay).toHaveBeenLastCalledWith(expect.objectContaining({ visible: true, ticker, rgbContract: assetId }));
 });
 
 test('the Utexo Mint preset cannot issue an invoice on Mutinynet', async () => {

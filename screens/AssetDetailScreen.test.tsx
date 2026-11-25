@@ -23,6 +23,7 @@ jest.mock('../services/rgbWallet', () => ({
   rgbInflationRights: async () => mockRights,
 }));
 let mockCaps: any = {};
+jest.mock('../services/kaleidoPay/connect', () => ({ receiveAccountChain: () => 'signet' }));
 jest.mock('../services/protocols', () => ({ rgbAccountAdapter: () => ({ protocolName: 'RGB_L1', isConnected: () => true, listUnspents: jest.fn(), account: { capabilities: () => mockCaps } }) }));
 jest.mock('../components/rgb/InflateAssetSheet', () => ({ InflateAssetSheet: 'InflateAssetSheet' }));
 jest.mock('../store/slices/walletSlice', () => ({ loadBtcBalance: () => ({ type: 'loadBtcBalance' }) }));
@@ -57,6 +58,15 @@ test('actions open Receive and Send for this asset', () => {
   });
   fireEvent.press(screen.getByLabelText('Send USDT'));
   expect(navigation.navigate).toHaveBeenCalledWith('Send', expect.anything());
+});
+
+test.each([
+  ['rgb:uVMNCuVU-U00Y_wv-6~7ZbW7-tEuUMcE-pB0wDzC-nt7Qsdc', true],
+  ['rgb:uvmncuVU-U00Y_wv-6~7ZbW7-tEuUMcE-pB0wDzC-nt7Qsdc', false],
+  ['rgb:A6Nr_ndv-Cx_t3_i-YfPXoL6-pT8ibp3-CR6LH5q-fQvTsp8', false],
+])('recognizes the Utexo identity only for the Signet contract: %s', (asset_id, recognized) => {
+  const { screen } = open({ ...usdt, asset_id });
+  expect(!!screen.queryByText('Utexo USDT')).toBe(recognized);
 });
 
 test('bitcoin shows the unit and dollar value it was opened with, and no asset id', () => {

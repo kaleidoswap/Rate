@@ -16,6 +16,7 @@ import { theme } from '../theme';
 import DatabaseService from '../services/DatabaseService';
 import { CHANNEL } from '../services/features';
 import { rgbWalletErrorMessage } from '../utils/rgb-wallet';
+import { utexoUsdtContract } from '../services/protocols/utexoUsdt';
 import { protocolManager, reconcileRgbOnDevice, switchRgbOnDeviceNetwork } from '../services/protocols';
 import {
   loadRgbL1Network, saveRgbL1Network, isRgbLibNativeAvailable, loadRgbL1Host, saveRgbL1Endpoints,
@@ -400,6 +401,13 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
     </View>
   );
 
+  const contractId = utexoUsdtContract(network);
+  const contractDetails = contractId && (
+    <View style={styles.section}>
+      <Text style={styles.label}>Utexo USDT · {label}</Text>
+      <Text selectable style={styles.description}>{contractId}</Text>
+    </View>
+  );
   const advanced = (
     <>
       {sectionLabel('Advanced')}
@@ -460,6 +468,7 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
             <Ionicons name={n === network ? 'checkmark-circle' : 'chevron-forward'} size={20} color={n === network ? accent : theme.colors.text.tertiary} />
           </TouchableOpacity>)}
         </View>}
+        {contractDetails}
         {errorText}
         {sectionLabel('Backup')}
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back up RGB data now" onPress={backupNow}
@@ -518,9 +527,10 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
               phrase: they are backed up to the cloud after every send and receive, and you can
               export a backup file.
             </Text>
-            {CHANNEL === 'beta' && <Text style={styles.description}>Choose Mutinynet to test BFA assets.</Text>}
+            {CHANNEL === 'beta' && <Text style={styles.description}>Choose Signet for Utexo Mint or Mutinynet for faucet assets.</Text>}
           </>
         )}
+        {contractDetails}
         {enabled && !busy && (
           <Text style={styles.description}>On for {RGB_L1_NETWORK_LABEL[enabled]} but not connected.</Text>
         )}

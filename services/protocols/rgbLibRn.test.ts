@@ -139,7 +139,7 @@ test('BFA is available through the engine on test networks and uses encrypted in
 test('public Signet and Mutinynet use separate bridge RPCs only with a BFA native build', async () => {
   const signetChains = { '42161': { rpcUrl: 'https://arb1.arbitrum.io/rpc', minMintLockBlocks: 1200, maxMintLockBlocks: 28800 } };
   process.env.EXPO_PUBLIC_RGB_L1_MUTINYNET_EVM_CHAINS = JSON.stringify(evmChains);
-  process.env.EXPO_PUBLIC_RGB_L1_SIGNET_EVM_CHAINS = JSON.stringify(signetChains);
+  delete process.env.EXPO_PUBLIC_RGB_L1_SIGNET_EVM_CHAINS;
   const { lib, wallet } = fakeLib();
   const { WalletManagerRgb } = createRgbLibRnModule(() => lib as any, { onlineOptions: rgbOnlineOptions });
   const legacyManager = new WalletManagerRgb('seed', options);
@@ -158,10 +158,13 @@ test('public Signet and Mutinynet use separate bridge RPCs only with a BFA nativ
   expect(rgbOnlineOptions('mainnet')).toBeUndefined();
 });
 
-test('public Signet can open without its own bridge RPC configuration', () => {
-  process.env.EXPO_PUBLIC_RGB_L1_MUTINYNET_EVM_CHAINS = JSON.stringify(evmChains);
-  delete process.env.EXPO_PUBLIC_RGB_L1_SIGNET_EVM_CHAINS;
-  expect(rgbOnlineOptions('signet')).toBeUndefined();
+test('an explicit Signet build override replaces the public Arbitrum profile', () => {
+  process.env.EXPO_PUBLIC_RGB_L1_SIGNET_EVM_CHAINS = JSON.stringify(evmChains);
+  expect(rgbOnlineOptions('signet')).toEqual({ evmChains });
+  process.env.EXPO_PUBLIC_RGB_L1_SIGNET_EVM_CHAINS = '{}';
+  expect(rgbOnlineOptions('signet')).toEqual({ evmChains: {} });
+  process.env.EXPO_PUBLIC_RGB_L1_SIGNET_EVM_CHAINS = 'bad';
+  expect(() => rgbOnlineOptions('signet')).toThrow(/Signet RGB bridge configuration is invalid/);
 });
 
 test.each([

@@ -29,6 +29,8 @@ import { useRgbTransferWatch } from '../hooks/useRgbTransferWatch';
 import { useRgbWalletSheets } from '../components/rgb/RgbWalletTools';
 import { refreshRgbAssets } from '../store/slices/assetsSlice';
 import { rgbAccountAdapter } from '../services/protocols';
+import { receiveAccountChain } from '../services/kaleidoPay/connect';
+import { utexoUsdtContract } from '../services/protocols/utexoUsdt';
 import { RGB_SCHEMA_LABEL, rgbWalletSupport, type RgbAssetMetadata } from '../utils/rgb-wallet';
 import { getRgbAssetMetadata, refreshRgbTransfers, rgbInflationRights } from '../services/rgbWallet';
 import { InflateAssetSheet } from '../components/rgb/InflateAssetSheet';
@@ -152,6 +154,7 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
   const isBTC = asset.asset_id === 'BTC';
   const protocol: Protocol = isBTC ? 'BTC' : asset.protocol ?? (asset.isRGB === false ? 'SPARK' : 'RGB');
   const isRGB = asset.isRGB ?? protocol === 'RGB';
+  const rgbNetwork = isRGB ? receiveAccountChain('RGB') : undefined;
   const precision = asset.precision ?? 0;
   const unit = asset.unit ?? asset.ticker;
   const fmt = (baseUnits: number) => grouped(formatAssetAmount(baseUnits, precision));
@@ -188,6 +191,7 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
   const issued = metadata?.issuedSupply ?? asset.issued_supply;
   const issuedOn = metadata?.timestamp ? new Date(metadata.timestamp * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : null;
   const detailRows: Array<{ label: string; value: string; copy?: string }> = [
+    ...(rgbNetwork && asset.asset_id === utexoUsdtContract(rgbNetwork) ? [{ label: 'Asset', value: 'Utexo USDT' }] : []),
     ...(bal.inChannels > 0 ? [{ label: 'In Lightning channels', value: `${fmt(bal.inChannels)} ${unit}` }] : []),
     ...(metadata?.schema ? [{ label: 'Schema', value: RGB_SCHEMA_LABEL[metadata.schema] ?? metadata.schema }] : []),
     ...(metadata?.name && metadata.name !== asset.name ? [{ label: 'Name', value: metadata.name }] : []),

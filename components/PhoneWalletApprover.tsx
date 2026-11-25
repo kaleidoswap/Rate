@@ -18,6 +18,7 @@ import {
 } from '../services/nwc/phoneWalletHost';
 import { PhoneWalletError, type PaymentReview } from '../services/nwc/phoneWalletProtocol';
 import { formatAssetAmount } from '../utils/assetAmount';
+import { utexoUsdtContract } from '../services/protocols/utexoUsdt';
 
 export function PhoneWalletApprover() {
   const theme = useAppTheme();
@@ -121,6 +122,7 @@ export function PhoneWalletApprover() {
               {t('base units')})
             </Text>
             <Text style={label}>{t('Asset contract')}</Text>
+            {review.asset === utexoUsdtContract(review.network) && <Text style={value}>Utexo USDT</Text>}
             <Text selectable style={value}>
               {review.asset}
             </Text>
