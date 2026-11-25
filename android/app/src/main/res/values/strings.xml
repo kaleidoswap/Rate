@@ -3,4 +3,5 @@
   <string name="expo_splash_screen_resize_mode" translatable="false">contain</string>
   <string name="expo_splash_screen_status_bar_translucent" translatable="false">false</string>
   <string name="expo_runtime_version">0.2.4</string>
+  <string name="asset_statements" translatable="false">[{\"include\":\"https://kaleidoswap.com/.well-known/assetlinks.json\"}]</string>
 </resources>

@@ -316,6 +316,15 @@ eas build --profile production   --platform ios      # store build (auto-increme
 
 ---
 
+### Native passkeys for browser payments
+
+Use a native build with a credential provider and screen lock on the phone. The phone registers a passkey for `kaleidoswap.com` while pairing a browser. The passkey authorizes individual payment requests. Wallet funds use the signing keys of the paired mobile wallet.
+
+The domain must serve the following association files over HTTPS with a 200 response, no redirects and a JSON content type.
+
+- `/.well-known/apple-app-site-association` must include `644JA45Z2S.com.kaleidoswap.wallet` in `webcredentials.apps`. Enable Associated Domains in the signing profile.
+- Browser payment approval on Android is deferred. To enable it in a future release, configure the installed APK's public signing certificate fingerprint in both the website's `/.well-known/assetlinks.json` and the app build. The GitHub APK workflow reads the `RATE_ANDROID_PASSKEY_CERT_SHA256` repository variable. A Google Play build needs the Play app signing certificate fingerprint.
+
 ## Project structure
 
 ```
@@ -432,7 +441,7 @@ Native device linking and funded flows must be verified in a development build.
 
 ### Test bridged RGB assets on Signet or Mutinynet
 
-Set `EXPO_PUBLIC_RGB_L1_SIGNET_EVM_CHAINS` for public Signet or
+To override the public Signet default, set `EXPO_PUBLIC_RGB_L1_SIGNET_EVM_CHAINS`. Set
 `EXPO_PUBLIC_RGB_L1_MUTINYNET_EVM_CHAINS` for Mutinynet before bundling. Release
 builds read the corresponding GitHub Actions variable without `EXPO_PUBLIC_`.
 Provide a JSON object keyed by decimal EVM chain IDs. Each entry has `rpcUrl`,
@@ -440,14 +449,16 @@ Provide a JSON object keyed by decimal EVM chain IDs. Each entry has `rpcUrl`,
 the bridge being tested and a trusted HTTPS RPC that serves state at finalized
 blocks. These values ship in the public app bundle. Keep API secrets out of them.
 
-The release build defaults to UTEXO’s public Signet profile when the Signet override is empty. Its SDK uses Arbitrum One (`42161`) with
+Rate defaults to UTEXO’s public Signet profile when the Signet override is empty. Its SDK uses Arbitrum One (`42161`) with
 `https://arb1.arbitrum.io/rpc` and mint lock limits of 1200 and 28800 blocks.
-Use a compatible test asset from the deployment. [UTEXO Signet quickstart](https://docs.utexo.com/getting-started/quickstart/node-js) · [SDK mint lock defaults](https://github.com/UTEXO-Protocol/rgb-sdk-web/blob/c0f3b02a69918ef8066e38d2839e3f56cd73a7ad/src/config.ts#L147-L161)
+The Signet Utexo USDT contract is `rgb:uVMNCuVU-U00Y_wv-6~7ZbW7-tEuUMcE-pB0wDzC-nt7Qsdc`.
+Settings also lists the separate mainnet contract from Utexo’s stage-mainnet deployment. Native BFA minting on this build is limited to test networks.
+[Utexo Signet deployment](https://github.com/UTEXO-Protocol/rgb-lib-wasm/issues/134#issuecomment-7102964005) · [Stage-mainnet manifest](https://github.com/UTEXO-Protocol/enclave-signer/releases/tag/stage-mainnet-v0.1.2) · [SDK mint lock defaults](https://github.com/UTEXO-Protocol/rgb-sdk-web/blob/c0f3b02a69918ef8066e38d2839e3f56cd73a7ad/src/config.ts#L147-L161)
 
 Select the matching network under Settings → RGB on this phone and receive a
 test asset using an invoice from Rate. Refresh RGB activity and verify that
 the transfer settles and the asset appears in Assets after restarting the app.
-Regular RGB transfers can still run with the chain configuration omitted.
+Use an explicit empty map (`{}`) to run without an EVM bridge on that network.
 
 ### Connect an RGB dApp over Nostr Wallet Connect
 
@@ -459,7 +470,7 @@ Rate serves WebRGB operations over encrypted NIP-47 requests on the KaleidoSwap 
 
 #### Receive a Utexo Mint transfer
 
-Utexo Mint’s current wallet picker supports WalletConnect v2 and selected browser extensions. To use Rate, select **Signet** on the phone, then open **Settings → Connected apps → Create Utexo Mint invoice**. Rate prepares an amountless invoice valid for one day. Copy it while at least 12 hours remain. In Mint select **Paste invoice** with the receiving wallet disconnected. Check the bridge details in Mint and authorize the deposit in your EVM wallet. This path does not establish an NWC session or provide phone verification of the prepared mint.
+Utexo Mint’s current wallet picker supports WalletConnect v2 and selected browser extensions. To use Rate, select **Signet** on the phone, then open **Settings → Connected apps → Create Utexo Mint invoice**. Rate prepares an amountless invoice valid for one day. A first receipt accepts any contract because the wallet has yet to import the asset. Once the wallet knows Utexo USDT, the preset requests that exact contract. Rate identifies the received asset from the transfer’s contract ID. Copy the invoice while at least 12 hours remain. In Mint select **Paste invoice** with the receiving wallet disconnected. Check the bridge details in Mint and authorize the deposit in your EVM wallet. This path does not establish an NWC session or provide phone verification of the prepared mint.
 
 ### AI library baseline
 

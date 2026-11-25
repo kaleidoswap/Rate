@@ -2,6 +2,8 @@ import * as SecureStore from 'expo-secure-store';
 
 import { parseNwcUri } from './NwcUri';
 
+export const phoneBrowserStorageKey = (walletId: number) => `phone_wallet_browser_v1_${walletId}`;
+
 export const ACTIVE_NWC_CONNECTION_KEY = 'nwc_connection_string';
 const ACTIVE_NWC_ID_KEY = 'nwc_active_connection_id';
 const CONNECTION_KEY_PREFIX = 'nwc_connection_';

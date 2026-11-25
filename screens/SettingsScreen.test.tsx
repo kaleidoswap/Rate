@@ -80,6 +80,8 @@ test('preferences remain actionable and connections retain their destinations', 
   fireEvent.press(screen.getByLabelText('Connections'));
   fireEvent.press(screen.getByLabelText('Lightning wallet'));
   expect(navigation.navigate).toHaveBeenCalledWith('NWCConnect');
+  fireEvent.press(screen.getByLabelText('Pair a browser'));
+  expect(navigation.navigate).toHaveBeenCalledWith('PhoneWallet');
 });
 
 test('Bark’s network is picked on the same bottom sheet as every other setting', async () => {

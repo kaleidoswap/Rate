@@ -172,6 +172,7 @@ export default function SettingsScreen({ navigation }: Props) {
     { page: 'connections', terms: 'prismo kaleidomind ai assistant mind personalize voice memory budget model' },
     { page: 'connections', terms: 'wallet connection lightning nwc rgb node' },
     { page: 'connections', terms: 'connected apps webrgb nostr nwc qr' },
+    { page: 'connections', terms: 'browser connection passkey phone rgb' },
     { page: 'security', terms: APP_LOCK_TERMS },
     { page: 'security', terms: 'security backup view recovery phrase seed words mnemonic' },
     { page: 'preferences', terms: 'preferences bitcoin balance unit sats satoshis btc denomination sound sounds payment currency fiat notifications language lingua italiano english crash reports bugs privacy' },
@@ -794,6 +795,10 @@ export default function SettingsScreen({ navigation }: Props) {
         </Group>
         </>}
 
+        {showSection('browser connection passkey phone rgb') && <>
+          <SectionLabel>Browser connection</SectionLabel>
+          <Group><Row first icon="desktop-outline" label="Pair a browser" description="Approve RGB payments on this phone" onPress={() => navigation.navigate('PhoneWallet')} /></Group>
+        </>}
         {showSection(APP_LOCK_TERMS) && <>
         <SectionLabel>App lock</SectionLabel>
         <Group>

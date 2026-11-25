@@ -87,6 +87,7 @@ import { SegmentedControl } from '../components/SegmentedControl';
 import { arkadeReceiveOptions, receiveAccountChain } from '../services/kaleidoPay/connect';
 import { rgbLibModule } from '../services/protocols/rgbL1';
 import { rgbOnlineOptions } from '../services/protocols/rgbOnlineOptions';
+import { UTEXO_USDT } from '../services/protocols/utexoUsdt';
 import { claimArkadeLightningReceive, createArkadeLightningReceive, type ArkadeLightningReceive } from '../services/kaleidoPay/arkadeIntents';
 import { BarkBoardingPanel } from '../components/receive/BarkBoardingPanel';
 import NostrContactsSelector from '../components/NostrContactsSelector';
@@ -222,7 +223,8 @@ function ReceiveRequestScreen({ navigation, route: navRoute }: Props) {
 
   const mintInvoice = navRoute?.params?.rgbInvoicePreset === 'utexoMint';
   const passedAsset = navRoute?.params?.selectedAsset ?? (mintInvoice
-    ? { asset_id: NEW_RGB_ASSET_ID, ticker: 'RGB', name: 'Any RGB asset', protocol: 'RGB' as const }
+    ? rgbAssets.find(asset => asset.asset_id === UTEXO_USDT.signet) ??
+      { asset_id: NEW_RGB_ASSET_ID, ticker: 'RGB', name: 'Any RGB asset', protocol: 'RGB' as const }
     : undefined);
   const startRoute = initialReceiveRoute(passedAsset);
   const [selectedAsset, setSelectedAsset] = useState<ReceiveAsset>(() => passedAsset ?? btcAsset());
@@ -852,6 +854,9 @@ function ReceiveRequestScreen({ navigation, route: navRoute }: Props) {
             throw new Error('Utexo Mint requires RGB on this phone on public Signet.');
           }
           if (mintInvoice) {
+            if (params.asset_id !== undefined && params.asset_id !== UTEXO_USDT.signet) {
+              throw new Error('Utexo Mint requires the Utexo USDT contract on public Signet.');
+            }
             if (!nativeRgbSupportsBfa() || !rgbOnlineOptions('signet')?.evmChains?.['42161']) {
               throw new Error('This build needs the public Signet bridge configuration to receive a Utexo mint.');
             }
@@ -1493,6 +1498,14 @@ function ReceiveRequestScreen({ navigation, route: navRoute }: Props) {
   // app claims), so the payer's money only lands while the app stays open.
   const claimsOnDevice = receiveMethods.some((m) => m.layer === 'lightning' && (m.protocol === 'ARKADE' || m.protocol === 'BARK'));
   const detectedAmount = depositAmountLabel(depositMonitor.amount, depositMonitor.assetId, assets);
+  const mintReceipt = mintInvoice && depositMonitor.layer === 'rgb';
+  const mintMatched = mintReceipt && receiveAccountChain('RGB') === 'signet' && depositMonitor.assetId === UTEXO_USDT.signet;
+  // The contract in the transfer identifies a first Mint receipt even before the inventory refreshes.
+  let receivedTicker = assets.find(a => a.asset_id === depositMonitor.assetId)?.ticker
+    ?? (depositMonitor.assetId?.startsWith('rgb:') ? 'RGB asset' : depositMonitor.assetId && depositMonitor.assetId !== selectedAsset.asset_id ? depositMonitor.assetId : selectedAsset.ticker);
+  if (mintReceipt) receivedTicker = mintMatched ? 'Utexo USDT' : 'RGB asset';
+  else if (depositMonitor.assetId === 'MULTIPLE') receivedTicker = 'Multiple assets';
+  else if (depositMonitor.assetId === 'BTC') receivedTicker = 'BTC';
   const renderStatus = () => (
     <ReceiveStatus visible={monitorVisible} status={monitorStatus} message={separateFailed ? undefined : depositMonitor.message} amountLabel={detectedAmount} requestOnly={assetFamily === 'RGB'}
       hint={claimsOnDevice ? 'Keep this screen open until it arrives' : undefined} />
@@ -1730,6 +1743,12 @@ function ReceiveRequestScreen({ navigation, route: navRoute }: Props) {
           <ReceiveQr value={address} size={qrSize} label={isRgbRequest ? title : undefined} />
         </View>
         {isRgbRequest && actions}
+        {isRgbRequest && mintInvoice && (
+          <View>
+            <Text style={styles.promptText}>Expected Utexo USDT contract · Signet</Text>
+            <Text selectable style={styles.promptText}>{UTEXO_USDT.signet}</Text>
+          </View>
+        )}
         {renderStatus()}
         {renderAmountRow()}
         {assetFamily === 'SPARK' && <Text style={styles.promptText}>Ask the sender to select {selectedAsset.ticker} in their Spark wallet.</Text>}
@@ -1903,10 +1922,9 @@ function ReceiveRequestScreen({ navigation, route: navRoute }: Props) {
 
       <DepositSuccessOverlay
         visible={showDepositSuccess}
-        // A newly received RGB asset is named once the asset list refreshes; never show its raw id meanwhile.
-        ticker={depositMonitor.assetId === 'MULTIPLE' ? 'Multiple assets' : depositMonitor.assetId === 'BTC' ? 'BTC' : assets.find(a => a.asset_id === depositMonitor.assetId)?.ticker
-          ?? (depositMonitor.assetId?.startsWith('rgb:') ? 'RGB asset' : depositMonitor.assetId && depositMonitor.assetId !== selectedAsset.asset_id ? depositMonitor.assetId : selectedAsset.ticker)}
-        amountLabel={detectedAmount}
+        ticker={receivedTicker}
+        rgbContract={mintReceipt && depositMonitor.assetId?.startsWith('rgb:') ? depositMonitor.assetId : undefined}
+        amountLabel={mintReceipt && !mintMatched ? undefined : detectedAmount}
         amountIsBalanceChange={depositMonitor.amountSource === 'balance'}
         account={depositMonitor.protocol === 'RGB' ? rgbLabel : depositMonitor.protocol === 'ARKADE' ? 'Arkade' : depositMonitor.protocol === 'SPARK' ? 'Spark' : depositMonitor.protocol === 'BARK' ? 'Bark' : undefined}
         network={depositMonitor.layer ? formatDepositLayer(depositMonitor.layer) : networkType === 'unified' ? undefined : networkType}

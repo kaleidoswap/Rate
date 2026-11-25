@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AppState, ScrollView, Text, View } from 'react-native';
 import { useAppSelector } from '../store/hooks';
+import { withRgbApproval } from '../services/rgbApproval';
 import { isAppUnlocked, subscribeAppLockState } from '../services/appLockState';
 import { isRgbConnecting, subscribeRgbConnecting } from '../services/protocols/wdk';
 import {
@@ -29,7 +30,7 @@ export function WebRgbApprover() {
       }
     };
 
-    setWebRgbReviewer(request => new Promise<boolean>(resolve => {
+    setWebRgbReviewer(request => withRgbApproval(() => new Promise<boolean>(resolve => {
       if (pending.current || request.signal.aborted || !ready()) { resolve(false); return; }
       const finish = (accepted: boolean) => {
         if (pending.current !== finish) return;
@@ -42,7 +43,7 @@ export function WebRgbApprover() {
       pending.current = finish;
       request.signal.addEventListener('abort', abort);
       setReview(request);
-    }));
+    }), () => false));
     const lock = subscribeAppLockState(refresh);
     const network = subscribeRgbConnecting(refresh);
     const app = AppState.addEventListener('change', refresh);

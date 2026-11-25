@@ -1,6 +1,6 @@
 import type { OnlineOptions } from '../../modules/kaleido-rgb'
 
-/** The RPC verifies bridge state, so only use endpoints supplied by the build. */
+/** Signet verifies Utexo's bridge on Arbitrum One. A build may override the network's entire map. */
 export function rgbOnlineOptions(network: string): OnlineOptions | undefined {
   const configs = {
     mutinynet: process.env.EXPO_PUBLIC_RGB_L1_MUTINYNET_EVM_CHAINS,
@@ -9,7 +9,11 @@ export function rgbOnlineOptions(network: string): OnlineOptions | undefined {
   if (network !== 'mutinynet' && network !== 'signet') return undefined
 
   const config = configs[network]?.trim()
-  if (!config) return undefined
+  if (!config) {
+    return network === 'signet'
+      ? { evmChains: { '42161': { rpcUrl: 'https://arb1.arbitrum.io/rpc', minMintLockBlocks: 1200, maxMintLockBlocks: 28_800 } } }
+      : undefined
+  }
 
   try {
     const chains: unknown = JSON.parse(config)

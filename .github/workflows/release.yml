@@ -22,6 +22,10 @@ on:
         description: 'Build & sign both platforms but skip TestFlight upload + GitHub Release'
         type: boolean
         default: true
+      marketing_version:
+        description: 'Optional marketing version for a branch build, e.g. 0.20.0'
+        type: string
+        required: false
       android_shrink:
         description: 'Build only Android with R8 and resource shrinking for comparison (dry run)'
         type: boolean
@@ -44,9 +48,7 @@ env:
   # and Settings hides the opt-in switch.
   EXPO_PUBLIC_SENTRY_DSN: ${{ vars.SENTRY_DSN }}
   EXPO_PUBLIC_RGB_L1_MUTINYNET_EVM_CHAINS: ${{ vars.RGB_L1_MUTINYNET_EVM_CHAINS }}
-  # Utexo's public Bitcoin Signet bridge settles via Arbitrum One.
-  EXPO_PUBLIC_RGB_L1_SIGNET_EVM_CHAINS: >-
-    ${{ vars.RGB_L1_SIGNET_EVM_CHAINS || '{"42161":{"rpcUrl":"https://arb1.arbitrum.io/rpc","minMintLockBlocks":1200,"maxMintLockBlocks":28800}}' }}
+  EXPO_PUBLIC_RGB_L1_SIGNET_EVM_CHAINS: ${{ vars.RGB_L1_SIGNET_EVM_CHAINS }}
 
 permissions:
   contents: read
@@ -85,9 +87,17 @@ jobs:
           persist-credentials: false
           fetch-depth: 0   # full history — versionCode = commit count
       - id: v
+        env:
+          MARKETING_VERSION: ${{ inputs.marketing_version }}
         run: |
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             NAME="${GITHUB_REF_NAME#v}"
+          elif [ -n "$MARKETING_VERSION" ]; then
+            if ! [[ "$MARKETING_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo '::error::Enter a marketing version in major.minor.patch format.'
+              exit 1
+            fi
+            NAME="$MARKETING_VERSION"
           else
             NAME="0.0.0-${GITHUB_SHA::7}"   # dry-run / manual dispatch
           fi
@@ -174,6 +184,8 @@ jobs:
           ORG_GRADLE_PROJECT_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           ORG_GRADLE_PROJECT_VERSION_NAME: ${{ needs.version.outputs.name }}
           ORG_GRADLE_PROJECT_VERSION_CODE: ${{ needs.version.outputs.code }}
+          # Set together with the domain association when Android passkeys are released.
+          EXPO_PUBLIC_PASSKEY_ANDROID_CERT_SHA256: ${{ vars.RATE_ANDROID_PASSKEY_CERT_SHA256 }}
           ANDROID_SHRINK: ${{ (github.event_name == 'workflow_dispatch' && inputs.android_shrink) && '1' || '0' }}
         run: |
           flags=()
@@ -304,7 +316,7 @@ jobs:
     needs: [version, android, ios]
     # Only on a real tag push — never on a dry-run dispatch. An Apple-side
     # failure (signing, membership) must not hold back the Android APK.
-    if: always() && startsWith(github.ref, 'refs/tags/') && needs.version.result == 'success' && needs.android.result == 'success'
+    if: always() && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && needs.version.result == 'success' && needs.android.result == 'success'
     permissions:
       contents: write
     steps:

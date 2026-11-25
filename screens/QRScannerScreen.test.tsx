@@ -192,3 +192,27 @@ test('explains which Nostr QR to use when a dApp shows a WalletConnect v2 invita
   expect(navigation.navigate).not.toHaveBeenCalled();
   expect(navigation.replace).not.toHaveBeenCalled();
 });
+
+test('the browser scanner hands a QR to review and never dispatches a payment', async () => {
+  const code = `kaleidoswap://pair?version=1&client=${'a'.repeat(64)}&nonce=${'b'.repeat(32)}&relay=wss%3A%2F%2Frelay.kaleidoswap.com&expires=${Math.floor(Date.now() / 1000) + 120}`;
+  (Clipboard.getString as jest.Mock).mockResolvedValue(code);
+  const navigation = { navigate: jest.fn(), replace: jest.fn(), goBack: jest.fn() };
+  const screen = render(<QRScannerScreen navigation={navigation} route={{params:{mode:'browser'}}} />);
+  await act(async () => { fireEvent.press(screen.getByText('Paste')); });
+  expect(navigation.navigate).toHaveBeenCalledWith('PhoneWallet', {scanned: code});
+  expect(navigation.replace).not.toHaveBeenCalled();
+});
+
+test.each([
+  ['browser', 'nostr+walletauth://client?state=private'],
+  ['browser', 'kaleidoswap://pair?version=1&secret=private'],
+  ['contact', 'kaleidoswap://pair?version=1&client=public'],
+])('keeps unrelated or invalid pairing data out of %s navigation', async (mode, uri) => {
+  const navigation = { navigate: jest.fn(), replace: jest.fn(), goBack: jest.fn() };
+  const view = render(<QRScannerScreen navigation={navigation} route={{ params: { mode } }} />);
+  (Clipboard.getString as jest.Mock).mockResolvedValue(uri);
+  await act(async () => { fireEvent.press(view.getByText('Paste')); });
+  expect(pairWebRgb).not.toHaveBeenCalled();
+  expect(navigation.navigate).not.toHaveBeenCalled();
+  expect(navigation.replace).not.toHaveBeenCalled();
+});

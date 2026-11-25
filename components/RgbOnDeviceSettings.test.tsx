@@ -114,9 +114,16 @@ test('the TestFlight settings guide to an explicit Mutinynet opt-in', async () =
   try {
     const screen = render(<RgbOnDeviceSettings walletId={7} />);
     await act(async () => {});
-    expect(screen.getByText('Choose Mutinynet to test BFA assets.')).toBeTruthy();
+    expect(screen.getByText('Choose Signet for Utexo Mint or Mutinynet for faucet assets.')).toBeTruthy();
+    const mainnetId = 'rgb:A6Nr_ndv-Cx_t3_i-YfPXoL6-pT8ibp3-CR6LH5q-fQvTsp8';
+    const signetId = 'rgb:uVMNCuVU-U00Y_wv-6~7ZbW7-tEuUMcE-pB0wDzC-nt7Qsdc';
+    expect(screen.getByText(mainnetId)).toBeTruthy();
+    fireEvent.press(screen.getByText('Signet'));
+    expect(screen.getByText(signetId)).toBeTruthy();
+    expect(screen.queryByText(mainnetId)).toBeNull();
     expect(mockSave).not.toHaveBeenCalled();
     fireEvent.press(screen.getByText('Mutinynet'));
+    expect(screen.queryByText(signetId)).toBeNull();
     fireEvent.press(screen.getByText('Connect'));
     await act(async () => {});
     expect(mockFindBackup).toHaveBeenCalledWith('seed words', 'mutinynet');

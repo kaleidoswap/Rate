@@ -89,12 +89,14 @@ export function AppLockGate() {
   // may uncover the app without authentication.
   const lock = useCallback(async () => {
     // Cover the UI straight away; it only uncovers once we know no lock applies.
+    setAppUnlocked(false);
     setMode((m) => (m === 'locked' ? m : 'checking'));
     try {
       const m = await resolveLockMethods();
       methodsRef.current = m;
       setMethods(m);
       if (!m.pin && !m.biometric) {
+        setAppUnlocked(true);
         setMode('unlocked');
         return;
       }

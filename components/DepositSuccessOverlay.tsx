@@ -7,6 +7,7 @@ import type { RgbBackupStatus } from '../services/protocols/rgbBackup';
 interface Props {
   visible: boolean;
   ticker: string;
+  rgbContract?: string;
   network?: string;
   account?: string;
   amountLabel?: string;
@@ -19,7 +20,7 @@ interface Props {
 }
 
 /** A deposit that landed, on the shared success overlay. */
-export default function DepositSuccessOverlay({ visible, ticker, network, account, amountLabel, amountIsBalanceChange, onDone, onActivity, backup, receivedAt, onBackup }: Props) {
+export default function DepositSuccessOverlay({ visible, ticker, rgbContract, network, account, amountLabel, amountIsBalanceChange, onDone, onActivity, backup, receivedAt, onBackup }: Props) {
   const { language } = useAppLanguage();
   const it = language === 'it';
   return <PaymentSuccessOverlay
@@ -29,6 +30,7 @@ export default function DepositSuccessOverlay({ visible, ticker, network, accoun
     subtitle={amountLabel ? (amountIsBalanceChange ? (it ? 'Aumento del saldo rilevato' : 'Detected balance increase') : undefined) : (it ? 'Importo nei dettagli attività' : 'See Activity for the amount')}
     rows={[
       { label: 'Asset', value: ticker },
+      ...(rgbContract ? [{ label: it ? 'Contratto RGB' : 'RGB contract', value: rgbContract }] : []),
       { label: it ? 'Accreditato su' : 'Received in', value: account ?? (it ? 'Vedi attività' : 'See Activity') },
       ...(backup ? [{ label: 'Backup RGB', value: backup.state === 'failed' ? (it ? 'Da riprovare' : 'Retry needed')
         : backup.state === 'backing-up' ? (it ? 'In corso…' : 'Backing up…')

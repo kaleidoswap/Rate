@@ -139,7 +139,7 @@ test('BFA is available through the engine on test networks and uses encrypted in
 test('public Signet and Mutinynet use separate bridge RPCs only with a BFA native build', async () => {
   const signetChains = { '42161': { rpcUrl: 'https://arb1.arbitrum.io/rpc', minMintLockBlocks: 1200, maxMintLockBlocks: 28800 } };
   process.env.EXPO_PUBLIC_RGB_L1_MUTINYNET_EVM_CHAINS = JSON.stringify(evmChains);
-  process.env.EXPO_PUBLIC_RGB_L1_SIGNET_EVM_CHAINS = JSON.stringify(signetChains);
+  delete process.env.EXPO_PUBLIC_RGB_L1_SIGNET_EVM_CHAINS;
   const { lib, wallet } = fakeLib();
   const { WalletManagerRgb } = createRgbLibRnModule(() => lib as any, { onlineOptions: rgbOnlineOptions });
   const legacyManager = new WalletManagerRgb('seed', options);
@@ -158,10 +158,13 @@ test('public Signet and Mutinynet use separate bridge RPCs only with a BFA nativ
   expect(rgbOnlineOptions('mainnet')).toBeUndefined();
 });
 
-test('public Signet can open without its own bridge RPC configuration', () => {
-  process.env.EXPO_PUBLIC_RGB_L1_MUTINYNET_EVM_CHAINS = JSON.stringify(evmChains);
-  delete process.env.EXPO_PUBLIC_RGB_L1_SIGNET_EVM_CHAINS;
-  expect(rgbOnlineOptions('signet')).toBeUndefined();
+test('an explicit Signet build override replaces the public Arbitrum profile', () => {
+  process.env.EXPO_PUBLIC_RGB_L1_SIGNET_EVM_CHAINS = JSON.stringify(evmChains);
+  expect(rgbOnlineOptions('signet')).toEqual({ evmChains });
+  process.env.EXPO_PUBLIC_RGB_L1_SIGNET_EVM_CHAINS = '{}';
+  expect(rgbOnlineOptions('signet')).toEqual({ evmChains: {} });
+  process.env.EXPO_PUBLIC_RGB_L1_SIGNET_EVM_CHAINS = 'bad';
+  expect(() => rgbOnlineOptions('signet')).toThrow(/Signet RGB bridge configuration is invalid/);
 });
 
 test.each([
@@ -574,6 +577,21 @@ test('preserves the invoice deadline in native send', async () => {
   const account = await open(lib);
   await account.transfer({ token: 'rgb:usdt', recipient: 'invoice', amount: 25 });
   expect(wallet.send).toHaveBeenCalledWith(expect.anything(), false, 2, 1, deadline);
+});
+
+test('phone requests use the bound native wallet, recheck approval at dispatch and schedule its normal backup', async () => {
+  const { lib, wallet } = fakeLib();
+  const backup = jest.fn();
+  const manager = new (createRgbLibRnModule(() => lib as any, { onChange: backup }).WalletManagerRgb)('seed', options);
+  const account = await manager.getAccount();
+  const request = { token: 'rgb:asset', recipient: 'invoice', amount: 25 };
+  await expect(account.transfer(request, () => { throw new Error('revoked'); })).rejects.toThrow('revoked');
+  expect(wallet.send).not.toHaveBeenCalled();
+  expect(backup).not.toHaveBeenCalled();
+  await account.transfer(request, () => undefined);
+  expect(wallet.send).toHaveBeenCalledTimes(1);
+  expect(backup).toHaveBeenCalledTimes(1);
+  await manager.dispose();
 });
 
 test('an invoice expiring while queued behind a backup is never sent', async () => {
