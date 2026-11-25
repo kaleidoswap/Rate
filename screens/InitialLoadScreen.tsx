@@ -1,47 +1,54 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
+import { Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDispatch } from 'react-redux';
-import DatabaseService, { NetworkConfig } from '../services/DatabaseService';
+import DatabaseService from '../services/DatabaseService';
 import { setUnlocked, setInitialized, setActiveWallet } from '../store/slices/walletSlice';
 import { autoRestoreNostrConnection, initializeProtocolServices } from '../services/initializeServices';
 import { BrandLoading } from '../components/brand/BrandLoading';
+import { Button } from '../components/Button';
 import { hasBalanceSnapshot } from '../services/balanceSnapshot';
+import { useAppTheme } from '../theme/ThemeProvider';
 
 const STARTUP_WAIT_MS = 8000;
 const SNAPSHOT_STARTUP_WAIT_MS = 1000;
 
 export default function InitialLoadScreen({ navigation }: { navigation: any }) {
   const dispatch = useDispatch();
+  const theme = useAppTheme();
+  const [attempt, setAttempt] = useState(0);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
-    initializeApp();
-  }, []);
+    let active = true;
 
-  const initializeApp = async () => {
-    try {
-      // Initialize database first
-      const dbService = DatabaseService.getInstance();
-      await dbService.initializeDatabase();
-      
-      // Load active wallet
-      let activeWallet = await dbService.getActiveWallet();
+    const initializeApp = async () => {
+      try {
+        const dbService = DatabaseService.getInstance();
+        await dbService.initializeDatabase();
+        let activeWallet = await dbService.getActiveWallet();
 
-      // If no active wallet, try to find any wallet and make it active (Single Wallet enforcement)
-      if (!activeWallet) {
-        const wallets = await dbService.getAllWallets();
-        if (wallets.length > 0) {
-          await dbService.setActiveWallet(wallets[0].id!);
+        if (!activeWallet) {
+          const wallets = await dbService.getAllWallets();
+          if (!active) return;
+          if (wallets.length === 0) {
+            navigation.replace('WalletSetup');
+            return;
+          }
+          const walletId = wallets[0].id;
+          if (walletId == null) throw new Error('Saved wallet has no ID');
+          await dbService.setActiveWallet(walletId);
           activeWallet = await dbService.getActiveWallet();
         }
-      }
 
-      if (activeWallet) {
-        // Set active wallet in Redux
+        if (!active) return;
+        // A SecureStore read failure can leave an existing record without its seed.
+        if (!activeWallet?.encrypted_mnemonic) throw new Error('Saved wallet is unavailable');
         dispatch(setActiveWallet(activeWallet));
 
-        // Initialize protocol services — timeout after 8s so a slow/unreachable
-        // node never blocks the load screen on Android or low-connectivity devices.
-        // With last balances to show, the dashboard can open almost at once.
+        // Give protocols a short head start. Slow connections continue in the background.
         const startupWaitMs = (await hasBalanceSnapshot(activeWallet)) ? SNAPSHOT_STARTUP_WAIT_MS : STARTUP_WAIT_MS;
+        if (!active) return;
         let startupTimer: ReturnType<typeof setTimeout> | undefined;
         try {
           await Promise.race([
@@ -55,39 +62,36 @@ export default function InitialLoadScreen({ navigation }: { navigation: any }) {
         } finally {
           if (startupTimer) clearTimeout(startupTimer);
         }
-        // Slow connections continue in the background. Dashboard joins the same initialization.
 
+        if (!active) return;
         dispatch(setInitialized(true));
         dispatch(setUnlocked(true));
 
-        // Attempt to auto-restore Nostr connection in parallel
         autoRestoreNostrConnection().catch(error => {
           console.log('Nostr auto-restore failed (non-blocking):', error);
         });
-
         navigation.replace('Dashboard');
-        return;
+      } catch (error) {
+        console.warn('Unable to open saved wallet:', error instanceof Error ? error.message : String(error));
+        if (active) setFailed(true);
       }
+    };
 
-      // If absolutely no wallets, go to WalletSetup (Onboarding)
-      navigation.replace('WalletSetup');
+    void initializeApp();
+    return () => { active = false; };
+  }, [attempt, dispatch, navigation]);
 
-    } catch (error) {
-      console.error('Initial state check error:', error);
-      // A DB error with existing wallets must never land the user on "Create
-      // wallet": try to recover the wallet list, and only offer setup when
-      // there truly is nothing.
-      try {
-        const wallets = await DatabaseService.getInstance().getAllWallets();
-        navigation.replace(wallets.length > 0 ? 'Dashboard' : 'WalletSetup');
-      } catch {
-        navigation.replace('WalletSetup');
-      }
-    }
-  };
+  if (failed) {
+    return (
+      <SafeAreaView style={{ flex: 1, justifyContent: 'center', backgroundColor: theme.colors.background.primary, paddingHorizontal: theme.spacing[6] }}>
+        <View style={{ gap: theme.spacing[4] }}>
+          <Text accessibilityRole="header" style={{ color: theme.colors.text.primary, fontSize: theme.typography.fontSize.xl, fontWeight: '700' }}>Couldn’t open your wallet</Text>
+          <Text style={{ color: theme.colors.text.secondary, fontSize: theme.typography.fontSize.base }}>Unlock your device if needed, then try again.</Text>
+          <Button title="Try again" onPress={() => { setFailed(false); setAttempt(value => value + 1); }} />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
-  // Branded loader that visually continues the BrandIntro (same dark
-  // kaleidoscope background) so the launch feels like one seamless moment
-  // instead of flashing a white screen with a blue spinner.
   return <BrandLoading />;
 }

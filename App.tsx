@@ -18,7 +18,6 @@ import { MindCharacterBadge } from './components/mind/MindCharacter';
 import { defineBackgroundPaymentCheck, scheduleBackgroundPaymentCheck } from './services/paymentNotifications';
 import { ThemeProvider } from '@react-navigation/native';
 import { BrandLoading } from './components/brand/BrandLoading';
-import { BrandIntro } from './components/brand/BrandIntro';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ToastContainer } from './components/Toast';
 import { PersistenceLoading } from './components/PersistenceLoading';
@@ -337,17 +336,11 @@ function QVACEnabledSync() {
   return null;
 }
 
-function AppLoadingScreen() {
-  // Same branded loader the BrandIntro fades into — keeps startup seamless.
-  return <BrandLoading />;
-}
-
 export default function App() {
   const navigationTheme = createNavigationTheme();
-  const [introDone, setIntroDone] = React.useState(false);
   // Load the Satoshi brand typeface (shipped by kaleido-ui) before first paint
   // so the app-wide Text patch resolves real faces rather than the system fallback.
-  const [fontsLoaded] = useFonts(kaleidoFonts);
+  const [fontsLoaded, fontError] = useFonts(kaleidoFonts);
 
   React.useEffect(() => {
     // The background balance check and its task definition live outside Redux
@@ -372,9 +365,9 @@ export default function App() {
     };
   }, []);
 
-  // Hold on the branded loader until Satoshi is registered (all hooks above run first).
-  if (!fontsLoaded) {
-    return <AppLoadingScreen />;
+  // Keep wallets accessible even if a bundled font fails to load.
+  if (!fontsLoaded && !fontError) {
+    return <BrandLoading />;
   }
 
   return (
@@ -401,7 +394,6 @@ export default function App() {
               </AppThemeProvider>
             </PersistGate>
           </Provider>
-          {!introDone && <BrandIntro onFinish={() => setIntroDone(true)} />}
         </ErrorBoundary>
       </SafeAreaProvider>
     </GestureHandlerRootView>
