@@ -449,15 +449,17 @@ test asset using an invoice from Rate. Refresh RGB activity and verify that
 the transfer settles and the asset appears in Assets after restarting the app.
 Regular RGB transfers can still run with the chain configuration omitted.
 
-### Connect an RGB dApp from the phone
+### Connect an RGB dApp over Nostr Wallet Connect
 
-Set `EXPO_PUBLIC_WALLETCONNECT_PROJECT_ID` to your Reown project's public ID before building Rate. The release workflow reads the GitHub Actions variable `WALLETCONNECT_PROJECT_ID`. Rebuild the native app to enable checked mint receipts and transaction previews for creating colorable outputs.
+On a fresh beta install, open **Settings → Advanced → RGB → This phone**, select the dApp’s network, then tap **Connect**. For the Mosaik Signet preview, select **Mutinynet**. In Mosaik choose the phone wallet, then open **Scan** in Rate and scan the Nostr wallet authorization QR. Review the app’s public key, permissions, network and expiry. Revoke its access under **Settings → Connected apps**.
 
-On a fresh beta install, open **Settings → Advanced → RGB → This phone**. Select **Signet** for Utexo Mint or **Mutinynet** for Mosaik, then tap **Connect**. Open **Scan**, scan the dApp's WalletConnect QR, review the domain and requested permissions, and approve the session. Rate asks again before signing a message, creating an invoice, or sending an asset. Use **Connected apps** in Settings to disconnect a site.
+Mosaik can read balances and request **Prepare wallet**. Rate shows the Bitcoin outputs and mining fee and asks for approval before signing. Taking a P2P order still requires the extension’s swap interface.
 
-Utexo Mint's RGB connector requests `getAddress` and `blindReceive` on public Signet. Configure the bridge RPC described above so the phone can verify a prepared mint before the EVM deposit. Mint's portal login is separate. A WebRGB dApp can request `sendAsset` for a phone-approved transfer. Automated bridge redemption would also require `burnAsset` and `getConsignment`, which Rate does not advertise.
+Rate serves WebRGB operations over encrypted NIP-47 requests on the KaleidoSwap Nostr relay. A compatible app requests the required methods through a NWC-08 authorization QR. Operations that create invoices, send RGB assets, create outputs or sign messages require approval on the unlocked phone. The standard Lightning NWC client remains available for connecting an external wallet.
 
-For Mosaik on Mutinynet, **Prepare wallet** shows the Bitcoin outputs and mining fee on the phone before signing. Taking a Mosaik P2P order requires the extension's swap interface.
+#### Receive a Utexo Mint transfer
+
+Utexo Mint’s current wallet picker supports WalletConnect v2 and selected browser extensions. To use Rate, select **Signet** on the phone, then open **Settings → Connected apps → Create Utexo Mint invoice**. Rate prepares an amountless invoice valid for one day. Copy it while at least 12 hours remain. In Mint select **Paste invoice** with the receiving wallet disconnected. Check the bridge details in Mint and authorize the deposit in your EVM wallet. This path does not establish an NWC session or provide phone verification of the prepared mint.
 
 ### AI library baseline
 

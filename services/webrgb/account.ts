@@ -18,5 +18,5 @@ export function currentWebRgbAccount() {
       !account?.network || account.ownerKey !== rgbL1WalletKey(wallet.encrypted_mnemonic)) {
     throw new Error('Enable RGB on this phone for the active wallet, then scan the code again.');
   }
-  return { account, walletName: typeof wallet.name === 'string' ? wallet.name : '', key: `webrgb-wc-v1-${wallet.id}-${account.ownerKey}-${account.network}` };
+  return { account, walletName: typeof wallet.name === 'string' ? wallet.name : '', key: `webrgb-nwc-v1-${wallet.id}-${account.ownerKey}-${account.network}` };
 }

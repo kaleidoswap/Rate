@@ -1,13 +1,22 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js';
-import type { ProviderErrorCode, RgbBlindReceiveArgs, RgbMethod, RgbTransfer } from '@utexo/webrgb';
-import type { WalletConnectBackend, WalletConnectWalletContext } from '@utexo/webrgb-walletconnect';
+import type { ProviderErrorCode, RgbBlindReceiveArgs, RgbMethod, RgbProvider, RgbTransfer } from '@utexo/webrgb';
 import type { Balance, BitcoinNetwork, InvoiceData } from '../../modules/kaleido-rgb';
 import { formatAssetAmount } from '../../utils/assetAmount';
 import type { RgbLibRnAccount } from '../protocols/rgbLibRn';
 import { validateSignMessage } from './message';
 import { getReceivedMint, supportsReceivedMint } from './mint';
+
+export interface WebRgbContext {
+  /** Authenticated client identity used to scope issued invoices. */
+  origin: string;
+  network: string;
+  requestSignal: AbortSignal;
+  assertAuthorized(): void;
+}
+
+export type WebRgbBackend = Partial<RgbProvider> & Pick<RgbProvider, 'enable' | 'getInfo'>;
 
 const BASE_METHODS: RgbMethod[] = [
   'enable', 'getInfo', 'getAddress', 'getBtcBalance', 'listAssets',
@@ -89,9 +98,10 @@ function nativeError(error: unknown): never {
 }
 
 export function createWebRgbProvider(
-  account: RgbLibRnAccount, context: WalletConnectWalletContext,
+  account: RgbLibRnAccount, context: WebRgbContext,
   approve: (detail: string) => Promise<void>, assertActive: () => void,
-): WalletConnectBackend {
+  invoicesByRecipient = new Map<string, string>(),
+): WebRgbBackend {
   const methods = webRgbMethods(account);
   function ownedInvoiceKey(invoice: string) {
     const binding = JSON.stringify([account.ownerKey, context.network, context.origin, invoice]);
@@ -99,7 +109,6 @@ export function createWebRgbProvider(
   }
   // Proxy v1 sends need the invoice's encryption key and deadline. A dApp can
   // decode an invoice and then use its bare recipient ID for an explicit amount.
-  const invoicesByRecipient = new Map<string, string>();
   function rememberInvoice(recipient: string, invoice: string) {
     invoicesByRecipient.delete(recipient);
     if (invoicesByRecipient.size >= 64) invoicesByRecipient.delete(invoicesByRecipient.keys().next().value!);

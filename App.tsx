@@ -90,7 +90,7 @@ type RootStackParamList = {
   Settings: undefined;
   Send: { selectedAsset?: any; preferredAccount?: 'BARK'; prefilledAddress?: string; contactName?: string; prefilledAmountSat?: number; resumePayment?: boolean } | undefined;
   MerchantOffer: undefined;
-  Receive: { selectedAsset?: any; prefilledAmountSat?: number; prefilledNetwork?: 'lightning' | 'onchain'; prefilledAssetTicker?: string } | undefined;
+  Receive: import('./utils/receive-routes').ReceiveParams | undefined;
   Bridge: undefined;
   QRScanner: { mode?: 'payment' | 'contact'; returnScreen?: string } | undefined;
   Assets: { issue?: boolean } | undefined;
@@ -110,7 +110,7 @@ type RootStackParamList = {
   MindSettings: undefined;
   AgentWallet: undefined;
   LightningAddress: undefined;
-  WebRgbConnections: { pairing?: boolean } | undefined;
+  WebRgbConnections: undefined;
   NWCConnect: { scanned?: string } | undefined;
   RgbNode: undefined;
   Chat: { pubkey: string; name?: string; npub?: string; avatarUrl?: string };

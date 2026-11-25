@@ -1,6 +1,6 @@
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
-import { pairWalletConnect } from '../services/webrgb/walletConnect';
+import { pairWebRgb } from '../services/webrgb/nwc';
 import { isPayable } from '../services/kaleidoPay';
 import { rgbInvoiceWallet } from '../services/kaleidoPay/connect';
 // screens/QRScannerScreen.tsx
@@ -113,13 +113,17 @@ export default function QRScannerScreen({ navigation, route }: Props) {
     try {
       data = data.trim();
       if (/^wc:/i.test(data)) {
+        setScanError('Choose Nostr Wallet Connect in the app to get a compatible QR code.');
+        return;
+      }
+      if (/^nostr\+walletauth(?:\+kaleidoswap)?:/i.test(data)) {
         if (captureMode === 'contact') {
-          setScanError('This is a WalletConnect invitation. Open Scan from the wallet to connect.');
+          setScanError('This is a Nostr wallet authorization request. Open Scan from the wallet to connect.');
           return;
         }
         try {
-          await pairWalletConnect(data);
-          if (current === scanRevision.current) navigation.replace('WebRgbConnections', { pairing: true });
+          await pairWebRgb(data);
+          if (current === scanRevision.current) navigation.replace('WebRgbConnections');
         } catch (error) {
           if (current === scanRevision.current) setScanError(error instanceof Error ? error.message : 'Could not pair with this app.');
         }
@@ -560,7 +564,7 @@ export default function QRScannerScreen({ navigation, route }: Props) {
             <TouchableOpacity accessibilityRole="button" disabled={processing} onPress={() => void pasteRequest()} style={styles.entryAction}><Ionicons name="clipboard-outline" size={24} color={theme.colors.text.primary} /><Text style={styles.entryLabel}>Paste</Text></TouchableOpacity>
             <TouchableOpacity accessibilityRole="button" disabled={processing} onPress={() => void chooseImage()} style={styles.entryAction}><Ionicons name="image-outline" size={24} color={theme.colors.text.primary} /><Text style={styles.entryLabel}>Choose image</Text></TouchableOpacity>
           </View>
-          <Text style={{ color: theme.colors.text.secondary, textAlign: 'center' }}>{processing ? 'Reading request…' : captureMode === 'contact' ? 'Scan a contact code or paste their address.' : 'Scan a payment request or a WalletConnect QR code.'}</Text>
+          <Text style={{ color: theme.colors.text.secondary, textAlign: 'center' }}>{processing ? 'Reading request…' : captureMode === 'contact' ? 'Scan a contact code or paste their address.' : 'Scan a payment request or a Nostr wallet authorization QR code.'}</Text>
         </View>
       </SafeAreaView>
     </View>

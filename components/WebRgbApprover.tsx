@@ -4,8 +4,8 @@ import { useAppSelector } from '../store/hooks';
 import { isAppUnlocked, subscribeAppLockState } from '../services/appLockState';
 import { isRgbConnecting, subscribeRgbConnecting } from '../services/protocols/wdk';
 import {
-  invalidateWalletConnect, restoreWalletConnect, setWalletConnectReviewer, type WalletConnectReview,
-} from '../services/webrgb/walletConnect';
+  invalidateWebRgb, restoreWebRgb, setWebRgbReviewer, type WebRgbReview,
+} from '../services/webrgb/nwc';
 import { useAppLanguage } from '../localization/useAppLanguage';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { Button } from './Button';
@@ -14,7 +14,7 @@ import { Sheet } from './Sheet';
 export function WebRgbApprover() {
   const walletId = useAppSelector(state => state.wallet.activeWallet?.id);
   const unlocked = useAppSelector(state => state.wallet.isUnlocked);
-  const [review, setReview] = useState<WalletConnectReview | null>(null);
+  const [review, setReview] = useState<WebRgbReview | null>(null);
   const pending = useRef<((answer: boolean) => void) | null>(null);
   const { t } = useAppLanguage();
   const theme = useAppTheme();
@@ -22,14 +22,14 @@ export function WebRgbApprover() {
   useEffect(() => {
     const ready = () => Boolean(walletId && unlocked && isAppUnlocked() && AppState.currentState === 'active' && !isRgbConnecting());
     const refresh = () => {
-      if (ready()) void restoreWalletConnect().catch(() => {});
+      if (ready()) void restoreWebRgb().catch(() => {});
       else {
         pending.current?.(false);
-        invalidateWalletConnect();
+        invalidateWebRgb();
       }
     };
 
-    setWalletConnectReviewer(request => new Promise<boolean>(resolve => {
+    setWebRgbReviewer(request => new Promise<boolean>(resolve => {
       if (pending.current || request.signal.aborted || !ready()) { resolve(false); return; }
       const finish = (accepted: boolean) => {
         if (pending.current !== finish) return;
@@ -49,9 +49,9 @@ export function WebRgbApprover() {
     refresh();
     return () => {
       lock(); network(); app.remove();
-      setWalletConnectReviewer(undefined);
+      setWebRgbReviewer(undefined);
       pending.current?.(false);
-      invalidateWalletConnect();
+      invalidateWebRgb();
     };
   }, [walletId, unlocked]);
 
@@ -66,7 +66,7 @@ export function WebRgbApprover() {
     <ScrollView style={{ flexShrink: 1 }} contentContainerStyle={{ gap: theme.spacing[2], paddingBottom: theme.spacing[4] }}>
       <Text style={{ color: theme.colors.text.primary, fontWeight: 'bold' }}>{review.url}</Text>
       <Text style={{ color: theme.colors.text.secondary }}>{review.name}</Text>
-      {review.verification === 'UNKNOWN' && <Text style={{ color: theme.colors.text.secondary }}>{t('WalletConnect could not verify this site.')}</Text>}
+      {connecting && <Text style={{ color: theme.colors.text.secondary }}>{t('The app supplies its own name. Check the Nostr public key before connecting.')}</Text>}
       {review.details.map((detail, index) => <Text key={index} selectable style={{ color: theme.colors.text.primary }}>{detail}</Text>)}
     </ScrollView>
   </Sheet>;

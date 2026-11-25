@@ -181,7 +181,7 @@ export default function ReceiveScreen(props: Props) {
   // If navigation reuses Receive for a new request, discard the previous code and its work together.
   const requestKey = JSON.stringify([
     asset?.asset_id, asset && receiveAssetFamily(asset),
-    params?.prefilledAmountSat, params?.prefilledNetwork, params?.prefilledAssetTicker,
+    params?.prefilledAmountSat, params?.prefilledNetwork, params?.prefilledAssetTicker, params?.rgbInvoicePreset,
   ]);
   return <ReceiveRequestScreen key={requestKey} {...props} />;
 }
@@ -219,7 +219,10 @@ function ReceiveRequestScreen({ navigation, route: navRoute }: Props) {
   const backup = React.useSyncExternalStore(onRgbBackupStatus, rgbBackupStatus);
   const getProtocolStatus = useRefreshableProtocolStatus();
 
-  const passedAsset = navRoute?.params?.selectedAsset;
+  const mintInvoice = navRoute?.params?.rgbInvoicePreset === 'utexoMint';
+  const passedAsset = navRoute?.params?.selectedAsset ?? (mintInvoice
+    ? { asset_id: NEW_RGB_ASSET_ID, ticker: 'RGB', name: 'Any RGB asset', protocol: 'RGB' as const }
+    : undefined);
   const startRoute = initialReceiveRoute(passedAsset);
   const [selectedAsset, setSelectedAsset] = useState<ReceiveAsset>(() => passedAsset ?? btcAsset());
   const [awaitingPrefilledAsset, setAwaitingPrefilledAsset] = useState(() => !passedAsset && !!navRoute?.params?.prefilledAssetTicker);
@@ -267,7 +270,7 @@ function ReceiveRequestScreen({ navigation, route: navRoute }: Props) {
   const requestEventId = useRef<string | null>(null);
   const requestScrollView = useRef<ScrollView>(null);
   const [amount, setAmount] = useState('');
-  const [expirySeconds, setExpirySeconds] = useState(3600);
+  const [expirySeconds, setExpirySeconds] = useState(mintInvoice ? 86_400 : 3600);
   const [showCountdown, setShowCountdown] = useState(false);
 
   const [loading, setLoading] = useState(false);
@@ -844,6 +847,12 @@ function ReceiveRequestScreen({ navigation, route: navRoute }: Props) {
             support: rgbReceiveSupport(rgbAssetAdapter),
             proxyV1: rgbReceiveUsesProxyV1(rgbAssetAdapter, nativeRgbSupportsBfa),
           });
+          if (mintInvoice && (!rgbAccountIsOnDevice() || receiveAccountChain('RGB') !== 'signet')) {
+            throw new Error('Utexo Mint requires RGB on this phone on public Signet.');
+          }
+          if (mintInvoice && (params.amount !== undefined || Number(params.duration_seconds) <= 43_200)) {
+            throw new Error('Utexo Mint needs an open amount and more than 12 hours of invoice validity.');
+          }
           const issuedAt = Date.now();
           const rgbInvoice = await runReceiveOperation('Create RGB asset invoice', (signal) =>
             callAbortableAdapterMethod<any>(rgbAssetAdapter, 'createRgbInvoice', [params], signal));

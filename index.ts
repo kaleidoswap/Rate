@@ -1,5 +1,4 @@
 // Polyfills - must be imported first
-import '@walletconnect/react-native-compat';
 import 'react-native-get-random-values';
 import { Buffer } from 'buffer';
 // @ts-expect-error — no types for this polyfill

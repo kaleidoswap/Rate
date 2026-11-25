@@ -1,5 +1,4 @@
 import type { RgbLibRnAccount } from '../protocols/rgbLibRn';
-import type { WalletConnectWalletContext } from '@utexo/webrgb-walletconnect';
 import { createWebRgbProvider, webRgbMethods } from './provider';
 import { getReceivedMint, supportsReceivedMint } from './mint';
 
@@ -39,7 +38,7 @@ function setup(origin = 'https://mint.test', network = 'mutinynet') {
   const assertActive = jest.fn();
   const approve = jest.fn(async (_details: string) => {});
   const provider = createWebRgbProvider(account as unknown as RgbLibRnAccount,
-    { network, origin, assertAuthorized } as unknown as WalletConnectWalletContext, approve, assertActive);
+    { network, origin, assertAuthorized, requestSignal: new AbortController().signal }, approve, assertActive);
   return { provider, account, approve, assertActive, assertAuthorized };
 }
 

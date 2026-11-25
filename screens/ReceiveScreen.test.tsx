@@ -24,6 +24,7 @@ const mockDispatch = jest.fn();
 let mockConnected: Record<'RGB' | 'SPARK' | 'ARKADE', boolean>;
 let mockAssets: InventoryAsset[];
 let mockRemoteRgb: boolean;
+let mockRgbChain = 'mutinynet';
 
 jest.mock('@react-navigation/native', () => ({ useIsFocused: () => true }));
 jest.mock('../store/hooks', () => ({
@@ -55,7 +56,7 @@ jest.mock('../services/protocols/rgbBackup', () => {
 });
 jest.mock('../services/kaleidoPay/connect', () => ({
   arkadeReceiveOptions: () => ({ wallet: {}, arkServerUrl: 'https://arkade.invalid' }),
-  receiveAccountChain: () => 'mutinynet',
+  receiveAccountChain: () => mockRgbChain,
 }));
 jest.mock('../services/kaleidoPay/arkadeIntents', () => ({
   createArkadeLightningReceive: (opts: unknown, sats: number) => mockReceive(opts, sats),
@@ -92,6 +93,7 @@ const generate = () => act(async () => { await jest.advanceTimersByTimeAsync(450
 beforeEach(() => {
   jest.useFakeTimers();
   jest.clearAllMocks();
+  mockRgbChain = 'mutinynet';
   mockRgbInvoice.mockReset().mockResolvedValue({ invoice: mockRgbCode });
   mockConnected = { RGB: false, SPARK: false, ARKADE: false };
   mockAssets = [];
@@ -302,4 +304,21 @@ test('leaves an Arkade Lightning invoice in the universal QR when it has the sam
   expect(payment.searchParams.get('lightning')).toBe(mockLightningCode);
   expect(payment.searchParams.get('amount')).toBe('0.0001');
   expect(ui.queryByLabelText('Share Arkade Lightning invoice')).toBeNull();
+});
+
+test('the Utexo Mint preset issues an amountless public Signet invoice valid for one day', async () => {
+  mockConnected.RGB = true;
+  mockRgbChain = 'signet';
+  const ui = render(<ReceiveScreen navigation={navigation} route={{ params: { rgbInvoicePreset: 'utexoMint' } }} />);
+  await generate();
+  expect(mockRgbInvoice).toHaveBeenCalledWith({ duration_seconds: 86_400, min_confirmations: 1 });
+  expect(ui.getByLabelText('Copy RGB invoice')).toBeTruthy();
+});
+
+test('the Utexo Mint preset cannot issue an invoice on Mutinynet', async () => {
+  mockConnected.RGB = true;
+  const ui = render(<ReceiveScreen navigation={navigation} route={{ params: { rgbInvoicePreset: 'utexoMint' } }} />);
+  await generate();
+  expect(mockRgbInvoice).not.toHaveBeenCalled();
+  expect(ui.queryByLabelText('Copy RGB invoice')).toBeNull();
 });

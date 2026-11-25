@@ -11,10 +11,12 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 ## [Unreleased]
 
 ### Added
-- **WebRGB connections.** Scan a dApp's WalletConnect QR to connect your
-  on-device RGB account. Review invoices, asset transfers and signing requests
-  on the phone. Utexo Mint uses public Signet. Mosaik's wallet preparation
-  uses Mutinynet and shows the outputs and mining fee before you approve.
+- **WebRGB over Nostr Wallet Connect.** Scan a compatible dApp’s authorization
+  QR to use the on-device RGB wallet. Review transfers, invoice requests and
+  message signatures on the phone. Mosaik on Mutinynet also shows the Bitcoin
+  outputs and mining fee before signing a wallet preparation transaction.
+- **Utexo Mint invoices.** Connected apps can prepare an amountless, one-day
+  public Signet invoice for Mint’s manual receive flow.
 - **Settings → Labs.** Experimental features have a switch each: Arkade,
   Prismo, contacts and chat, places to pay, wallet connections, the RGB
   Lightning node and Lightning channels. Beta and store builds start them

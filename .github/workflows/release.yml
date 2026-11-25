@@ -38,7 +38,6 @@ concurrency:
 # (services/features.ts) and comes from the APP_CHANNEL repo variable: a tag or
 # an uploading run needs beta or store; only a dry run may build dev.
 env:
-  EXPO_PUBLIC_WALLETCONNECT_PROJECT_ID: ${{ vars.WALLETCONNECT_PROJECT_ID }}
   EXPO_PUBLIC_FLASHNET_ORCHESTRA_KEY: ${{ vars.FLASHNET_ORCHESTRA_KEY }}
   EXPO_PUBLIC_CHANNEL: ${{ vars.APP_CHANNEL }}
   # Sentry DSN (public by design). Without it the app has no crash reporting
