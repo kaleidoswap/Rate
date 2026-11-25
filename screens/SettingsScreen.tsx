@@ -1,9 +1,9 @@
 import { useAppLanguage } from '../localization/useAppLanguage';
 import { AccountSettings } from '../components/AccountSettings';
 import { BARK_ENABLED } from '../services/protocols/bark';
-import { loadRgbL1Network, RGB_L1_ENABLED } from '../services/protocols/rgbL1';
+import { loadRgbL1Network, rgbL1HomeNetwork, RGB_L1_ENABLED, RGB_L1_NETWORK_LABEL, type RgbL1Network } from '../services/protocols/rgbL1';
 import { RgbAccountSettings, RGB_STATUS } from '../components/RgbAccountSettings';
-import { RgbWalletTools } from '../components/rgb/RgbWalletTools';
+import { RgbOnDeviceSettings } from '../components/RgbOnDeviceSettings';
 import { rgbNetworkLabel } from '../services/protocols/rgbAccount';
 import { currentBarkHost, isBarkOff, loadBarkHost, saveBarkNetwork, setBarkOff } from '../services/protocols/barkPreferences';
 import { toEngineProtocol } from '../utils/protocol-bridge'
@@ -49,7 +49,7 @@ import { getStoredHandle } from '../services/kaleidoswapMe';
 import { syncPaymentPush, setPaymentNotificationsEnabled, scheduleBackgroundPaymentCheck, defineBackgroundPaymentCheck } from '../services/paymentNotifications';
 import SecurityService, { type SecuritySettings } from '../services/SecurityService';
 import { RevealMnemonicModal } from '../components/RevealMnemonicModal';
-import { initializeProtocols, protocolManager, rgbAccountAdapter, rgbNodeConnected } from '../services/protocols';
+import { initializeProtocols, protocolManager, rgbNodeConnected } from '../services/protocols';
 import { removeNwcCredential, WALLET_SERVICE_NWC_URI_KEY } from '../services/nwc/connectionStore';
 import { clearNwcConnections } from '../store/slices/nostrSlice';
 import {
@@ -71,8 +71,12 @@ interface Props {
 type WalletProtocol = 'RGB' | 'SPARK' | 'ARKADE';
 type SettingsAccount = WalletProtocol | 'BARK';
 const WALLET_PROTOCOLS: readonly WalletProtocol[] = ['RGB', 'SPARK', 'ARKADE'];
+const ACCOUNT_NAMES: Record<SettingsAccount, string> = { RGB: 'RGB', SPARK: 'Spark', ARKADE: 'Arkade', BARK: 'Bark' };
 const RGB_VIA_NWC = process.env.EXPO_PUBLIC_RGB_VIA_NWC !== '0';
 const LABS_TERMS = 'labs experimental features beta arkade prismo assistant contacts chat places map nwc wallet connections rgb node lightning channels';
+const BACKUP_TERMS = 'security backup rgb data restore view recovery phrase seed words mnemonic';
+const ACCOUNT_TERMS = 'accounts wallet protocols network spark arkade rgb bark servers mutinynet signet regtest testnet mainnet';
+const WALLET_TOOL_TERMS = 'advanced wallet tools open lightning channel liquidity';
 const APP_LOCK_TERMS = 'app lock biometric face id touch fingerprint pin passcode auto-lock autolock timeout';
 const AUTO_LOCK_MINUTES = [0, 1, 5, 15, 30, 60];
 const autoLockLabel = (m: number) => m === 0 ? 'Immediately' : m === 60 ? 'After 1 hour' : `After ${m} minute${m === 1 ? '' : 's'}`;
@@ -154,6 +158,7 @@ export default function SettingsScreen({ navigation }: Props) {
   const selectedNwcConnection = (nostrState.nwcConnections ?? []).find(
     (connection) => connection.id === nostrState.selectedNwcConnectionId,
   );
+  const rgbConnection = RGB_VIA_NWC && selectedNwcConnection?.type === 'rln' ? selectedNwcConnection : undefined;
   const disclosureLevel = useAppSelector(selectDisclosureLevel);
   const feature = {
     arkade: useFeature('arkade'), prismo: useFeature('prismo'), map: useFeature('map'), nwc: useFeature('nwc'),
@@ -162,8 +167,10 @@ export default function SettingsScreen({ navigation }: Props) {
   const expoVersion = Constants.expoConfig?.version;
   const expoBuildVersion = Constants.expoConfig?.ios?.buildNumber;
   const [settingsQuery, setSettingsQuery] = useState('');
+  const [accountsExpanded, setAccountsExpanded] = useState(false);
   type SettingsPage = 'preferences' | 'security' | 'connections' | 'advanced' | 'labs';
-  const [account, setAccount] = useState<SettingsAccount | null>(null);
+  const [accountView, setAccount] = useState<SettingsAccount | 'rgb-backup' | null>(null);
+  const account = accountView === 'rgb-backup' ? 'RGB' : accountView;
   const [page, setPage] = useState<SettingsPage | null>(null);
   const titles: Record<SettingsPage, string> = { preferences: 'Preferences', security: 'Security & backup', connections: 'Connections', advanced: 'Advanced', labs: 'Labs' };
   const sections = [
@@ -174,10 +181,11 @@ export default function SettingsScreen({ navigation }: Props) {
     { page: 'connections', terms: 'connected apps webrgb nostr nwc qr' },
     { page: 'connections', terms: 'browser connection passkey phone rgb' },
     { page: 'security', terms: APP_LOCK_TERMS },
-    { page: 'security', terms: 'security backup view recovery phrase seed words mnemonic' },
+    { page: 'security', terms: BACKUP_TERMS },
     { page: 'preferences', terms: 'preferences bitcoin balance unit sats satoshis btc denomination sound sounds payment currency fiat notifications language lingua italiano english crash reports bugs privacy' },
     { page: 'preferences', terms: 'display detail mode lite advanced simple view interface' },
-    { page: 'advanced', terms: 'advanced accounts wallet protocols network spark arkade rgb bark servers mutinynet signet regtest testnet mainnet' },
+    { page: null, terms: ACCOUNT_TERMS },
+    ...(feature.lsp ? [{ page: 'advanced', terms: WALLET_TOOL_TERMS }] : []),
     { page: 'security', terms: 'danger remove delete wallet' },
     { page: 'labs', terms: LABS_TERMS },
   ];
@@ -186,7 +194,7 @@ export default function SettingsScreen({ navigation }: Props) {
     ? query.split(/\s+/).every(word => terms.includes(word))
     : sections.find(section => section.terms === terms)?.page === page;
   const hasSettingsSearchResults = !query || sections.some(section => showSection(section.terms));
-  const atHome = page === null && !query;
+  const atHome = !account && page === null && !query;
   const openPage = (next: SettingsPage) => { Keyboard.dismiss(); setSettingsQuery(''); setPage(next); };
   const goBack = useCallback(() => {
     if (account) setAccount(null);
@@ -313,6 +321,8 @@ export default function SettingsScreen({ navigation }: Props) {
     setRevealedMnemonic(null);
   };
 
+  const [savedRgbWalletId, setSavedRgbWalletId] = useState<number | null>(null);
+  const hasSavedRgbData = savedRgbWalletId !== null && savedRgbWalletId === activeWallet?.id;
   const [protoNetworks, setProtoNetworks] = useState<Record<string, string>>({});
   /** Bumped when the RGB account changes in Settings, to re-read its network. */
   const [rgbRevision, setRgbRevision] = useState(0);
@@ -330,11 +340,11 @@ export default function SettingsScreen({ navigation }: Props) {
   // TestFlight users can opt in here. The held onboarding feature keeps their
   // default wallet Spark-only and leaves any saved RGB selection in place.
   const allowNewPhoneSetup = feature.rgbOnDevice || (CHANNEL === 'beta' && RGB_L1_ENABLED);
-  const showRgbDataBackup = allowNewPhoneSetup || !!protoNetworks.rgbL1
+  const showRgbDataBackup = (RGB_L1_ENABLED && CHANNEL !== 'store') || hasSavedRgbData || !!protoNetworks.rgbL1
     || !!protocolManager.getAdapterIfAvailable('RGB_L1')?.isConnected();
   const refreshProtocolStatus = useCallback(() => {
     setProtocolStatus({
-      RGB: rgbAccountAdapter()?.isConnected() ?? false,
+      RGB: rgbNodeConnected() || !!protocolManager.getAdapterIfAvailable('RGB_L1')?.isConnected(),
       SPARK: protocolManager.getAdapterIfAvailable('SPARK')?.isConnected() ?? false,
       ARKADE: protocolManager.getAdapterIfAvailable('ARKADE')?.isConnected() ?? false,
       BARK: protocolManager.getAdapterIfAvailable('BARK')?.isConnected() ?? false,
@@ -348,8 +358,9 @@ export default function SettingsScreen({ navigation }: Props) {
   }, [navigation, refreshProtocolStatus]);
 
   useEffect(() => {
+    let current = true;
     (async () => {
-      const id = (activeWallet as any)?.id;
+      const id = activeWallet?.id;
       if (!id) return;
       try {
         const nets = await DatabaseService.getInstance().getWalletNetworks(id);
@@ -368,6 +379,7 @@ export default function SettingsScreen({ navigation }: Props) {
           ARKADE: nets.some((n) => n.type === 'arkade' && n.enabled),
           RGB: nets.some((n) => n.type === 'rln' && n.enabled),
         };
+        let hasLocalData = false;
         if (wallet && wallet.id === id && wallet.encrypted_mnemonic) {
           if (BARK_ENABLED) {
             enabled.BARK = !(await isBarkOff(wallet.encrypted_mnemonic));
@@ -376,17 +388,23 @@ export default function SettingsScreen({ navigation }: Props) {
           const onDevice = await loadRgbL1Network(wallet.encrypted_mnemonic);
           if (onDevice) enabled.RGB = true;
           map.rgbL1 = onDevice ?? '';
+          if (RGB_L1_ENABLED && !feature.rgbOnDevice && !onDevice) {
+            hasLocalData = !!(await rgbL1HomeNetwork(wallet.encrypted_mnemonic));
+          }
         }
+        if (!current) return;
+        setSavedRgbWalletId(hasLocalData ? id : null);
         setAccountEnabledState(enabled);
         setProtoNetworks(map);
       } catch { /* ignore */ }
     })();
-  }, [activeWallet, rgbRevision]);
+    return () => { current = false; };
+  }, [activeWallet, rgbRevision, feature.rgbOnDevice]);
 
   /** The RGB account's network: the RGB node's when it is the account, else this phone's. */
   const rgbNetwork = (): string | null => {
-    if (rgbNodeConnected()) return rgbNetworkLabel(selectedNwcConnection?.network ?? protoNetworks.rln);
-    return rgbNetworkLabel(protoNetworks.rgbL1);
+    if (rgbNodeConnected()) return rgbNetworkLabel(rgbConnection?.network ?? protoNetworks.rln);
+    return RGB_L1_NETWORK_LABEL[protoNetworks.rgbL1 as RgbL1Network] ?? null;
   };
 
   const changeProtocolNetwork = (proto: WalletProtocol, network: ProtocolNetwork, patch: Record<string, unknown> = {}) => {
@@ -631,12 +649,32 @@ export default function SettingsScreen({ navigation }: Props) {
     );
   };
 
+  const openRgbNode = () => {
+    if (feature.rgbNode || rgbNodeConnected() || (nostrState.nwcConnections ?? []).length > 0) navigation.navigate('RgbNode');
+    else Alert.alert(t('RGB Lightning node'), t('Turn on RGB Lightning node in Settings → Labs to connect one.'));
+  };
+  const rgbChanged = () => {
+    refreshProtocolStatus();
+    setRgbRevision((revision) => revision + 1);
+    void dispatch(loadBtcBalance());
+  };
+
+  const availableAccounts: SettingsAccount[] = [...WALLET_PROTOCOLS];
+  if (BARK_ENABLED) availableAccounts.push('BARK');
+  // Keep existing wallets reachable even when their Labs feature is off.
+  const visibleAccounts = availableAccounts.filter(proto =>
+    proto === 'SPARK' || accountEnabled[proto] || protocolStatus[proto]
+    || (proto === 'ARKADE' ? feature.arkade : proto === 'BARK' ? feature.bark : allowNewPhoneSetup || feature.rgbNode || hasSavedRgbData));
+  const accountColors = { RGB: theme.colors.primary[500], SPARK: theme.colors.networks.spark, ARKADE: theme.colors.networks.arkade, BARK: protocolColor('BARK') };
+  const accountIcon = (proto: SettingsAccount, size: number) => proto === 'RGB' && rgbNodeConnected()
+    ? <RgbNodeIcon size={size} /> : <NetworkIcon network={proto} size={size} color={accountColors[proto]} />;
+
   return (
     <View style={styles.container}>
-      <MainHeader title={account ? ({ RGB: 'RGB', SPARK: 'Spark', ARKADE: 'Arkade', BARK: 'Bark' }[account]) : t(query ? 'Search settings' : page ? titles[page] : 'Settings')} onBack={goBack} />
+      <MainHeader title={accountView === 'rgb-backup' ? t('RGB data backup') : account ? ACCOUNT_NAMES[account] : t(query ? 'Search settings' : page ? titles[page] : 'Settings')} onBack={goBack} />
       <ScrollView key={account ?? page ?? 'home'} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" style={styles.scrollView} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
 
-        {!page && <Input
+        {!account && !page && <Input
           value={settingsQuery}
           onChangeText={setSettingsQuery}
           placeholder={t("Search settings")}
@@ -657,21 +695,69 @@ export default function SettingsScreen({ navigation }: Props) {
             <Row icon="shield-checkmark-outline" label="Security & backup" onPress={() => openPage('security')} />
             <Row icon="link-outline" label="Connections" onPress={() => openPage('connections')} />
           </Group>
+        </>}
+
+        {showSection(ACCOUNT_TERMS) && <View style={styles.accountsPanel}>
+          {query ? <Text accessibilityRole="header" style={styles.accountSearchHeading}>{t('Accounts & networks')}</Text> : (
+            <TouchableOpacity accessible accessibilityRole="button" accessibilityLabel={t('Accounts & networks')}
+              accessibilityHint={visibleAccounts.map(proto => ACCOUNT_NAMES[proto]).join(', ')}
+              accessibilityState={{ expanded: accountsExpanded }} activeOpacity={0.7}
+              onPress={() => setAccountsExpanded(open => !open)} style={styles.accountsToggle}>
+              <Text style={[styles.rowText, styles.rowLabel]}>{t('Accounts & networks')}</Text>
+              <View style={styles.accountMarks} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+                {visibleAccounts.map(proto => <View key={proto} style={[styles.accountMark, { backgroundColor: accountColors[proto] + '1A' }]}>{accountIcon(proto, 14)}</View>)}
+              </View>
+              <Ionicons name={accountsExpanded ? 'chevron-up' : 'chevron-down'} size={16} color={theme.colors.text.tertiary} />
+            </TouchableOpacity>
+          )}
+          {(query || accountsExpanded) ? visibleAccounts.map(proto => {
+            const connected = protocolStatus[proto];
+            const connecting = protocolConnecting[proto] ?? false;
+            const error = protocolErrors[proto];
+            const network = proto === 'BARK' ? protoNetworks.bark ?? currentBarkHost()?.network : protoNetworks[PROTOCOL_TO_NETWORK_TYPE[proto]] ?? PROTOCOL_DEFAULT_NETWORK[PROTOCOL_TO_NETWORK_TYPE[proto]];
+            const networkLabel = proto === 'RGB' ? rgbNetwork()
+              : network ? (proto === 'BARK' && network === 'signet' ? 'Signet' : NETWORK_LABEL[network as ProtocolNetwork] ?? network) : null;
+            const failed = !!error && !error.startsWith('skipped');
+            // RGB uses the same words as its hub and node screen: Connected / Not connected.
+            const status = connecting ? 'Connecting...' : connected ? 'Connected'
+              : proto === 'RGB' ? (failed ? 'Error' : RGB_STATUS.notConnected)
+              : accountEnabled[proto] === false ? 'Off' : failed ? 'Error' : 'Offline';
+            const name = ACCOUNT_NAMES[proto];
+            return (
+              <TouchableOpacity key={proto} activeOpacity={0.7} accessibilityRole="button"
+                accessibilityLabel={t('{account} account settings').replace('{account}', name)}
+                accessibilityHint={`${t(status)}${networkLabel ? ` · ${networkLabel}` : ''}`}
+                onPress={() => { Keyboard.dismiss(); setAccount(proto); }}
+                style={styles.accountCard}>
+                <View style={[styles.accountIcon, { backgroundColor: accountColors[proto] + '1A' }]}>
+                  {accountIcon(proto, 16)}
+                </View>
+                <View style={styles.rowText}>
+                  <Text style={styles.rowLabel}>{name}</Text>
+                  {!!networkLabel && (connected || accountEnabled[proto] !== false) && <Text style={styles.rowDescription}>{networkLabel}</Text>}
+                </View>
+                <Text style={[styles.accountStatus, { color: failed ? theme.colors.error[500] : connected ? theme.colors.success[500] : theme.colors.text.secondary }]}>{t(status)}</Text>
+                <Ionicons name="chevron-forward" size={17} color={theme.colors.text.tertiary} />
+              </TouchableOpacity>
+            );
+          }) : null}
+        </View>}
+
+        {atHome && <>
           <SectionLabel>More</SectionLabel>
           <Group>
             {feature.map && <Row icon="map-outline" label="Places to pay" description="Nearby businesses accepting bitcoin" onPress={() => navigation.navigate('Map')} />}
             <Row icon="flask-outline" label="Labs" description="Experimental features you can turn on" onPress={() => openPage('labs')} />
-            <Row icon="construct-outline" label="Advanced" description="Accounts, networks and wallet tools" onPress={() => openPage('advanced')} />
+            {(__DEV__ || !RGB_VIA_NWC || feature.lsp) && <Row icon="construct-outline" label="Advanced" onPress={() => openPage('advanced')} />}
             <Row icon="information-circle-outline" label="About" value={`v${expoVersion ?? '—'}`} onPress={() => Alert.alert('KaleidoSwap Wallet', `Version ${expoVersion ?? '—'}\nBuild ${expoBuildVersion ?? '—'}\n\nA non-custodial Bitcoin & RGB wallet.`)} />
 
           </Group>
         </>}
-        {page === 'advanced' && !account && <Text style={styles.pageDescription}>Manage your accounts, networks and wallet tools. Changing a network changes which balance you see.</Text>}
         {page === 'labs' && !account && <Text style={styles.pageDescription}>{t('Experimental features are still being tested. Turn one on to try it; your funds stay in their accounts whether it is on or off.')}</Text>}
         {page === 'security' && !account && <Text style={styles.pageDescription}>Lock the app on this phone and keep your recovery phrase private. The phrase gives access to your funds.</Text>}
 
 
-        {!hasSettingsSearchResults && (
+        {!account && !hasSettingsSearchResults && (
           <View style={styles.searchEmpty} accessibilityRole="text">
             <Ionicons name="search-outline" size={24} color={theme.colors.text.tertiary} />
             <Text style={styles.searchEmptyTitle}>No settings found</Text>
@@ -837,7 +923,7 @@ export default function SettingsScreen({ navigation }: Props) {
         </>}
 
         {/* Security */}
-        {showSection('security backup view recovery phrase seed words mnemonic') && <>
+        {showSection(BACKUP_TERMS) && <>
         <SectionLabel>Security</SectionLabel>
         <Group>
           <Row
@@ -851,7 +937,7 @@ export default function SettingsScreen({ navigation }: Props) {
           />
           {activeWallet?.id != null && showRgbDataBackup && <Row icon="cloud-upload-outline" label="RGB data backup"
             description="RGB assets need an encrypted data backup as well as your recovery phrase. Check the last backup, retry or export a copy."
-            onPress={() => setAccount('RGB')} />}
+            onPress={() => { Keyboard.dismiss(); setAccount('rgb-backup'); }} />}
         </Group>
         <Text style={styles.pageDescription}>Keep both your recovery phrase and any required account backups. A connected Lightning node has its own backup procedure.</Text>
         </>}
@@ -918,16 +1004,18 @@ export default function SettingsScreen({ navigation }: Props) {
         </Group>
         </>}
 
-        {account === 'RGB' && activeWallet?.id != null && (
-          <RgbAccountSettings walletId={activeWallet.id}
-            allowNewPhoneSetup={allowNewPhoneSetup}
-            node={{ connected: rgbNodeConnected(), alias: selectedNwcConnection?.alias, network: selectedNwcConnection?.network ?? protoNetworks.rln }}
-            onOpenNode={() => feature.rgbNode || (nostrState.nwcConnections ?? []).length > 0
-              ? navigation.navigate('RgbNode')
-              : Alert.alert(t('RGB Lightning node'), t('Turn on RGB Lightning node in Settings → Labs to connect one.'))}
-            onChanged={() => { refreshProtocolStatus(); setRgbRevision((r) => r + 1); void dispatch(loadBtcBalance()); }} />
+        {accountView === 'rgb-backup' && activeWallet?.id != null && <Group>
+          <RgbOnDeviceSettings key={activeWallet.id} walletId={activeWallet.id} backupOnly nodeActive={rgbNodeConnected()}
+            onOpenNode={openRgbNode} onChanged={rgbChanged} />
+        </Group>}
+        {accountView === 'RGB' && activeWallet?.id != null && (
+          <RgbAccountSettings key={activeWallet.id} walletId={activeWallet.id} allowNewPhoneSetup={allowNewPhoneSetup || hasSavedRgbData}
+            node={{
+              connected: rgbNodeConnected(), alias: rgbConnection?.alias, network: rgbConnection?.network ?? protoNetworks.rln,
+              relays: rgbConnection?.relays, connectionId: rgbConnection?.id, transport: RGB_VIA_NWC ? 'nwc' : 'http',
+            }}
+            onOpenNode={openRgbNode} onChanged={rgbChanged} />
         )}
-        {account === 'RGB' && <RgbWalletTools key={rgbRevision} />}
         {account && account !== 'RGB' && activeWallet?.id != null && <AccountSettings account={account} walletId={activeWallet.id}
           network={account === 'BARK' ? protoNetworks.bark ?? currentBarkHost()?.network ?? 'mainnet' : protoNetworks[PROTOCOL_TO_NETWORK_TYPE[account]] ?? PROTOCOL_DEFAULT_NETWORK[PROTOCOL_TO_NETWORK_TYPE[account]]}
           connected={protocolStatus[account]}
@@ -939,73 +1027,10 @@ export default function SettingsScreen({ navigation }: Props) {
           onSave={patch => { if (account === 'ARKADE') changeProtocolNetwork(account, (protoNetworks.arkade ?? 'signet') as ProtocolNetwork, patch); }}
         />}
 
-        {/* Network changes live in the explicit Advanced section in both display modes. */}
-        {showSection('advanced accounts wallet protocols network spark arkade rgb bark servers mutinynet signet regtest testnet mainnet') && (
-          <>
+        {feature.lsp && showSection(WALLET_TOOL_TERMS) && <>
           <SectionLabel>Wallet tools</SectionLabel>
-          {feature.lsp && <Group><Row first icon="git-branch-outline" label="Open a Lightning channel" description="Add inbound or outbound liquidity" onPress={() => navigation.navigate('LSP')} /></Group>}
-          <SectionLabel>Accounts & networks</SectionLabel>
-          <Group>
-          {([...WALLET_PROTOCOLS, ...(BARK_ENABLED ? ['BARK' as const] : [])] as SettingsAccount[]).filter(proto =>
-            // Never hide money: an account this wallet already uses stays, whatever its feature state.
-            proto === 'SPARK' || accountEnabled[proto] === true || protocolStatus[proto]
-            || (proto === 'ARKADE' ? feature.arkade : proto === 'BARK' ? feature.bark : allowNewPhoneSetup || feature.rgbNode)).map((proto, idx) => {
-            const connected = protocolStatus[proto];
-            const connecting = protocolConnecting[proto] ?? false;
-            const error = protocolErrors[proto];
-            // RGB-Lightning uses the brand green accent (primary[500] === #2BEE79);
-            // Spark maps to accent[400] (=== #60A5FA). Arkade's purple has no exact
-            // token equivalent (brand.violet differs), so it stays a literal.
-            const colors: Record<string, string> = {
-              RGB: theme.colors.primary[500],
-              SPARK: theme.colors.networks.spark,
-              ARKADE: theme.colors.networks.arkade,
-              BARK: protocolColor('BARK'),
-            };
-            const labels: Record<string, string> = { RGB: 'RGB', SPARK: 'Spark', ARKADE: 'Arkade', BARK: 'Bark' };
-            const descs: Record<string, string> = {
-              RGB: rgbNodeConnected() ? 'RGB assets on your RGB Lightning Node' : protoNetworks.rgbL1 ? 'RGB assets on this phone' : 'RGB assets · this phone or your node',
-              SPARK: 'Bitcoin, Lightning and tokens',
-              ARKADE: 'Low-fee off-chain bitcoin',
-              BARK: 'Bitcoin via Second’s Ark network',
-            };
-            const network = proto === 'BARK' ? protoNetworks.bark ?? currentBarkHost()?.network : protoNetworks[PROTOCOL_TO_NETWORK_TYPE[proto]] ?? PROTOCOL_DEFAULT_NETWORK[PROTOCOL_TO_NETWORK_TYPE[proto]];
-            const networkLabel = proto === 'RGB' ? rgbNetwork()
-              : network ? (proto === 'BARK' && network === 'signet' ? 'Signet' : NETWORK_LABEL[network as ProtocolNetwork] ?? network) : null;
-            const failed = !!error && !error.startsWith('skipped');
-            // RGB uses the same words as its hub and node screen: Connected / Not connected.
-            const status = connecting ? 'Connecting...' : connected ? 'Connected'
-              : proto === 'RGB' ? (failed ? 'Error' : RGB_STATUS.notConnected)
-              : accountEnabled[proto] === false ? 'Off' : failed ? 'Error' : 'Offline';
-            // The whole row opens the account page; its network is changed there.
-            return (
-              <TouchableOpacity key={proto} activeOpacity={0.7} accessibilityRole="button"
-                accessibilityLabel={`${labels[proto]} account settings`} accessibilityHint={`${status}${networkLabel ? ` · ${networkLabel}` : ''}`}
-                onPress={() => { setSettingsQuery(''); setPage('advanced'); setAccount(proto); }}
-                style={[styles.row, idx > 0 && styles.rowDivider]}>
-                <View style={[styles.rowIcon, { backgroundColor: colors[proto] + '1A', opacity: connected ? 1 : 0.5 }]}>
-                  {proto === 'RGB' && rgbNodeConnected() ? <RgbNodeIcon size={18} /> : <NetworkIcon network={proto} size={18} color={colors[proto]} />}
-                </View>
-                <View style={[styles.rowText, { minHeight: 48, justifyContent: 'center' }]}>
-                  <Text style={styles.rowLabel}>{labels[proto]}</Text>
-                  <Text style={styles.rowDescription} numberOfLines={1}>{descs[proto]}</Text>
-                  {!!error && !connecting && (
-                    <Text style={[styles.rowDescription, { color: theme.colors.error[500] }]} numberOfLines={1}>
-                      {error}
-                    </Text>
-                  )}
-                </View>
-                <View style={{ alignItems: 'flex-end', gap: 2 }}>
-                  <Text style={{ fontSize: 11, fontWeight: '600', color: connected ? colors[proto] : theme.colors.text.tertiary }}>{status}</Text>
-                  {!!networkLabel && accountEnabled[proto] !== false && <Text style={styles.rowDescription}>{networkLabel}</Text>}
-                </View>
-                <Ionicons name="chevron-forward" size={18} color={theme.colors.text.tertiary} />
-              </TouchableOpacity>
-            );
-          })}
-          </Group>
-          </>
-        )}
+          <Group><Row first icon="git-branch-outline" label="Open a Lightning channel" description="Add inbound or outbound liquidity" onPress={() => navigation.navigate('LSP')} /></Group>
+        </>}
 
         {/* Remove from this device */}
         {page === 'advanced' && !account && __DEV__ && <>
@@ -1193,18 +1218,33 @@ const createStyles = (theme: ReturnType<typeof useAppTheme>) => StyleSheet.creat
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: theme.spacing[3],
-    paddingHorizontal: theme.spacing[4],
-    gap: theme.spacing[3],
-    minHeight: 68,
+    paddingVertical: theme.spacing[2],
+    paddingHorizontal: theme.spacing[3],
+    gap: theme.spacing[2],
+    minHeight: 52,
   },
+  accountsPanel: {
+    marginTop: theme.spacing[3], borderRadius: theme.borderRadius.md, overflow: 'hidden',
+    borderWidth: 1, borderColor: theme.colors.border.light, backgroundColor: theme.colors.surface.primary,
+  },
+  accountsToggle: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[2], minHeight: 44, paddingHorizontal: theme.spacing[3], paddingVertical: theme.spacing[1] },
+  accountMarks: { flexDirection: 'row', alignItems: 'center' },
+  accountMark: { alignItems: 'center', justifyContent: 'center', width: 20, height: 20, borderRadius: 10, marginLeft: -2 },
+  accountSearchHeading: { marginHorizontal: theme.spacing[3], marginVertical: theme.spacing[2], fontSize: theme.typography.fontSize.sm, fontWeight: '600', color: theme.colors.text.primary },
+  accountCard: {
+    flexDirection: 'row', alignItems: 'center', gap: theme.spacing[2],
+    minHeight: 44, paddingHorizontal: theme.spacing[3], paddingVertical: theme.spacing[1],
+    borderTopColor: theme.colors.border.light, borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  accountIcon: { width: 24, height: 24, borderRadius: theme.borderRadius.base, alignItems: 'center', justifyContent: 'center' },
+  accountStatus: { fontSize: theme.typography.fontSize.xs, fontWeight: '600', flexShrink: 1 },
   rowDivider: {
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: theme.colors.border.light,
   },
   rowIcon: {
-    width: 36,
-    height: 36,
+    width: 30,
+    height: 30,
     borderRadius: theme.borderRadius.base,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1213,7 +1253,7 @@ const createStyles = (theme: ReturnType<typeof useAppTheme>) => StyleSheet.creat
     flex: 1,
   },
   rowLabel: {
-    fontSize: theme.typography.fontSize.base,
+    fontSize: theme.typography.fontSize.sm,
     fontWeight: '600',
     color: theme.colors.text.primary,
   },

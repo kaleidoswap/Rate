@@ -338,10 +338,12 @@ export function FormField({
 
 export function Collapsible({
   title,
+  description,
   children,
   defaultOpen = false,
 }: {
   title: string;
+  description?: string;
   children: React.ReactNode;
   defaultOpen?: boolean;
 }) {
@@ -351,6 +353,7 @@ export function Collapsible({
     <View style={{ gap: t.spacing[2] }}>
       <Pressable
         accessibilityRole="button"
+        accessibilityLabel={description ? `${title}, ${description}` : title}
         accessibilityState={{ expanded: open }}
         onPress={() => setOpen(!open)}
         style={{ minHeight: 44, justifyContent: 'center' }}
@@ -358,6 +361,7 @@ export function Collapsible({
         <Typography>
           {title} {open ? '−' : '+'}
         </Typography>
+        {description && <Typography role="caption" muted>{description}</Typography>}
       </Pressable>
       {open && children}
     </View>

@@ -76,7 +76,7 @@ const RgbNodeScreen: React.FC<Props> = ({ navigation }) => {
                 message="This connection does not report the last successful backup. The node operator manages recovery for its bitcoin, RGB assets and Lightning channels." />
               <Text style={styles.text}>If you run the node, create an encrypted backup on its host and keep a copy off the host. Keep the backup password separately for a restore to a fresh node.</Text>
               <Text style={styles.text}>If someone else runs the node, ask when its last backup succeeded, whether it contains RGB and channel state, and how to request a restore.</Text>
-              <Text style={styles.meta}>The node has its own recovery credentials. Rate’s automatic encrypted cloud backups cover RGB on this phone.</Text>
+              <Text style={styles.meta}>The node has its own recovery credentials. Rate’s automatic encrypted cloud backups cover RGB on this phone. Check their status in the RGB account settings.</Text>
             </View>
           </>
         )}

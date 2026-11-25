@@ -108,7 +108,7 @@ export async function getRgbAssetMetadata(adapter: any, assetId: string): Promis
   if (!support.metadata) return null;
   const device = deviceAccount(adapter);
   if (device?.getAssetMetadata) return normalizeRgbAssetMetadata(await device.getAssetMetadata(assetId));
-  return normalizeRgbAssetMetadata(await adapter.executeProtocolOperation('getAssetMetadata', { asset_id: assetId }));
+  return normalizeRgbAssetMetadata(await adapter.executeProtocolOperation('getAssetMetadata', assetId));
 }
 
 /** Base units of an IFA asset this wallet may still issue; 0 when it holds no rights or can't inflate. */

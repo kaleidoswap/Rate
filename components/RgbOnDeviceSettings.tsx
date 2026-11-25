@@ -13,13 +13,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { theme } from '../theme';
+import { useAppLanguage } from '../localization/useAppLanguage';
 import DatabaseService from '../services/DatabaseService';
 import { CHANNEL } from '../services/features';
 import { rgbWalletErrorMessage } from '../utils/rgb-wallet';
 import { utexoUsdtContract } from '../services/protocols/utexoUsdt';
 import { protocolManager, reconcileRgbOnDevice, switchRgbOnDeviceNetwork } from '../services/protocols';
 import {
-  loadRgbL1Network, saveRgbL1Network, isRgbLibNativeAvailable, loadRgbL1Host, saveRgbL1Endpoints,
+  RGB_L1_ENABLED, loadRgbL1Network, saveRgbL1Network, isRgbLibNativeAvailable, loadRgbL1Host, saveRgbL1Endpoints,
   lockedRgbL1Network, pinnedRgbL1Network, markRgbL1Ready, rgbL1Host, RGB_L1_DEFAULT_NETWORK, RGB_L1_NETWORKS, RGB_L1_NETWORK_LABEL,
   readyRgbL1Networks, rgbL1Restorer, isRgbL1NetworkSwitchSupported, RGB_L1_UPDATE_TO_SWITCH,
   type RgbL1Network,
@@ -61,13 +62,27 @@ export function rgbStartError(error?: string): string {
 type Phase = 'checking' | 'connecting' | 'restoring' | 'stopping' | 'saving';
 type Restore = { kind: 'cloud' } | { kind: 'file'; uri: string };
 
-export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, onChanged }: {
+export interface RgbDeviceSections {
+  connected?: boolean;
+  enabledNetwork?: RgbL1Network | null;
+  network?: RgbL1Network;
+  backupStatus?: string;
+  backup?: React.ReactNode;
+  connection?: React.ReactNode;
+  notice?: React.ReactNode;
+}
+
+export function RgbOnDeviceSettings({ walletId, nodeActive = false, backupOnly = false, onOpenNode, onChanged, children }: {
   walletId: number;
   /** An RGB Lightning Node is connected: it is the RGB account, this wallet steps aside. */
   nodeActive?: boolean;
+  backupOnly?: boolean;
+  /** Lay out the same backup and connection controls separately in the RGB account. */
+  children?: (sections: RgbDeviceSections) => React.ReactElement;
   onOpenNode?: () => void;
   onChanged?: () => void;
 }) {
+  const { t } = useAppLanguage();
   const [loaded, setLoaded] = useState(false);
   /** The network RGB on this phone is turned on for, or null when it's off. */
   const [enabled, setEnabled] = useState<RgbL1Network | null>(null);
@@ -80,7 +95,7 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
   const [phase, setPhase] = useState<Phase | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
-  const [backupNeeded, setBackupNeeded] = useState(false);
+  const [backupNeeded, setBackupNeeded] = useState<boolean | null>(null);
   const [cloud, setCloud] = useState<RgbBackupStatus>(rgbBackupStatus());
   const [showServers, setShowServers] = useState(false);
   const [showNetworks, setShowNetworks] = useState(false);
@@ -88,14 +103,37 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
   const [proxy, setProxy] = useState('');
   const [serversEdited, setServersEdited] = useState(false);
   const [endpointError, setEndpointError] = useState<string | null>(null);
+  const [manifest, setManifest] = useState<{ network: RgbL1Network; at: number | null; unavailable?: boolean }>();
   useEffect(() => onRgbBackupStatus(setCloud), []);
+  // A reopened account has no in-memory upload timestamp. Read only the manifest
+  // for the connected wallet; picking another setup tab must not change this read.
+  useEffect(() => {
+    if (!connected || !enabled || nodeActive || cloud.state !== 'idle') return;
+    let current = true;
+    void activeMnemonic(walletId).then(mnemonic => findRgbCloudBackup(mnemonic, enabled)).then(
+      result => { if (current) setManifest({ network: enabled, at: result?.createdAt ?? null }); },
+      () => { if (current) setManifest({ network: enabled, at: null, unavailable: true }); },
+    );
+    return () => { current = false; };
+  }, [walletId, enabled, connected, nodeActive, cloud.state]);
+  // Automatic uploads can finish while the open account still shows pending changes.
+  useEffect(() => {
+    if (!connected || nodeActive || cloud.state !== 'done') return;
+    let current = true;
+    const account = rgbL1Account();
+    if (account) {
+      void account.backupRequired().then((needed: boolean) => {
+        if (current) setBackupNeeded(needed);
+      }).catch(() => { if (current) setBackupNeeded(null); });
+    }
+    return () => { current = false; };
+  }, [cloud, connected, nodeActive]);
   /** Why the last connection (at startup or from here) failed, with its ERR_RGB_* code. */
   const [lastFailure, setLastFailure] = useState<RgbConnectionError | null>(lastRgbConnectionError());
   useEffect(() => onRgbConnectionError(setLastFailure), []);
 
   const refresh = useCallback(async () => {
-    const account = rgbL1Account();
-    setConnected(!!account);
+    const account = nodeActive ? null : rgbL1Account();
     try {
       const mnemonic = await activeMnemonic(walletId);
       const [on, fixed, pinned, started] = await Promise.all([
@@ -104,15 +142,19 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
       setEnabled(on);
       setLocked(fixed);
       setReady(started);
+      setConnected(!!account);
+      setBackupNeeded(account ? await account.backupRequired().catch(() => null) : null);
       // A fixed network wins; otherwise show the last choice, else keep what's picked.
       const shown = fixed ?? on ?? pinned;
       if (shown) setNetwork(shown);
     } catch (e: any) {
+      setConnected(false);
+      setEnabled(null);
+      setBackupNeeded(null);
       setError(messageOf(e, 'Could not read the RGB settings.'));
     }
-    setBackupNeeded(account ? await account.backupRequired().catch(() => false) : false);
     setLoaded(true);
-  }, [walletId]);
+  }, [walletId, nodeActive]);
 
   useEffect(() => { void refresh(); }, [refresh]);
 
@@ -121,6 +163,7 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
     let live = true;
     setServersEdited(false);
     setEndpointError(null);
+    if (backupOnly || nodeActive) return;
     const defaults = rgbL1Host(network);
     setIndexer(defaults.indexerUrl);
     setProxy(defaults.transportEndpoint);
@@ -129,7 +172,7 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
       .then((host) => { if (live) { setIndexer(host.indexerUrl); setProxy(host.transportEndpoint); } })
       .catch(() => undefined); // the defaults stay shown; refresh() reports a locked wallet
     return () => { live = false; };
-  }, [walletId, network]);
+  }, [walletId, network, backupOnly, nodeActive]);
 
   const label = RGB_L1_NETWORK_LABEL[network];
   const busy = phase !== null;
@@ -347,54 +390,67 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
 
   const accent = theme.colors.primary[500];
   const errorText = !!error && <Callout tone="error" message={error} style={styles.callout} />;
-  const sectionLabel = (text: string) => <Text accessibilityRole="header" style={styles.sectionLabel}>{text}</Text>;
-  const rowIcon = (name: keyof typeof Ionicons.glyphMap, tint: string = theme.colors.text.secondary) => (
-    <View style={[styles.icon, { backgroundColor: tint + '1A' }]}><Ionicons name={name} size={18} color={tint} /></View>
+  const renderSections = (sections: RgbDeviceSections) => children ? children({
+    connected, enabledNetwork: enabled, network: loaded ? network : undefined, ...sections,
+  }) : (
+    <View>
+      {sections.notice}
+      {sections.connection}
+      {sections.backup && <>
+        <Text accessibilityRole="header" style={styles.sectionLabel}>{t('Backup')}</Text>
+        {sections.backup}
+      </>}
+    </View>
   );
-  const chevron = <Ionicons name="chevron-forward" size={18} color={theme.colors.text.tertiary} />;
+  const rowIcon = (name: keyof typeof Ionicons.glyphMap, tint: string = theme.colors.text.secondary) => (
+    <View style={[styles.icon, { backgroundColor: tint + '1A' }]}><Ionicons name={name} size={16} color={tint} /></View>
+  );
+  const chevron = <Ionicons name="chevron-forward" size={16} color={theme.colors.text.tertiary} />;
 
-  if (!isRgbLibNativeAvailable()) {
-    return <View style={styles.section}><Text style={styles.description}>RGB on this phone needs a newer app build.</Text></View>;
+  if (!RGB_L1_ENABLED || !isRgbLibNativeAvailable()) {
+    return renderSections({ backup: <View style={styles.section}><Text style={styles.description}>{t('RGB on this phone needs a newer app build.')}</Text></View> });
   }
   if (!loaded) {
-    return <View style={styles.section}><ActivityIndicator color={accent} /></View>;
+    return renderSections({ backup: <View style={styles.section}><ActivityIndicator color={accent} /></View> });
   }
 
   if (nodeActive) {
-    return (
+    return renderSections({ connection: (
       <View style={styles.section}>
         <Callout tone="info" message={`Your RGB Lightning Node is the RGB account while it’s connected. ${enabled
           ? `RGB on this phone (${RGB_L1_NETWORK_LABEL[enabled]}) comes back when you remove the node.`
           : 'To use RGB on this phone instead, remove the node connection first.'}`} />
-        {onOpenNode && <Button title="Manage RGB node" variant="secondary" onPress={onOpenNode} fullWidth />}
+        {onOpenNode && <Button title={t('Manage RGB node')} variant="secondary" size="sm" onPress={onOpenNode} fullWidth />}
       </View>
-    );
+    ) });
   }
 
   const servers = (
     <View style={styles.fields}>
-      <Text style={styles.fieldLabel}>Indexer (Esplora)</Text>
+      <Text style={styles.fieldLabel}>{t('Indexer (Esplora)')}</Text>
       <TextInput accessibilityLabel="RGB indexer URL" style={styles.input} value={indexer} editable={!busy}
         onChangeText={(v) => { setIndexer(v); setServersEdited(true); }}
         autoCapitalize="none" autoCorrect={false} keyboardType="url" placeholderTextColor={theme.colors.text.tertiary} />
-      <Text style={styles.fieldLabel}>RGB proxy</Text>
+      <Text style={styles.description}>{t('Supplies Bitcoin transactions and confirmations for RGB anchors.')}</Text>
+      <Text style={styles.fieldLabel}>{t('RGB proxy')}</Text>
       <TextInput accessibilityLabel="RGB proxy endpoint" style={styles.input} value={proxy} editable={!busy}
         onChangeText={(v) => { setProxy(v); setServersEdited(true); }}
         autoCapitalize="none" autoCorrect={false} keyboardType="url" placeholderTextColor={theme.colors.text.tertiary} />
+      <Text style={styles.description}>{t('Your RGB invoices include this endpoint so senders can deliver consignments.')}</Text>
       {!!endpointError && <Callout tone="error" message={endpointError} />}
       {connected ? (
         <View style={styles.inlineActions}>
-          <TouchableOpacity accessibilityRole="button" disabled={busy} onPress={() => { const d = rgbL1Host(network); setIndexer(d.indexerUrl); setProxy(d.transportEndpoint); void saveEndpoints(null); }}>
-            <Text style={styles.secondaryAction}>Use defaults</Text>
+          <TouchableOpacity accessibilityRole="button" style={styles.textButton} disabled={busy} onPress={() => { const d = rgbL1Host(network); setIndexer(d.indexerUrl); setProxy(d.transportEndpoint); void saveEndpoints(null); }}>
+            <Text style={styles.secondaryAction}>{t('Use defaults')}</Text>
           </TouchableOpacity>
-          <TouchableOpacity accessibilityRole="button" disabled={busy} onPress={() => void saveEndpoints({ indexerUrl: indexer, transportEndpoint: proxy })}>
-            <Text style={styles.action}>Save and reconnect</Text>
+          <TouchableOpacity accessibilityRole="button" style={styles.textButton} disabled={busy} onPress={() => void saveEndpoints({ indexerUrl: indexer, transportEndpoint: proxy })}>
+            <Text style={styles.action}>{t('Save and reconnect')}</Text>
           </TouchableOpacity>
         </View>
       ) : (
         <View style={styles.inlineActions}>
-          <TouchableOpacity accessibilityRole="button" disabled={busy} onPress={() => { const d = rgbL1Host(network); setIndexer(d.indexerUrl); setProxy(d.transportEndpoint); setServersEdited(true); }}>
-            <Text style={styles.secondaryAction}>Use defaults</Text>
+          <TouchableOpacity accessibilityRole="button" style={styles.textButton} disabled={busy} onPress={() => { const d = rgbL1Host(network); setIndexer(d.indexerUrl); setProxy(d.transportEndpoint); setServersEdited(true); }}>
+            <Text style={styles.secondaryAction}>{t('Use defaults')}</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -408,52 +464,59 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
       <Text selectable style={styles.description}>{contractId}</Text>
     </View>
   );
-  const advanced = (
+  const serverSettings = (
     <>
-      {sectionLabel('Advanced')}
       <TouchableOpacity accessibilityRole="button" accessibilityState={{ expanded: showServers }} onPress={() => setShowServers((v) => !v)}
         activeOpacity={0.7} style={styles.row}>
         {rowIcon('server-outline')}
         <View style={styles.text}>
-          <Text style={styles.label}>Servers</Text>
-          <Text style={styles.description} numberOfLines={1}>Indexer and RGB proxy for {label}</Text>
+          <Text style={styles.label}>{t('Indexer and RGB proxy')}</Text>
+          <Text style={styles.description} numberOfLines={1}>{label}</Text>
         </View>
         <Ionicons name={showServers ? 'chevron-up' : 'chevron-down'} size={18} color={theme.colors.text.tertiary} />
       </TouchableOpacity>
       {showServers && servers}
-      <TouchableOpacity accessibilityRole="button" accessibilityLabel="Share RGB diagnostics" onPress={shareDiagnostics}
-        activeOpacity={0.7} style={[styles.row, styles.divider]}>
-        {rowIcon('document-text-outline')}
-        <View style={styles.text}>
-          <Text style={styles.label}>Diagnostics</Text>
-          <Text style={styles.description} numberOfLines={1}>Connection steps and errors, to share with support</Text>
-        </View>
-        <Ionicons name="share-outline" size={18} color={theme.colors.text.tertiary} />
-      </TouchableOpacity>
     </>
+  );
+
+  const diagnostics = (
+    <TouchableOpacity accessibilityRole="button" accessibilityLabel={t('Share RGB diagnostics')} onPress={shareDiagnostics}
+      activeOpacity={0.7} style={[styles.row, styles.divider]}>
+      {rowIcon('document-text-outline')}
+      <View style={styles.text}>
+        <Text style={styles.label}>{t('Diagnostics')}</Text>
+        <Text style={styles.description}>{t('Connection steps and errors, to share with support')}</Text>
+      </View>
+      <Ionicons name="share-outline" size={18} color={theme.colors.text.tertiary} />
+    </TouchableOpacity>
   );
 
   if (connected) {
     const cloudWarn = cloud.state === 'failed' || (backupNeeded && cloud.state !== 'backing-up');
     const cloudColor = cloudWarn ? theme.colors.warning[500] : accent;
-    const cloudLine = cloud.state === 'backing-up' ? 'Backing up…'
-      : cloud.state === 'failed' ? `Last backup failed · ${cloud.error ?? 'retries on the next change'}`
-      : backupNeeded ? 'Changed since the last backup · backs up automatically'
-      : cloud.lastBackupAt ? `Backed up · ${new Date(cloud.lastBackupAt).toLocaleString()}`
-      : 'Backs up after every send and receive';
-    return (
+    const checked = manifest?.network === enabled ? manifest : undefined;
+    const cloudLine = cloud.state === 'backing-up' ? t('Backing up…')
+      : cloud.state === 'failed' ? t('Last backup failed · {reason}').replace('{reason}', cloud.error ?? t('Retries after the next change'))
+      : backupNeeded ? t('Changed since the last backup · backs up automatically')
+      : cloud.lastBackupAt != null ? t(backupNeeded === false ? 'Up to date · {date}' : 'Last cloud backup · {date}').replace('{date}', new Date(cloud.lastBackupAt).toLocaleString())
+      : !enabled ? t('Backup status unavailable')
+      : !checked ? t('Checking cloud backup…')
+      : checked.unavailable ? t('Backup status unavailable')
+      : checked.at == null ? t('No cloud backup yet')
+      : t('Last cloud backup · {date}').replace('{date}', new Date(checked.at).toLocaleString());
+    const connection = (
       <View>
         <View style={styles.row}>
           {rowIcon('checkmark-circle', theme.colors.success[500])}
           <View style={styles.text}>
-            <Text style={styles.label}>Connected · {label}</Text>
+            <Text style={styles.label}>{t('Connected')} · {label}</Text>
             <Text style={styles.description} numberOfLines={1}>
-              {canSwitch ? 'Separate balances and backups for each network' : RGB_L1_UPDATE_TO_SWITCH}
+              {t(canSwitch ? 'Separate balances and backups for each network' : RGB_L1_UPDATE_TO_SWITCH)}
             </Text>
           </View>
           {busy ? <ActivityIndicator color={accent} /> : canSwitch && (
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Choose RGB network" accessibilityState={{ expanded: showNetworks }} onPress={() => setShowNetworks(v => !v)}>
-              <Text style={styles.action}>Switch</Text>
+            <TouchableOpacity accessibilityRole="button" style={styles.textButton} accessibilityLabel={t('Choose RGB network')} accessibilityState={{ expanded: showNetworks }} onPress={() => setShowNetworks(v => !v)}>
+              <Text style={styles.action}>{t('Switch')}</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -469,37 +532,49 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
           </TouchableOpacity>)}
         </View>}
         {contractDetails}
-        {errorText}
-        {sectionLabel('Backup')}
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back up RGB data now" onPress={backupNow}
-          disabled={cloud.state === 'backing-up'} activeOpacity={0.7} style={styles.row}>
+        {!backupOnly && serverSettings}
+        {!backupOnly && diagnostics}
+        {!backupOnly && <TouchableOpacity accessibilityRole="button" onPress={turnOff} disabled={busy} activeOpacity={0.7} style={[styles.row, styles.divider]}>
+          {rowIcon('power-outline')}
+          <View style={styles.text}>
+            <Text style={[styles.label, styles.danger]}>{t('Disconnect')}</Text>
+            <Text style={styles.description}>{t('Your RGB data stays on this phone')}</Text>
+          </View>
+        </TouchableOpacity>}
+      </View>
+    );
+    const backup = (
+      <View>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel={t('Back up RGB data now')} accessibilityHint={cloudLine} onPress={backupNow}
+          disabled={busy || exporting || cloud.state === 'backing-up'} activeOpacity={0.7} style={styles.row}>
           {rowIcon(cloud.state === 'failed' ? 'cloud-offline-outline' : 'cloud-done-outline', cloudColor)}
           <View style={styles.text}>
-            <Text style={styles.label}>Cloud backup</Text>
-            <Text style={[styles.description, cloudWarn && { color: cloudColor }]} numberOfLines={2}>{cloudLine}</Text>
-            {!!cloud.lastBackupAt && (cloudWarn || cloud.state === 'backing-up') &&
-              <Text style={styles.description}>Last successful backup · {new Date(cloud.lastBackupAt).toLocaleString()}</Text>}
+            <Text style={styles.label}>{t('Cloud backup')}</Text>
+            <Text style={styles.description}>{children ? t('Backs up after every send and receive') : cloudLine}</Text>
+            {cloud.lastBackupAt != null && (cloudWarn || cloud.state === 'backing-up') && (
+              <Text style={styles.description}>{t('Last cloud backup · {date}').replace('{date}', new Date(cloud.lastBackupAt).toLocaleString())}</Text>
+            )}
           </View>
-          {cloud.state === 'backing-up' ? <ActivityIndicator color={accent} /> : <Text style={styles.action}>Back up now</Text>}
+          {cloud.state === 'backing-up' ? <ActivityIndicator color={accent} /> : <Text style={[styles.action, { maxWidth: '32%' }]}>{t('Back up now')}</Text>}
         </TouchableOpacity>
-        <TouchableOpacity accessibilityRole="button" onPress={exportFile} activeOpacity={0.7} style={[styles.row, styles.divider]}>
+        <TouchableOpacity accessibilityRole="button" onPress={exportFile} disabled={busy || exporting || cloud.state === 'backing-up'} activeOpacity={0.7} style={[styles.row, styles.divider]}>
           {rowIcon('share-outline')}
           <View style={styles.text}>
-            <Text style={styles.label}>Export backup file</Text>
-            <Text style={styles.description} numberOfLines={1}>Encrypted with your recovery phrase</Text>
+            <Text style={styles.label}>{t('Export backup file')}</Text>
+            <Text style={styles.description} numberOfLines={1}>{t('Encrypted with your recovery phrase')}</Text>
           </View>
           {exporting ? <ActivityIndicator color={accent} /> : chevron}
         </TouchableOpacity>
-        {advanced}
-        <TouchableOpacity accessibilityRole="button" onPress={turnOff} disabled={busy} activeOpacity={0.7} style={[styles.row, styles.divider]}>
-          {rowIcon('power-outline')}
+        <View style={[styles.row, styles.divider]}>
+          {rowIcon('cloud-download-outline')}
           <View style={styles.text}>
-            <Text style={[styles.label, styles.danger]}>Disconnect</Text>
-            <Text style={styles.description} numberOfLines={1}>Your RGB data stays on this phone</Text>
+            <Text style={styles.label}>{t('Restore')}</Text>
+            <Text style={styles.description}>{t('Restore on a phone without RGB data for this wallet and network.')}</Text>
           </View>
-        </TouchableOpacity>
+        </View>
       </View>
     );
+    return renderSections({ connection, backup, backupStatus: cloudLine, notice: errorText });
   }
 
   // Not connected: choose the network, then connect; or restore what you had.
@@ -507,7 +582,7 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
     : phase === 'connecting' ? (slowConnection ? 'Synchronizing RGB wallet…' : 'Connecting…')
     : phase === 'restoring' ? 'Restoring…'
     : enabled ? 'Try again' : 'Connect';
-  return (
+  const connection = (
     <View>
       <View style={styles.section}>
         <Text style={styles.label}>Network</Text>
@@ -534,35 +609,14 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
         {enabled && !busy && (
           <Text style={styles.description}>On for {RGB_L1_NETWORK_LABEL[enabled]} but not connected.</Text>
         )}
-        {errorText}
         {!error && !busy && enabled && lastFailure && (
           <Callout tone="error" message={`Last connection${lastFailure.network ? ` (${RGB_L1_NETWORK_LABEL[lastFailure.network as RgbL1Network] ?? lastFailure.network})` : ''} failed. ${rgbWalletErrorMessage(lastFailure.message, 'connect')} The full error is in diagnostics below.`} />
         )}
-        <Button title={connectTitle} onPress={connect} disabled={busy} loading={phase === 'connecting' || phase === 'checking'} fullWidth style={styles.primary} />
+        {(!backupOnly || locked || ready.includes(network) || enabled) && <Button title={connectTitle} size="sm" onPress={connect} disabled={busy} loading={phase === 'connecting' || phase === 'checking'} fullWidth style={styles.primary} />}
       </View>
-      {!locked && !ready.includes(network) && (
-        <>
-          {sectionLabel('Already have RGB assets?')}
-          <TouchableOpacity accessibilityRole="button" onPress={restoreCloud} disabled={busy} activeOpacity={0.7} style={styles.row}>
-            {rowIcon('cloud-download-outline')}
-            <View style={styles.text}>
-              <Text style={styles.label}>Restore from cloud</Text>
-              <Text style={styles.description} numberOfLines={1}>This wallet’s automatic backup on {label}</Text>
-            </View>
-            {phase === 'restoring' ? <ActivityIndicator color={accent} /> : chevron}
-          </TouchableOpacity>
-          <TouchableOpacity accessibilityRole="button" onPress={restoreFile} disabled={busy} activeOpacity={0.7} style={[styles.row, styles.divider]}>
-            {rowIcon('document-attach-outline')}
-            <View style={styles.text}>
-              <Text style={styles.label}>Restore from a backup file</Text>
-              <Text style={styles.description} numberOfLines={1}>A file you exported before</Text>
-            </View>
-            {chevron}
-          </TouchableOpacity>
-        </>
-      )}
-      {advanced}
-      {enabled && (
+      {!backupOnly && serverSettings}
+      {!backupOnly && diagnostics}
+      {!backupOnly && enabled && (
         <TouchableOpacity accessibilityRole="button" onPress={turnOff} disabled={busy} activeOpacity={0.7} style={[styles.row, styles.divider]}>
           {rowIcon('power-outline')}
           <View style={styles.text}>
@@ -573,20 +627,45 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
       )}
     </View>
   );
+  const backup = !locked && !ready.includes(network) ? (
+    <View>
+      <TouchableOpacity accessibilityRole="button" onPress={restoreCloud} disabled={busy} activeOpacity={0.7} style={styles.row}>
+        {rowIcon('cloud-download-outline')}
+        <View style={styles.text}>
+          <Text style={styles.label}>{t('Restore from cloud')}</Text>
+          <Text style={styles.description} numberOfLines={1}>{t('This wallet’s automatic backup on {network}').replace('{network}', label)}</Text>
+        </View>
+        {phase === 'restoring' ? <ActivityIndicator color={accent} /> : chevron}
+      </TouchableOpacity>
+      <TouchableOpacity accessibilityRole="button" onPress={restoreFile} disabled={busy} activeOpacity={0.7} style={[styles.row, styles.divider]}>
+        {rowIcon('document-attach-outline')}
+        <View style={styles.text}>
+          <Text style={styles.label}>{t('Restore from a backup file')}</Text>
+          <Text style={styles.description} numberOfLines={1}>{t('A file you exported before')}</Text>
+        </View>
+        {chevron}
+      </TouchableOpacity>
+    </View>
+  ) : (
+    <View style={styles.section}>
+      <Text style={styles.description}>{t('Connect the wallet on this phone to back up its data on {network}.').replace('{network}', label)}</Text>
+    </View>
+  );
+  return renderSections({ connection, backup, notice: errorText });
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[3], paddingHorizontal: theme.spacing[4], minHeight: 60, paddingVertical: theme.spacing[3] },
-  section: { paddingHorizontal: theme.spacing[4], paddingVertical: theme.spacing[4], gap: theme.spacing[2] },
+  row: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[2], paddingHorizontal: theme.spacing[2.5], minHeight: 44, paddingVertical: theme.spacing[1] },
+  section: { paddingHorizontal: theme.spacing[3], paddingVertical: theme.spacing[2], gap: theme.spacing[2] },
   sectionLabel: {
     fontSize: theme.typography.fontSize.xs, fontWeight: '700', color: theme.colors.text.tertiary, textTransform: 'uppercase', letterSpacing: 0.6,
     paddingHorizontal: theme.spacing[4], paddingTop: theme.spacing[4], paddingBottom: theme.spacing[1],
     borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.colors.border.light,
   },
   divider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.colors.border.light },
-  icon: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  icon: { width: 24, height: 24, borderRadius: theme.borderRadius.full, alignItems: 'center', justifyContent: 'center' },
   text: { flex: 1, minWidth: 0 },
-  label: { fontSize: theme.typography.fontSize.base, fontWeight: '600', color: theme.colors.text.primary },
+  label: { fontSize: theme.typography.fontSize.sm, fontWeight: '600', color: theme.colors.text.primary },
   description: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.secondary, marginTop: 2 },
   danger: { color: theme.colors.error[500] },
   callout: { marginHorizontal: theme.spacing[4], marginBottom: theme.spacing[3] },
@@ -600,5 +679,6 @@ const styles = StyleSheet.create({
     color: theme.colors.text.primary, borderColor: theme.colors.border.medium, borderWidth: 1, borderRadius: theme.borderRadius.md,
     paddingHorizontal: theme.spacing[3], minHeight: 44, fontSize: theme.typography.fontSize.sm,
   },
-  inlineActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: theme.spacing[5], marginTop: theme.spacing[2], minHeight: 44, alignItems: 'center' },
+  textButton: { minHeight: 44, minWidth: 44, justifyContent: 'center' },
+  inlineActions: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', columnGap: theme.spacing[5], marginTop: theme.spacing[2], alignItems: 'center' },
 });

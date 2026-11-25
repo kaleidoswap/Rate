@@ -43,6 +43,15 @@ export function isRgbLibNativeAvailable(): boolean {
   }
 }
 
+/** The release installed in this native build, including builds used with an over-the-air JS update. */
+export function installedRgbLibVersion(): string | null {
+  try {
+    return rgbLibModule().nativeRgbLibVersion()
+  } catch {
+    return null
+  }
+}
+
 /**
  * Whether the native module can open a wallet in a folder of its own. Without
  * it a seed's RGB stays on one network.

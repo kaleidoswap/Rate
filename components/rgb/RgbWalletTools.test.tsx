@@ -15,24 +15,32 @@ const mockDeleteFailed = jest.fn(async () => true);
 jest.mock('../../services/rgbWallet', () => ({ deleteFailedRgbTransfers: () => mockDeleteFailed() }));
 jest.mock('./DrainSheet', () => ({ DrainSheet: ({ visible }: any) => (visible ? require('react').createElement(require('react-native').Text, null, 'Drain sheet open') : null) }));
 jest.mock('../../store/slices/walletSlice', () => ({ loadBtcBalance: () => ({ type: 'loadBtcBalance' }) }));
-jest.mock('./IssueAssetSheet', () => ({ IssueAssetSheet: ({ visible }: any) => (visible ? require('react').createElement(require('react-native').Text, null, 'Issue sheet open') : null) }));
+jest.mock('./IssueAssetSheet', () => ({ IssueAssetSheet: ({ visible, onIssued }: any) => (visible ? require('react').createElement(require('react-native').Text, { onPress: onIssued }, 'Issue sheet open') : null) }));
 
 const device = { protocolName: 'RGB_L1', isConnected: () => true, listUnspents: jest.fn(), createRgbUtxos: jest.fn(), issueAssetNia: jest.fn(), account: { issueAssetCfa: jest.fn() } };
 
 beforeEach(() => { mockLevel = 'advanced'; mockAdapter = device; });
 
 test('Advanced shows UTXOs and issuing for RGB on this phone, and opens each sheet', () => {
-  const screen = render(<RgbWalletTools />);
+  const onIssued = jest.fn();
+  const screen = render(<RgbWalletTools onIssued={onIssued} />);
   fireEvent.press(screen.getByLabelText('UTXOs'));
   expect(screen.getByText('UTXO sheet open')).toBeTruthy();
-  expect(screen.getByText('A new token or collectible')).toBeTruthy();
+  expect(screen.getByLabelText('Issue an asset').props.accessibilityHint).toBe('A new token or collectible');
   fireEvent.press(screen.getByLabelText('Issue an asset'));
+  fireEvent.press(screen.getByText('Issue sheet open'));
+  expect(onIssued).toHaveBeenCalledTimes(1);
   expect(screen.getByText('Issue sheet open')).toBeTruthy();
 });
 
-test('Lite shows neither', () => {
+test('Lite exposes asset and UTXO management inside settings and keeps advanced maintenance hidden', () => {
   mockLevel = 'lite';
-  expect(render(<RgbWalletTools />).toJSON()).toBeNull();
+  mockAdapter = { ...device, account: { ...device.account, capabilities: () => ({ drain: true, deleteTransfers: true }) } };
+  const screen = render(<RgbWalletTools />);
+  expect(screen.getByLabelText('UTXOs')).toBeTruthy();
+  expect(screen.getByLabelText('Issue an asset')).toBeTruthy();
+  expect(screen.queryByLabelText('Send all bitcoin')).toBeNull();
+  expect(screen.queryByLabelText('Remove failed transfers')).toBeNull();
 });
 
 test('the node over NWC shows only what its connection allows, and never issuing', () => {

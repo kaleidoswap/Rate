@@ -3,6 +3,8 @@ import { act, fireEvent, render } from '@testing-library/react-native';
 import { Alert } from 'react-native';
 import { RgbOnDeviceSettings, rgbStartError } from './RgbOnDeviceSettings';
 
+jest.mock('../localization/useAppLanguage', () => ({ useAppLanguage: () => ({ t: (text: string) => text }) }));
+
 const mockAdapters: Record<string, any> = {};
 const mockCalls: string[] = [];
 const mockReconcile = jest.fn(async (_opts?: any): Promise<any> => ({ success: true }));
@@ -25,6 +27,7 @@ jest.mock('../services/protocols', () => ({
   switchRgbOnDeviceNetwork: (...a: any[]) => { mockCalls.push(`switch:${a[0]}`); return (mockSwitch as any)(...a); },
 }));
 jest.mock('../services/protocols/rgbL1', () => ({
+  RGB_L1_ENABLED: true,
   loadRgbL1Network: async () => mockNetwork,
   saveRgbL1Network: (...a: any[]) => { mockCalls.push(`save:${a[1]}`); mockNetwork = a[1]; if (a[1]) mockPinned = a[1]; return (mockSave as any)(...a); },
   pinnedRgbL1Network: async () => mockPinned,
@@ -145,6 +148,20 @@ test('before it starts, the network is picked; Mutinynet is saved on connect', a
   expect(mockSave).toHaveBeenCalledWith('seed words', 'mutinynet');
 });
 
+test('the direct backup panel exposes cloud and file backup for a connected local wallet', async () => {
+  mockNetwork = 'mutinynet';
+  mockAdapters.RGB_L1 = connectedL1(true);
+  const screen = render(<RgbOnDeviceSettings walletId={7} backupOnly />);
+  await act(async () => {});
+  expect(screen.getByText('Connected · Mutinynet')).toBeTruthy();
+  expect(screen.queryByText('Disconnect')).toBeNull();
+  expect(screen.queryByLabelText('Share RGB diagnostics')).toBeNull();
+  await act(async () => { fireEvent.press(screen.getByLabelText('Back up RGB data now')); });
+  expect(mockRunBackup).toHaveBeenCalledWith(true);
+  await act(async () => { fireEvent.press(screen.getByText('Export backup file')); });
+  expect(mockAdapters.RGB_L1.account.backup).toHaveBeenCalledTimes(1);
+});
+
 test('a cloud backup found on Connect is restored only with consent, in one ask', async () => {
   mockFindBackup.mockResolvedValue({ createdAt: Date.UTC(2026, 0, 2) });
   const screen = render(<RgbOnDeviceSettings walletId={7} />);
@@ -228,8 +245,10 @@ test('a network already on this phone connects without questions; restore is not
   await act(async () => {});
   expect(screen.getByText('Mainnet')).toBeTruthy(); // the other network can still be picked
   expect(screen.queryByText('Restore from cloud')).toBeNull();
-  await act(async () => { fireEvent.press(screen.getByText('Connect')); });
   expect(mockFindBackup).not.toHaveBeenCalled();
+  await act(async () => { fireEvent.press(screen.getByText('Connect')); });
+  expect(mockRestoreCloud).not.toHaveBeenCalled();
+  expect(Alert.alert).not.toHaveBeenCalled();
   expect(mockCalls).toEqual(['save:mutinynet', 'reconcile']);
 });
 
@@ -282,7 +301,8 @@ test('an app build that can’t switch keeps the first network and says to updat
   expect(screen.queryByText('Restore from a backup file')).toBeNull();
   // Its data is here: connecting needs no questions.
   await act(async () => { fireEvent.press(screen.getByText('Connect')); });
-  expect(mockFindBackup).not.toHaveBeenCalled();
+  expect(mockRestoreCloud).not.toHaveBeenCalled();
+  expect(Alert.alert).not.toHaveBeenCalled();
   expect(mockCalls).toEqual(['save:mutinynet', 'reconcile']);
 });
 
@@ -292,7 +312,7 @@ test('the indexer and proxy can be changed per wallet; saving reconnects', async
   mockAdapters.RGB_L1 = connectedL1();
   const screen = render(<RgbOnDeviceSettings walletId={7} />);
   await act(async () => {});
-  fireEvent.press(screen.getByText('Servers'));
+  fireEvent.press(screen.getByText('Indexer and RGB proxy'));
   expect(screen.getByLabelText('RGB indexer URL').props.value).toBe('https://default-indexer');
   fireEvent.changeText(screen.getByLabelText('RGB indexer URL'), 'https://my-esplora.example');
   await act(async () => { fireEvent.press(screen.getByText('Save and reconnect')); });

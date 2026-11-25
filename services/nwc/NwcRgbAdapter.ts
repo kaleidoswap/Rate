@@ -267,7 +267,10 @@ export class NwcRgbAdapter implements IProtocolAdapter {
     const out: UnifiedAsset[] = [];
     for (const g of groups) {
       const arr = Array.isArray(res[g]) ? (res[g] as unknown[]) : [];
-      for (const a of arr) out.push(this.toUnifiedAsset(anyRec(a)));
+      for (const a of arr) {
+        const raw = anyRec(a);
+        out.push(this.toUnifiedAsset({ ...raw, asset_schema: raw.asset_schema ?? raw.schema ?? g.toUpperCase() }));
+      }
     }
     return out;
   }

@@ -3,6 +3,10 @@ jest.mock('expo-constants', () => ({ default: { expoConfig: { version: '0.16.0',
 import React from 'react';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import SettingsScreen from './SettingsScreen';
+import * as featureHooks from '../hooks/useFeature';
+import * as rgbL1 from '../services/protocols/rgbL1';
+import DatabaseService from '../services/DatabaseService';
+let mockNodeConnected = false;
 const mockDispatch = jest.fn();
 const mockState = { settings: { currency: 'USD', bitcoinUnit: 'sats', disclosureLevel: 'lite', soundEnabled: true }, nostr: { nwcConnections: [] }, wallet: { activeWallet: { id: 1, name: 'Daily wallet' }, isUnlocked: false } };
 let mockNetworks: { type: 'spark' | 'arkade'; enabled: boolean }[] = [];
@@ -12,10 +16,11 @@ jest.mock('../services/protocols/bark', () => ({ BARK_ENABLED: true }));
 jest.mock('../services/protocols/barkPreferences', () => ({ currentBarkHost: () => ({ network: 'signet' }), isBarkOff: async () => false, loadBarkHost: async () => ({ network: 'signet' }), saveBarkNetwork: jest.fn() }));
 let mockPhoneNetwork: string | null = null;
 jest.mock('../services/protocols/rgbL1', () => ({
+  __esModule: true,
   ...jest.requireActual('../services/protocols/rgbL1'),
   loadRgbL1Network: async () => mockPhoneNetwork,
 }));
-jest.mock('../services/protocols', () => ({ protocolManager: { getAdapterIfAvailable: () => null, disconnect: jest.fn() }, rgbAccountAdapter: () => null, rgbNodeConnected: () => false, reconcileRgbOnDevice: jest.fn(), initializeProtocols: jest.fn(async () => new Map([['BARK', { success: true }]])) }));
+jest.mock('../services/protocols', () => ({ protocolManager: { getAdapterIfAvailable: () => null, disconnect: jest.fn() }, rgbAccountAdapter: () => null, rgbNodeConnected: () => mockNodeConnected, reconcileRgbOnDevice: jest.fn(), initializeProtocols: jest.fn(async () => new Map([['BARK', { success: true }]])) }));
 jest.mock('../services/DatabaseService', () => ({ __esModule: true, default: { getInstance: () => ({ getWalletNetworks: async () => mockNetworks, getActiveWallet: async () => ({ id: 1, encrypted_mnemonic: 'public test fixture' }) }) } }));
 jest.mock('../services/SecurityService', () => ({ __esModule: true, default: { getInstance: jest.fn() } }));
 jest.mock('../services/nwc/connectionStore', () => ({ removeNwcCredential: jest.fn() }));
@@ -40,7 +45,7 @@ const lockState = (over: Partial<{ pinEnabled: boolean; biometricEnabled: boolea
   };
   require('../services/SecurityService').default.getInstance.mockReturnValue(mockSecurity);
 };
-beforeEach(() => { jest.clearAllMocks(); mockNetworks = []; lockState({}); (require('react-native') as any).BackHandler = { addEventListener: () => ({ remove: jest.fn() }) }; (require('react-native') as any).Keyboard = { dismiss: jest.fn() }; });
+beforeEach(() => { mockNodeConnected = false; jest.clearAllMocks(); mockNetworks = []; lockState({}); (require('react-native') as any).BackHandler = { addEventListener: () => ({ remove: jest.fn() }) }; (require('react-native') as any).Keyboard = { dismiss: jest.fn() }; });
 test('home shows categories and keeps sensitive and technical actions in their sections', async () => {
   const screen = render(<SettingsScreen navigation={navigation} />);
   await act(async () => {});
@@ -51,6 +56,15 @@ test('home shows categories and keeps sensitive and technical actions in their s
   expect(screen.queryByLabelText('Mind')).toBeNull();
   expect(screen.getByLabelText('Connections')).toBeTruthy();
   expect(screen.getByLabelText('Preferences')).toBeTruthy();
+  const accounts = screen.getByLabelText('Accounts & networks');
+  expect(accounts.props.accessibilityState?.expanded).toBe(false);
+  expect(accounts.props.accessibilityHint).toContain('Spark');
+  expect(screen.queryByLabelText('Spark account settings')).toBeNull();
+  fireEvent.press(accounts);
+  expect(accounts.props.accessibilityState?.expanded).toBe(true);
+  expect(screen.getByLabelText('Spark account settings')).toBeTruthy();
+  fireEvent.press(accounts);
+  expect(screen.queryByLabelText('Spark account settings')).toBeNull();
   expect(screen.queryByText('View recovery phrase')).toBeNull();
   expect(screen.queryByText('Remove Wallet')).toBeNull();
   fireEvent.press(screen.getByLabelText('Security & backup'));
@@ -84,10 +98,75 @@ test('preferences remain actionable and connections retain their destinations', 
   expect(navigation.navigate).toHaveBeenCalledWith('PhoneWallet');
 });
 
+test('search opens account settings directly and Back restores the search', async () => {
+  const screen = render(<SettingsScreen navigation={navigation} />);
+  await act(async () => {});
+  fireEvent.changeText(screen.getByLabelText('Search settings'), 'spark');
+  fireEvent.press(screen.getByLabelText('Spark account settings'));
+  expect(screen.getByLabelText('Use this account')).toBeTruthy();
+  expect(screen.queryByLabelText('Search settings')).toBeNull();
+  fireEvent.press(screen.getByLabelText('Back'));
+  expect(screen.getByLabelText('Search settings').props.value).toBe('spark');
+  expect(screen.getByLabelText('Spark account settings')).toBeTruthy();
+});
+
+describe('RGB recovery when new device-wallet setup is held', () => {
+  beforeEach(() => {
+    const db = DatabaseService.getInstance();
+    jest.spyOn(DatabaseService, 'getInstance').mockReturnValue(Object.assign(db, { getSetting: async () => null }));
+    const original = featureHooks.useFeature;
+    jest.spyOn(featureHooks, 'useFeature').mockImplementation(feature => feature === 'rgbOnDevice' || feature === 'rgbNode' ? false : original(feature));
+    jest.spyOn(rgbL1, 'isRgbLibNativeAvailable').mockReturnValue(true);
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  test.each(['Security', 'Search'])('%s opens local restore on a fresh phone and returns to where it was opened', async source => {
+    const screen = render(<SettingsScreen navigation={navigation} />);
+    await act(async () => {});
+    fireEvent.press(screen.getByLabelText('Accounts & networks'));
+    expect(screen.queryByLabelText('RGB account settings')).toBeNull();
+    if (source === 'Search') fireEvent.changeText(screen.getByLabelText('Search settings'), 'RGB data backup');
+    else fireEvent.press(screen.getByLabelText('Security & backup'));
+    fireEvent.press(screen.getByLabelText('RGB data backup'));
+    await act(async () => {});
+    expect(screen.getByText('Restore from cloud')).toBeTruthy();
+    expect(screen.getByText('Restore from a backup file')).toBeTruthy();
+    expect(screen.queryByText('No settings found')).toBeNull();
+    fireEvent.press(screen.getByLabelText('Back'));
+    expect(screen.getByLabelText('RGB data backup')).toBeTruthy();
+    if (source === 'Search') expect(screen.getByLabelText('Search settings').props.value).toBe('RGB data backup');
+  });
+
+  test('the backup shortcut opens the local panel directly even while a node is active', async () => {
+    mockNodeConnected = true;
+    const screen = render(<SettingsScreen navigation={navigation} />);
+    await act(async () => {});
+    fireEvent.press(screen.getByLabelText('Security & backup'));
+    fireEvent.press(screen.getByLabelText('RGB data backup'));
+    await act(async () => {});
+    expect(screen.queryByLabelText('RGB node')).toBeNull();
+    expect(screen.queryByText('Connect')).toBeNull();
+    expect(screen.getByText(/To use RGB on this phone instead/)).toBeTruthy();
+    fireEvent.press(screen.getByText('Manage RGB node'));
+    expect(navigation.navigate).toHaveBeenCalledWith('RgbNode');
+  });
+
+  test('Settings keeps a previously initialized local wallet reachable after it was turned off', async () => {
+    jest.spyOn(rgbL1, 'rgbL1HomeNetwork').mockResolvedValue('mainnet');
+    const screen = render(<SettingsScreen navigation={navigation} />);
+    await act(async () => {});
+    fireEvent.press(screen.getByLabelText('Accounts & networks'));
+    fireEvent.press(screen.getByLabelText('RGB account settings'));
+    await act(async () => {});
+    fireEvent.press(screen.getByRole('button', { name: 'Advanced' }));
+    expect(screen.getByLabelText('This phone')).toBeTruthy();
+  });
+});
+
 test('Bark’s network is picked on the same bottom sheet as every other setting', async () => {
   const screen = render(<SettingsScreen navigation={navigation} />);
   await act(async () => {});
-  fireEvent.press(screen.getByLabelText('Advanced'));
+  fireEvent.press(screen.getByLabelText('Accounts & networks'));
   fireEvent.press(screen.getByLabelText('Bark account settings'));
   fireEvent.press(screen.getByText('Change network'));
   // An OptionSheet, not a native alert: both networks visible, the current one explained.
@@ -100,7 +179,7 @@ test('selecting Bark mainnet saves the preference and reconnects through protoco
   const { protocolManager, initializeProtocols } = require('../services/protocols');
   const screen = render(<SettingsScreen navigation={navigation} />);
   await act(async () => {});
-  fireEvent.press(screen.getByLabelText('Advanced'));
+  fireEvent.press(screen.getByLabelText('Accounts & networks'));
   fireEvent.press(screen.getByLabelText('Bark account settings'));
   fireEvent.press(screen.getByText('Change network'));
   await act(async () => { fireEvent.press(screen.getByText('Bark network: Mainnet')); });
@@ -113,7 +192,7 @@ test('account pages expose supported controls and back returns to the account li
   mockNetworks = [{ type: 'spark', enabled: true }, { type: 'arkade', enabled: true }];
   const screen = render(<SettingsScreen navigation={navigation} />);
   await act(async () => {});
-  fireEvent.press(screen.getByLabelText('Advanced'));
+  fireEvent.press(screen.getByLabelText('Accounts & networks'));
   fireEvent.press(screen.getByLabelText('Spark account settings'));
   expect(screen.getByText('Reconnect account')).toBeTruthy();
   expect(screen.getByLabelText('Use this account')).toBeTruthy();
@@ -136,11 +215,12 @@ test('account pages expose supported controls and back returns to the account li
   expect(screen.queryByLabelText('Use this account')).toBeNull();
   expect(screen.queryByText('Change network')).toBeNull();
   expect(screen.getByLabelText('RGB status: Not connected')).toBeTruthy();
+  fireEvent.press(screen.getByRole('button', { name: 'Advanced' }));
   expect(screen.getByLabelText('This phone')).toBeTruthy();
   // The node's how-to and connect live on their own screen.
   expect(screen.queryByText('How to connect')).toBeNull();
   fireEvent.press(screen.getByLabelText('RGB node'));
-  fireEvent.press(screen.getByLabelText('RGB Lightning Node'));
+  fireEvent.press(screen.getByLabelText('Connect an RGB node'));
   expect(navigation.navigate).toHaveBeenCalledWith('RgbNode');
 });
 
@@ -254,8 +334,8 @@ test('advanced tools and the map remain accessible without crowding everyday con
   fireEvent.press(screen.getByLabelText('Connections'));
   expect(screen.queryByLabelText('Spark account settings')).toBeNull();
   fireEvent.press(screen.getByLabelText('Back'));
+  expect(screen.getByLabelText('Accounts & networks').props.accessibilityState?.expanded).toBe(false);
   fireEvent.press(screen.getByLabelText('Advanced'));
-  expect(screen.getByLabelText('Spark account settings')).toBeTruthy();
   fireEvent.press(screen.getByLabelText('Open a Lightning channel'));
   expect(navigation.navigate).toHaveBeenCalledWith('LSP');
 });
@@ -276,11 +356,13 @@ test('a Labs feature turned off loses its entry points', async () => {
     const screen = render(<SettingsScreen navigation={navigation} />);
     await act(async () => {});
     expect(screen.queryByLabelText('Places to pay')).toBeNull();
-    fireEvent.press(screen.getByLabelText('Advanced'));
     expect(screen.queryByLabelText('Open a Lightning channel')).toBeNull();
+    fireEvent.press(screen.getByLabelText('Accounts & networks'));
     // Arkade is off and this wallet never set it up, so its account row is gone; Spark stays.
     expect(screen.queryByLabelText('Arkade account settings')).toBeNull();
     expect(screen.getByLabelText('Spark account settings')).toBeTruthy();
+    fireEvent.press(screen.getByLabelText('Advanced'));
+    expect(screen.queryByLabelText('Open a Lightning channel')).toBeNull();
   } finally {
     delete settings.labs;
   }
@@ -316,8 +398,10 @@ test('a fresh TestFlight wallet can find the on-device RGB account in Settings',
   try {
     const screen = render(<SettingsScreen navigation={navigation} />);
     await act(async () => {});
-    fireEvent.press(screen.getByLabelText('Advanced'));
+    fireEvent.press(screen.getByLabelText('Accounts & networks'));
     fireEvent.press(screen.getByLabelText('RGB account settings'));
+    await act(async () => {});
+    fireEvent.press(screen.getByRole('button', { name: 'Advanced' }));
     expect(screen.getByLabelText('This phone')).toBeTruthy();
   } finally {
     featuresForBeta.mockRestore();

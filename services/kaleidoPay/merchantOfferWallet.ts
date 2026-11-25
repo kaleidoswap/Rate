@@ -11,7 +11,7 @@ export async function receiverDestinationFromWallet(adapter:ReceivingAdapter,typ
  const name=type==='bark'?'Bark':'Arkade';
  let before=await adapter.getConnectionInfo();
  if(!before.connected)throw Error(`Connect a compatible ${name} account before adding its address.`);
- if(network(before.network)!==expectedNetwork)throw Error(`${name} is on ${network(before.network)??'another network'}, your receiving node on ${expectedNetwork}. Switch ${name} to ${expectedNetwork} in Settings → Advanced.`);
+ if(network(before.network)!==expectedNetwork)throw Error(`${name} is on ${network(before.network)??'another network'}, your receiving node on ${expectedNetwork}. Switch ${name} to ${expectedNetwork} in Settings → Accounts & networks.`);
  // A wallet learns its server key once it has reached the server.
  if(!key(before.nodeId)){await adapter.backend?.sync?.().catch(()=>undefined);before=await adapter.getConnectionInfo();}
  const serverKey=key(before.nodeId);

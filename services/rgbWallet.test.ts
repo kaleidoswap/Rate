@@ -112,7 +112,7 @@ test('metadata reads from the bridge or the node, in one shape', async () => {
   expect(await getRgbAssetMetadata(device().adapter, 'rgb:art')).toBeNull();
   const node = { protocolName: 'RGB_LN', isConnected: () => true, executeProtocolOperation: jest.fn(async () => ({ asset_schema: 'Nia', ticker: 'USDT', known_circulating_supply: 99 })) };
   expect(await getRgbAssetMetadata(node, 'rgb:usdt')).toEqual(expect.objectContaining({ schema: 'NIA', ticker: 'USDT', issuedSupply: 99 }));
-  expect(node.executeProtocolOperation).toHaveBeenCalledWith('getAssetMetadata', { asset_id: 'rgb:usdt' });
+  expect(node.executeProtocolOperation).toHaveBeenCalledWith('getAssetMetadata', 'rgb:usdt');
 });
 
 test('UDA, IFA and CFA with an image issue through the bridge', async () => {

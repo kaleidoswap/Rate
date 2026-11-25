@@ -8,6 +8,7 @@ jest.mock('./NWCExternalClient', () => ({
   NWCClient: jest.fn().mockImplementation(() => ({
     getInfo: jest.fn(async () => ({ methods: mockMethods, pubkey: 'pk' })),
     rlnNodeInfo: jest.fn(async () => ({ pubkey: 'node' })),
+    rlnListAssets: () => mockRequest('rln_list_assets'),
     request: mockRequest,
     rlnDecodeRgbInvoice: (params: unknown) => mockRequest('rln_decode_rgb_invoice', params),
     rlnSendAsset: (params: unknown) => mockRequest('rln_send_asset', params),
@@ -28,6 +29,12 @@ async function connected(advertised: string[]) {
 }
 
 beforeEach(() => mockRequest.mockReset());
+
+test('retains the schema group when a node lists assets without an explicit schema', async () => {
+  const adapter = await connected(['rln_node_info', 'rln_list_assets']);
+  mockRequest.mockResolvedValueOnce({ cfa: [{ asset_id: 'rgb:art', name: 'Art' }] });
+  expect(await adapter.listAssets()).toMatchObject([{ id: 'rgb:art', metadata: { asset_schema: 'CFA' } }]);
+});
 
 test('optional node methods are used only when the connection advertises them', async () => {
   const adapter = await connected(['pay_invoice', 'rln_node_info', 'rln_list_assets']);
