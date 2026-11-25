@@ -10,9 +10,10 @@ This phone**, choose **Mutinynet**, and connect to test BFA transfers. BFA is
 available on test networks. The native bridge keeps `allowRecklessSchemas`
 disabled. Mainnet uses the NIA, CFA, and UDA schemas.
 
-The upgraded library requires RGB proxy protocol 1.0. The built-in Iris proxy
-and any saved copy of its 0.2 URL resolve to its 1.0 endpoint. Custom proxy
-servers must support 1.0. Create a new v1 invoice when using the updated app.
+The upgraded library requires RGB proxy protocol 1.0. Rate creates invoices on
+Kaleidoscope Proxy v1 by default. A saved legacy KaleidoSwap address is upgraded
+to that endpoint, and a saved Iris 0.2 address is upgraded to Iris 1.0. Custom
+proxy servers must support 1.0. Create a new v1 invoice when using the updated app.
 
 Rate opens existing RGB files in their previous locations and retains the
 existing backup namespace. The native proxy migration marks older outgoing

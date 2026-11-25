@@ -153,7 +153,7 @@ private func checkOffline(root: URL, stage: inout String) throws {
 private func checkSignet(root: URL, output: URL, stage: inout String) throws {
     // Match the app's default Signet endpoints in services/protocols/rgbL1.ts.
     let indexer = "https://mempool.space/signet/api"
-    let proxy = "rpcs://proxy.iriswallet.com/1.0/json-rpc"
+    let proxy = "rpcs://proxy-v1.kaleidoswap.com/json-rpc"
     let directory = root.appendingPathComponent("signet", isDirectory: true)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
 
@@ -172,7 +172,7 @@ private func checkSignet(root: URL, output: URL, stage: inout String) throws {
     ])))
     print("PASS connected a fresh BFA-enabled wallet to Signet Esplora and verified the Arbitrum One RPC")
 
-    stage = "reserve a required-encrypted witness invoice on the Iris v1 proxy"
+    stage = "reserve a required-encrypted witness invoice on Kaleidoscope Proxy v1"
     let amount: UInt64 = 25
     let expiry = UInt64(Date().timeIntervalSince1970) + 3_600
     let assignment = try Mappers.assignment(Args(["type": "FUNGIBLE", "amount": NSNumber(value: amount)]))
@@ -180,7 +180,7 @@ private func checkSignet(root: URL, output: URL, stage: inout String) throws {
         online: online, assetId: nil, assignment: assignment, expirationTimestamp: expiry,
         transportEndpoints: [proxy], minConfirmations: 1, encryption: Mappers.encryption("REQUIRED")
     )
-    print("PASS reserved a witness invoice on the Iris v1 proxy")
+    print("PASS reserved a witness invoice on Kaleidoscope Proxy v1")
 
     stage = "check the Signet invoice returned by the native library"
     let invoice = try Invoice(invoiceString: receive.invoice).invoiceData()

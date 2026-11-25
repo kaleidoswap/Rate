@@ -70,12 +70,13 @@ export interface RgbL1Host {
   transportEndpoint: string
 }
 
-const RGB_PROXY_V1 = 'rpcs://proxy.iriswallet.com/1.0/json-rpc'
+const RGB_PROXY_V1 = 'rpcs://proxy-v1.kaleidoswap.com/json-rpc'
 
-/** Rate's legacy Iris endpoint has a direct v1 equivalent. Preserve custom hosts. */
+/** Upgrade the known legacy proxy paths within their original providers. */
 const rgbProxyEndpoint = (endpoint?: string) => (endpoint || RGB_PROXY_V1)
   .replace(/^https:/i, 'rpcs:')
   .replace(/^http:/i, 'rpc:')
+  .replace(/^rpcs:\/\/proxy\.kaleidoswap\.com\/json-rpc\/?$/i, RGB_PROXY_V1)
   .replace(/^(rpcs:\/\/proxy\.iriswallet\.com)\/0\.2(\/json-rpc\/?$)/i, '$1/1.0$2')
 
 // EXPO_PUBLIC_* vars are inlined at build time only on direct member access.
