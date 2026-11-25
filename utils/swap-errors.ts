@@ -82,9 +82,19 @@ export function describeSwapFailure(error: unknown): SwapFailureCopy {
   return RULES.find(([pattern]) => pattern.test(text))?.[1] ?? FALLBACK;
 }
 
-/** The request failed in transit, so the provider may still have acted on it. */
-export function isConnectionFailure(error: unknown): boolean {
-  const e = error as { message?: unknown; code?: unknown } | null | undefined;
-  const text = [typeof error === 'string' ? error : e?.message, e?.code].filter(v => typeof v === 'string').join(' ');
-  return CONNECTION_FAILURE.test(text);
+/** The SDK transfers to the pool before submitting the swap. Only confirmed recovery or a local pre-transfer rejection is safe to retry. */
+export function flashnetSwapNeedsVerification(error: unknown): boolean {
+  const details = error as {
+    transferIds?: readonly string[];
+    clawbackSummary?: { attempted?: boolean; totalTransfers?: number; successCount?: number; failureCount?: number };
+  } | null | undefined;
+  if (details?.transferIds?.length) return true;
+  const recovery = details?.clawbackSummary;
+  if (recovery?.attempted && (recovery.totalTransfers ?? 0) > 0
+    && recovery.failureCount === 0 && recovery.successCount === recovery.totalTransfers) return false;
+
+  // These are plain Errors from the SDK's local checks. A failure after the
+  // transfer carries FlashnetError metadata even if it repeats a local error.
+  return !(error instanceof Error && error.name === 'Error'
+    && /^(?:Insufficient balance for swap: Insufficient (?:BTC|token) balance\b|Minimum amount not met for (?:input|output) asset\.|Service is temporarily disabled by master kill switch$|Operation not allowed: feature 'allow_swaps' is disabled$|Settlement service unavailable\. Only read \(GET\) operations are allowed right now\.$)/.test(error.message));
 }

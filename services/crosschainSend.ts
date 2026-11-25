@@ -44,8 +44,10 @@ export async function loadCrossChainSession(walletId: number): Promise<CrossChai
   return parseSession(await AsyncStorage.getItem(key(walletId)));
 }
 
+const writeSession = (walletId: number, session: CrossChainSendSession) => AsyncStorage.setItem(key(walletId), JSON.stringify(session));
+
 export async function saveCrossChainSession(walletId: number, s: CrossChainSendSession): Promise<void> {
-  await AsyncStorage.setItem(key(walletId), JSON.stringify(s));
+  await writeSession(walletId, s);
   void recordCrossChain(walletId, recordFromSend(s));
 }
 
@@ -105,7 +107,7 @@ export interface SendProgress {
 }
 
 /**
- * The one action behind "slide to send": quote → pay from Spark → submit. Throws
+ * The action behind the confirmation: quote → pay from Spark → submit. Throws
  * CrossChainNotSentError when nothing moved. Once the paying record is saved, a
  * failure comes back as a session carrying `lastError` instead of a throw.
  */
@@ -115,23 +117,31 @@ export async function sendCrossChain(args: {
   reviewed: Pick<OrchestraEstimate, 'estimatedOut' | 'requiredAmountIn'>;
   destDecimals: number;
   id: string;
+  isApprovalCurrent?: () => boolean;
   onProgress?: (p: SendProgress) => void;
 }): Promise<CrossChainSendSession> {
   const { walletId, form } = args;
   if (starting.has(walletId)) throw new CrossChainNotSentError('Another transfer is starting.');
   starting.add(walletId);
   try {
+    const source = spark();
+    if (!source) throw new CrossChainNotSentError('Connect your Spark wallet to send to other chains.');
+    if (!source.mainnet) throw new CrossChainNotSentError('Sending to other chains works on mainnet only.');
+    const requireCurrentApproval = () => {
+      const current = spark();
+      if (args.isApprovalCurrent?.() === false || !current?.mainnet || current.adapter !== source.adapter) {
+        throw new CrossChainNotSentError('The wallet or transfer details changed. Review the transfer again. Nothing was sent.');
+      }
+    };
     let existing: CrossChainSendSession | null;
     try { existing = await loadCrossChainSession(walletId); }
     catch { throw new CrossChainNotSentError('Could not read your previous transfer. Check your Spark activity first.'); }
     if (!canStartTransfer(existing)) throw new CrossChainNotSentError('Finish your previous transfer before starting another.');
 
-    const s = spark();
-    if (!s) throw new CrossChainNotSentError('Connect your Spark wallet to send to other chains.');
-    if (!s.mainnet) throw new CrossChainNotSentError('Sending to other chains works on mainnet only.');
+    requireCurrentApproval();
 
     args.onProgress?.({ stage: 'quoting' });
-    const addr = await s.adapter.getReceiveAddress('SPARK');
+    const addr = await source.adapter.getReceiveAddress('SPARK');
     const sourceSparkAddress = typeof addr === 'string' ? addr : addr?.address;
     let quote: OrchestraQuote;
     try {
@@ -146,27 +156,35 @@ export async function sendCrossChain(args: {
     // Re-read the balance right before paying: the quote can ask for more than was shown.
     let token: SparkToken | null = null;
     if (form.source === 'USDB') {
-      token = await usdbToken(s.adapter);
-      if (!token || !s.adapter.sendAsset) throw new CrossChainNotSentError('No USDB on Spark to send.');
+      token = await usdbToken(source.adapter);
+      if (!token || !source.adapter.sendAsset) throw new CrossChainNotSentError('No USDB on Spark to send.');
       if (amount > token.available) throw new CrossChainNotSentError('Not enough USDB on Spark for this quote.');
     } else {
-      const btc = Math.floor(Number((await s.adapter.getBtcBalance())?.confirmed) || 0);
+      const btc = Math.floor(Number((await source.adapter.getBtcBalance())?.confirmed) || 0);
       if (amount > btc) throw new CrossChainNotSentError('Not enough bitcoin on Spark for this quote.');
     }
 
+    requireCurrentApproval();
     let session = beginPaying({
       id: args.id, form, quote, sourceSparkAddress: sourceSparkAddress ?? '', sourceAmountRaw: amountRaw,
       destDecimals: args.destDecimals, now: Date.now(),
     });
-    try { await saveCrossChainSession(walletId, session); }
+    try { await writeSession(walletId, session); }
     catch { throw new CrossChainNotSentError('Could not save the transfer record, so nothing was sent. Try again.'); }
+    try { requireCurrentApproval(); }
+    catch (error) {
+      // No payment can reach Spark before this check. Clear this attempt's reservation.
+      await clearCrossChainSession(walletId).catch(() => {});
+      throw error;
+    }
+    void recordCrossChain(walletId, recordFromSend(session));
     args.onProgress?.({ stage: 'paying', session });
 
     let sent: unknown;
     try {
       sent = token
-        ? await s.adapter.sendAsset!({ assetId: token.id, amount, recipientId: quote.depositAddress })
-        : await s.adapter.sendPayment({ invoice: quote.depositAddress, amount });
+        ? await source.adapter.sendAsset!({ assetId: token.id, amount, recipientId: quote.depositAddress })
+        : await source.adapter.sendPayment({ invoice: quote.depositAddress, amount });
     } catch (e) {
       // It may or may not have left the wallet: keep the paying record, which forces a check.
       session = withError(session, e instanceof Error ? e.message : 'The Spark payment did not confirm.', Date.now());

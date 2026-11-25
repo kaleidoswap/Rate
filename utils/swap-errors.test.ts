@@ -1,4 +1,4 @@
-import { describeSwapFailure, isConnectionFailure } from './swap-errors';
+import { describeSwapFailure, flashnetSwapNeedsVerification } from './swap-errors';
 
 describe('describeSwapFailure', () => {
   it.each([
@@ -39,10 +39,19 @@ describe('describeSwapFailure', () => {
     expect(describeSwapFailure('Insufficient liquidity').title).toBe('Not enough liquidity');
   });
 
-  it('tells transport failures apart from refusals', () => {
-    expect(isConnectionFailure(new Error('Request timed out'))).toBe(true);
-    expect(isConnectionFailure(Object.assign(new Error('Request failed'), { code: 'NETWORK_ERROR' }))).toBe(true);
-    expect(isConnectionFailure(new Error('Insufficient liquidity'))).toBe(false);
-    expect(isConnectionFailure(undefined)).toBe(false);
-  });
+});
+
+test('Flashnet errors with an unclear transfer outcome prevent retry', () => {
+  expect(flashnetSwapNeedsVerification(new Error('Request timed out'))).toBe(true);
+  expect(flashnetSwapNeedsVerification(new Error('Insufficient liquidity'))).toBe(true);
+  expect(flashnetSwapNeedsVerification(Object.assign(new Error('Trade rejected'), { transferIds: ['spark-funding-tx'] }))).toBe(true);
+  expect(flashnetSwapNeedsVerification({ clawbackSummary: { attempted: true, totalTransfers: 1, successCount: 0, failureCount: 1 } })).toBe(true);
+  expect(flashnetSwapNeedsVerification(undefined)).toBe(true);
+});
+
+test('Flashnet retry is available after a local refusal or confirmed full clawback', () => {
+  const insufficient = 'Insufficient balance for swap: Insufficient BTC balance. Required: 250 sats, Available: 200 sats';
+  expect(flashnetSwapNeedsVerification(new Error(insufficient))).toBe(false);
+  expect(flashnetSwapNeedsVerification(Object.assign(new Error(insufficient), { name: 'FlashnetError' }))).toBe(true);
+  expect(flashnetSwapNeedsVerification({ clawbackSummary: { attempted: true, totalTransfers: 1, successCount: 1, failureCount: 0 } })).toBe(false);
 });

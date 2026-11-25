@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { PaymentResult } from './index';
+import type { PaymentFailureRecovery } from './errors';
 export interface PaymentAttempt extends PaymentResult {
   id: string; sourceId: string; provider: string; total: string; recipient: string; createdAt: number;
   /** Display metadata captured before sending; optional for older records. Never store an invoice or secret. */
@@ -8,6 +9,8 @@ export interface PaymentAttempt extends PaymentResult {
   /** Set when the user chose to move on from a payment whose outcome could not be determined. */
   dismissedAt?: number;
   lastCheckedAt?: number; checkFailed?: boolean;
+  /** A verified pre-funding failure can be retried or given a replacement invoice. */
+  recovery?: PaymentFailureRecovery;
 }
 const key = (walletId: number) => `kaleidopay-attempt-v1-${walletId}`;
 export async function loadPaymentAttempt(walletId: number, attemptId?: string): Promise<PaymentAttempt | null> {
@@ -23,6 +26,7 @@ function validateAttempt(value: any): PaymentAttempt {
     || !Number.isSafeInteger(value.createdAt)
     || ['recipientName', 'feeDisplay', 'accountName', 'destinationRail', 'network', 'detail'].some(field => value[field] !== undefined && typeof value[field] !== 'string')
     || (value.resolution !== undefined && value.resolution !== 'refunded')
+    || (value.recovery !== undefined && !['retry-price', 'replace-invoice'].includes(value.recovery))
     || (value.lastCheckedAt !== undefined && !Number.isSafeInteger(value.lastCheckedAt))
     || (value.checkFailed !== undefined && typeof value.checkFailed !== 'boolean')
     || (value.onchainConfirmed !== undefined && typeof value.onchainConfirmed !== 'boolean')

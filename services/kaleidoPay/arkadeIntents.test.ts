@@ -184,6 +184,64 @@ test('a binding quote above the approved total is refused before anything is fun
   } finally { off(); }
 });
 
+test('a fresh binding quote within the reviewed total can outlive the estimate', async () => {
+  const { off } = connect();
+  let now = 1_700_000_000_000;
+  const clock = jest.spyOn(Date, 'now').mockImplementation(() => now);
+  try {
+    const preview = previewTarget(invoiceTarget(), undefined, 'slow-rfq');
+    const maker = (await quotePaymentOffers(preview)).find(o => o.id.endsWith(':kaleidoswap'))!;
+    const estimateExpiry = maker.quote!.expiresAt;
+    mockVenue.prepare.mockImplementationOnce(() => { now = (estimateExpiry + 1) * 1_000; });
+    await expect(executePaymentOffer(preview, maker, 'slow-rfq')).resolves.toMatchObject({ status: 'pending' });
+    expect(Date.now()).toBeGreaterThan(estimateExpiry * 1_000);
+    expect(wallet.sendBitcoin).toHaveBeenCalledTimes(1);
+    expect(wallet.sendBitcoin).toHaveBeenCalledWith({ address: 'tark1lockup', amount: 10_100 });
+  } finally { clock.mockRestore(); off(); }
+});
+
+test('the binding quote can expire while Arkade checks the funding balance', async () => {
+  const { off } = connect();
+  let now = 1_700_000_000_000;
+  const clock = jest.spyOn(Date, 'now').mockImplementation(() => now);
+  try {
+    const preview = previewTarget(invoiceTarget(), undefined, 'expired-rfq');
+    const maker = (await quotePaymentOffers(preview)).find(o => o.id.endsWith(':kaleidoswap'))!;
+    adapter.getBtcBalance.mockImplementationOnce(async () => { now += 60_000; return { confirmed: 100_000 }; });
+    await expect(executePaymentOffer(preview, maker, 'expired-rfq')).rejects.toMatchObject({ recovery: 'retry-price' });
+    expect(mockVenue.prepare).toHaveBeenCalledTimes(1);
+    expect(wallet.sendBitcoin).not.toHaveBeenCalled();
+  } finally { clock.mockRestore(); off(); }
+});
+
+test.each([
+  ['quote_expired', 'retry-price'],
+  ['invoice_expired', 'replace-invoice'],
+] as const)('a provider %s refusal identifies the recovery before funding', async (reason, recovery) => {
+  const { off } = connect();
+  try {
+    const preview = previewTarget(invoiceTarget(), undefined, 'expired-terms');
+    const maker = (await quotePaymentOffers(preview)).find(o => o.id.endsWith(':kaleidoswap'))!;
+    mockVenue.prepare.mockImplementationOnce(() => { throw new Error(reason); });
+    await expect(executePaymentOffer(preview, maker, 'expired-terms')).rejects.toMatchObject({ recovery });
+    expect(wallet.sendBitcoin).not.toHaveBeenCalled();
+  } finally { off(); }
+});
+
+test.each([
+  ['quote_expired', 'invoice expired', 'retry-price'],
+  ['invoice_expired', 'quote expired', 'replace-invoice'],
+] as const)('a structural SDK error reason %s takes priority over its message', async (reason, message, recovery) => {
+  const { off } = connect();
+  try {
+    const preview = previewTarget(invoiceTarget(), undefined, 'sdk-expiry');
+    const maker = (await quotePaymentOffers(preview)).find(o => o.id.endsWith(':kaleidoswap'))!;
+    mockVenue.prepare.mockImplementationOnce(() => { throw Object.assign(new Error(message), { reason }); });
+    await expect(executePaymentOffer(preview, maker, 'sdk-expiry')).rejects.toMatchObject({ recovery });
+    expect(wallet.sendBitcoin).not.toHaveBeenCalled();
+  } finally { off(); }
+});
+
 test('an unknown Ark transaction fee makes every provider unavailable instead of free', async () => {
   const swap = createArkadeIntentsSwap({
     sourceId: 'arkade-t4', rail: 'ark', network: 'mutinynet', wallet: () => wallet, arkServerUrl: () => 'https://a', arkNetwork: () => 'mutinynet',

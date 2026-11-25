@@ -339,7 +339,9 @@ export function createArkadeIntentsSwap(opts: ArkadeIntentsOptions) {
     if (!preview.code.invoice) throw new Error('Arkade swaps pay Lightning invoices (BOLT11), not offers.');
     const facts = invoiceFacts(preview.code.invoice);
     if (facts.amountSats !== preview.request.amountSat) throw new Error('The invoice asks for a different amount than this payment.');
-    if (facts.expiresAt <= Math.floor(Date.now() / 1000) + INVOICE_MARGIN_S) throw new Error('The Lightning invoice has expired or expires too soon.');
+    if (facts.expiresAt <= Math.floor(Date.now() / 1000) + INVOICE_MARGIN_S) {
+      throw new PaymentNotSentError('The Lightning invoice has expired or expires too soon. Ask for a fresh invoice.', 'replace-invoice');
+    }
     return facts;
   }
   const terms = (preview: Preview, route: Route) => JSON.stringify({ request: preview.request, invoice: preview.code.invoice, route });
@@ -349,7 +351,11 @@ export function createArkadeIntentsSwap(opts: ArkadeIntentsOptions) {
     const fundingFee = opts.fundingFee();
     const [list, balance] = await Promise.all([providers(), opts.balance().catch(() => null)]);
     if (!list.length) throw new Error('No Arkade swap provider pays Lightning on this network right now.');
-    const expiresAt = Math.min(Math.floor(Date.now() / 1000) + QUOTE_TTL_S, facts.expiresAt - INVOICE_MARGIN_S);
+    const now = Math.floor(Date.now() / 1000);
+    if (facts.expiresAt <= now + INVOICE_MARGIN_S) {
+      throw new PaymentNotSentError('The Lightning invoice has expired or expires too soon. Ask for a fresh invoice.', 'replace-invoice');
+    }
+    const expiresAt = Math.min(now + QUOTE_TTL_S, facts.expiresAt - INVOICE_MARGIN_S);
     return list.map(p => {
       const option: AccountQuoteOption = { id: p.id, name: p.name, detail: 'detail' in p ? p.detail : undefined };
       if (!('market' in p)) { option.unavailable = p.unavailable; return option; }
@@ -403,11 +409,15 @@ export function createArkadeIntentsSwap(opts: ArkadeIntentsOptions) {
     let approval: Approval, facts: InvoiceFacts, provider: IntentsProvider, wallet: any, arkServerUrl: string;
     try {
       approval = approved.get(quote)!;
-      if (!approval || approval.terms !== terms(preview, route)) throw new Error('Review the payment again to get a fresh quote.');
+      if (!approval || approval.terms !== terms(preview, route)) {
+        throw new PaymentNotSentError('Review the payment again to get a fresh quote.', 'retry-price');
+      }
       // Consume before the first provider await: two attempt IDs cannot reuse one approval.
       approved.delete(quote);
       facts = check(preview, route);
-      if (quote.expiresAt <= Math.floor(Date.now() / 1000)) throw new Error('Review the payment again to get a fresh quote.');
+      if (quote.expiresAt <= Math.floor(Date.now() / 1000)) {
+        throw new PaymentNotSentError('The Arkade price expired. Refresh the price before paying.', 'retry-price');
+      }
       const listed = (await providers()).find(p => p.id === approval.providerId);
       if (!listed || !('market' in listed)) throw new Error('That swap provider is no longer available. Choose another way to pay.');
       provider = listed;
@@ -415,6 +425,7 @@ export function createArkadeIntentsSwap(opts: ArkadeIntentsOptions) {
       arkServerUrl = opts.arkServerUrl()!;
       if (!wallet || !arkServerUrl) throw new Error('Arkade is not connected.');
     } catch (error) {
+      if (error instanceof PaymentNotSentError) throw error;
       throw new PaymentNotSentError(error instanceof Error ? error.message : 'Review the payment again.');
     }
     approved.delete(quote);
@@ -426,11 +437,19 @@ export function createArkadeIntentsSwap(opts: ArkadeIntentsOptions) {
       let prepared: Awaited<ReturnType<ArkadeIntentsVenue['prepareLightningSend']>>;
       try { prepared = await venue.prepareLightningSend({ invoice: facts }); }
       catch (error) {
-        const reason = error instanceof Error ? error.message : 'no answer';
+        const message = error instanceof Error ? error.message : 'no answer';
+        const code = error && typeof error === 'object' && 'reason' in error ? error.reason : undefined;
+        const reason = code === 'quote_expired' || code === 'invoice_expired' || code === 'invoice_cltv_too_large' ? code : message;
         if (reason.includes('invoice_cltv_too_large')) {
           throw new PaymentNotSentError('This Lightning invoice requires a longer payment window than the provider supports. Ask for a different invoice or choose another provider. Nothing was sent.');
         }
-        throw new PaymentNotSentError(`${provider.name} did not give a usable quote (${reason}). Choose another way to pay.`);
+        if (/invoice(?:[ _-]has)?[ _-]expired|expired[ _-]invoice/i.test(reason)) {
+          throw new PaymentNotSentError('The provider reported that this Lightning invoice expired. Ask for a fresh invoice.', 'replace-invoice');
+        }
+        if (/(?:quote|price)(?:[ _-]has)?[ _-]expired|expired[ _-](?:quote|price)/i.test(reason)) {
+          throw new PaymentNotSentError('The provider price expired before paying. Refresh the price to try again.', 'retry-price');
+        }
+        throw new PaymentNotSentError(`${provider.name} did not give a usable quote (${message}). Choose another way to pay.`);
       }
       const now = Math.floor(Date.now() / 1000);
       const spend = prepared.fundAmountSats + approval.fundingFee;
@@ -440,14 +459,20 @@ export function createArkadeIntentsSwap(opts: ArkadeIntentsOptions) {
       if (spend > quote.totalSat!) {
         throw new PaymentNotSentError(`${provider.name} now asks ${spend.toLocaleString('en-US')} sats, more than the ${quote.totalSat!.toLocaleString('en-US')} you approved. Nothing was sent.`);
       }
-      if (prepared.summary.validUntil <= now + 5) throw new PaymentNotSentError('The provider quote expired before paying. Nothing was sent.');
+      if (prepared.summary.validUntil <= now + 5) {
+        throw new PaymentNotSentError('The provider price expired before paying. Refresh the price to try again.', 'retry-price');
+      }
       const balance = await opts.balance().catch(() => null);
       if (balance === null || spend > balance) throw new PaymentNotSentError('Insufficient Arkade balance. Nothing was sent.');
 
       const checkFundingDeadline = () => {
         const now = Math.floor(Date.now() / 1000);
-        if (prepared.summary.validUntil <= now + 5 || quote.expiresAt <= now || facts.expiresAt <= now + INVOICE_MARGIN_S) {
-          throw new PaymentNotSentError('The quote or invoice expired before funding. Nothing was sent.');
+        if (facts.expiresAt <= now + INVOICE_MARGIN_S) {
+          throw new PaymentNotSentError('The Lightning invoice has expired or expires too soon. Ask for a fresh invoice.', 'replace-invoice');
+        }
+        // The estimate was valid when authorized. The binding quote now owns the funding deadline.
+        if (prepared.summary.validUntil <= now + 5) {
+          throw new PaymentNotSentError('The Arkade price expired before paying. Refresh the price to try again.', 'retry-price');
         }
       };
       checkFundingDeadline();

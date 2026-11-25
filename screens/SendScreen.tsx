@@ -12,7 +12,7 @@ import { PaymentOutcome } from '../components/payments/PaymentOutcome';
 // or through a swap provider, priced the same way. The user reviews the total and
 // pays; the payment journal keeps an unresolved payment from being paid twice.
 // An EVM or Solana address opens the cross-chain send (USDC/USDT from Spark).
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Alert, View, Text, TextInput, ScrollView, TouchableOpacity, ActivityIndicator, KeyboardAvoidingView, Platform, Clipboard, Share } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -21,7 +21,7 @@ import * as Crypto from 'expo-crypto';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { Button } from '../components/Button';
 import { PressableScale } from '../components/PressableScale';
-import { SlideToConfirm } from '../components/SlideToConfirm';
+import { HoldToConfirm } from '../components/HoldToConfirm';
 import { AmountText } from '../components/AmountText';
 import { ProviderSheet } from '../components/payments/ProviderSheet';
 import { NetworkIcon } from '../components/NetworkIcon';
@@ -61,6 +61,7 @@ import { ActionableError } from '../components/ActionableError';
 import { useFeature } from '../hooks/useFeature';
 
 interface Props { navigation: any; route: any }
+interface ReviewedPrice { offerId: string; assetId: string; total: number; networkFee: number; label: string }
 
 // Re-checks of an unresolved payment: quick at first, then every 15 s, for at most 10 minutes.
 const STATUS_POLL_DELAYS_MS = [3_000, 5_000, 10_000, 15_000];
@@ -135,7 +136,8 @@ export default function SendScreen({ navigation, route }: Props) {
   const [error, setError] = useState('');
   const [receiptExpanded, setReceiptExpanded] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [previousTotal, setPreviousTotal] = useState('');
+  const [reviewedPrice, setReviewedPrice] = useState<ReviewedPrice | null>(null);
+  const [offerRevision, setOfferRevision] = useState(0);
   const [attempt, setAttempt] = useState<PaymentAttempt | null>(null);
   const [statusTimedOut, setStatusTimedOut] = useState(false);
   const [statusChecking, setStatusChecking] = useState(false);
@@ -188,8 +190,8 @@ export default function SendScreen({ navigation, route }: Props) {
   useEffect(() => {
     revision.current++;
     autoRefreshes.current = 0;
-    setPreview(null); setOffers([]); setSelectedId(undefined); setError(''); setBusy(false); setPreviousTotal('');
-  }, [input, amountSat, assetAmount, sparkToken, rgbAsset?.id]);
+    setPreview(null); setOffers([]); setSelectedId(undefined); setError(''); setBusy(false); setReviewedPrice(null);
+  }, [walletId, input, amountSat, assetAmount, sparkToken, rgbAsset?.id]);
   useEffect(() => { setRgbAsset(null); setAssetAmount(''); setSparkToken(null); }, [input]);
   useEffect(() => {
     let active = true;
@@ -262,14 +264,28 @@ export default function SendScreen({ navigation, route }: Props) {
   const spend = quote ? quoteSpend(quote) : null;
   const total = spend ? displaySpend(spend.total, spend.asset) : '';
   const expired = !!quote && quote.expiresAt * 1000 <= now;
+  const invoiceExpiresAt = preview?.code.kind === 'bolt11' && !preview.code.lnurl ? preview.code.invoiceExpiresAt : undefined;
+  const invoiceExpired = invoiceExpiresAt !== undefined && invoiceExpiresAt <= now;
 
-  // After a manual refresh the new total is pointed out briefly, never gated.
+  const networkFee = quote && selected?.route.sourceId === 'rgb-asset' ? quote.feeSat ?? 0 : 0;
+  const currentPrice: ReviewedPrice | null = selected && spend ? {
+    offerId: selected.id, assetId: spend.asset.id, total: spend.total, networkFee,
+    label: networkFee > 0 ? `${total} + ${formatSats(networkFee)}` : total,
+  } : null;
+  const priceChanged = !!currentPrice && reviewedPrice?.offerId === currentPrice.offerId
+    && (currentPrice.assetId !== reviewedPrice.assetId || currentPrice.total > reviewedPrice.total || currentPrice.networkFee > reviewedPrice.networkFee);
+  const latestOffer = useRef({ selected, preview, walletId });
+  const mounted = useRef(true);
+  useLayoutEffect(() => { latestOffer.current = { selected, preview, walletId }; }, [selected, preview, walletId]);
+  useLayoutEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+
+  // Remember the terms shown for this route, including before an automatic refresh.
   useEffect(() => {
-    if (!previousTotal) return;
-    if (previousTotal === total) { setPreviousTotal(''); return; }
-    const timer = setTimeout(() => setPreviousTotal(''), 6000);
-    return () => clearTimeout(timer);
-  }, [previousTotal, total]);
+    if (!currentPrice || priceChanged || (reviewedPrice?.offerId === currentPrice.offerId
+      && reviewedPrice.assetId === currentPrice.assetId && reviewedPrice.total === currentPrice.total
+      && reviewedPrice.networkFee === currentPrice.networkFee && reviewedPrice.label === currentPrice.label)) return;
+    setReviewedPrice(currentPrice);
+  }, [currentPrice, priceChanged, reviewedPrice]);
 
   // The offers this screen shows: hidden accounts (Bark in Lite) are never picked for the user.
   const visibleOffers = useCallback((list: PaymentOffer[]) => {
@@ -277,11 +293,10 @@ export default function SendScreen({ navigation, route }: Props) {
     return list.filter(o => ids.has(o.id) || !offerAccount(o));
   }, [advanced, balancesSat]);
 
-  // `quiet`: re-quoted because the user changed the fee speed, so the new total needs no second review.
-  const getOffers = useCallback(async (refresh = false, quiet = false) => {
+  const getOffers = useCallback(async (refresh = false) => {
+    if (paying.current) return;
     const current = ++revision.current;
     setBusy(true); setError(''); setMoreQuotes(false);
-    if (refresh && !quiet) setPreviousTotal(total);
     try {
       await prepareKaleidoPay();
       if (route.params?.makerNetwork) {
@@ -323,7 +338,7 @@ export default function SendScreen({ navigation, route }: Props) {
       const show = (list: PaymentOffer[], done: boolean) => {
         if (current !== revision.current) return;
         if (route.params?.makerNetwork) list = makerSendOffers(list, route.params.makerNetwork);
-        setPreview(fresh); setOffers(list);
+        setPreview(fresh); setOffers(list); setOfferRevision(current);
         if (done && route.params?.makerNetwork && !list.length) setError('KaleidoSwap cannot pay this request from Arkade on the selected network.');
         const shown = visibleOffers(list);
         const best = bestOffer(shown.filter(o => o.executable)) ?? shown.find(o => o.executable && o.quote && !o.unavailable);
@@ -334,22 +349,19 @@ export default function SendScreen({ navigation, route }: Props) {
       };
       const result = await quotePaymentOffers(fresh, partial => show(partial, false));
       show(result, true);
-      if (current !== revision.current) return;
-      // Refresh never switches the chosen way to pay, even when its quote fails;
-      // the new total is noted briefly instead of asking for a second review.
     } catch (e) {
       if (current === revision.current) setError(e instanceof Error ? e.message : 'Could not get quotes. Please try again.');
     } finally { if (current === revision.current) { setBusy(false); setMoreQuotes(false); } }
-  }, [input, fixedSat, amountSat, assetAmount, rgbAsset, sparkToken, target, total, visibleOffers, route.params?.makerNetwork, route.params?.makerUrl]);
+  }, [input, fixedSat, amountSat, assetAmount, rgbAsset, sparkToken, target, visibleOffers, route.params?.makerNetwork, route.params?.makerUrl]);
 
-  // An expired price refreshes itself: no extra taps, the slide stays armed.
+  // Renew expired prices while this review is open. A higher price needs review.
   // After a few failed tries it stops and the manual Refresh button remains.
   useEffect(() => {
-    if (!expired || busy || !preview || attempt) return;
+    if (!expired || invoiceExpired || busy || !preview || attempt) return;
     if (autoRefreshes.current >= 3) return;
-    const timer = setTimeout(() => { autoRefreshes.current += 1; void getOffers(true, true); }, 400);
+    const timer = setTimeout(() => { autoRefreshes.current += 1; void getOffers(true); }, 400);
     return () => clearTimeout(timer);
-  }, [expired, busy, preview, attempt, getOffers]);
+  }, [expired, invoiceExpired, busy, preview, attempt, getOffers]);
 
   // A Spark address can also be paid in the Spark tokens this wallet holds.
   const sparkAddressTarget = target?.kind === 'spark' && fixedSat === undefined;
@@ -398,11 +410,11 @@ export default function SendScreen({ navigation, route }: Props) {
       }
       return;
     }
-    const key = `${target.kind}:${input}:${fixedSat ?? amountSat ?? ''}:${rgbAsset?.id ?? ''}:${sparkToken?.id ?? ''}:${assetAmount}`;
+    const key = `${walletId ?? ''}:${target.kind}:${input}:${fixedSat ?? amountSat ?? ''}:${rgbAsset?.id ?? ''}:${sparkToken?.id ?? ''}:${assetAmount}`;
     if (autoQuoted.current === key) return;
     autoQuoted.current = key;
     void getOffers();
-  }, [target, fixedSat, amountSat, rgbAsset, sparkToken, assetAmount, busy, preview, input, showAmountEditor, getOffers]);
+  }, [walletId, target, fixedSat, amountSat, rgbAsset, sparkToken, assetAmount, busy, preview, input, showAmountEditor, getOffers]);
 
   function review() {
     if (!target) { setError(decodeError ?? 'Paste or scan something to pay.'); return; }
@@ -421,18 +433,26 @@ export default function SendScreen({ navigation, route }: Props) {
   }
 
   async function pay() {
-    if (paying.current || !walletId || !journalReady || !preview || !selected || !quote || selected.unavailable || quote.expiresAt * 1000 <= Date.now() || !selected.executable || zeroRgbFeeBalance || unresolvedAttempt(attempt)) return;
+    const sameWallet = () => mounted.current && latestOffer.current.walletId === walletId;
+    const isCurrent = () => sameWallet() && offerRevision === revision.current
+      && latestOffer.current.selected === selected && latestOffer.current.preview === preview;
+    if (paying.current || busy || !walletId || !journalReady || !preview || !selected || !quote || selected.unavailable
+      || quote.expiresAt * 1000 <= Date.now() || (invoiceExpiresAt !== undefined && invoiceExpiresAt <= Date.now())
+      || !selected.executable || zeroRgbFeeBalance || priceChanged
+      || unresolvedAttempt(attempt) || !isCurrent()) return;
     paying.current = true; setBusy(true); setError('');
     const recipient = preview.request.asset ? formatSpend(preview.request.asset.amount, preview.request.asset) : formatSats(preview.request.amountSat);
     const next: PaymentAttempt = { destinationRail: selected.route.to, network: paymentAccountNetwork(selected.route.sourceId) ?? preview.request.network, recipientName, feeDisplay: spend ? (selected.route.sourceId === 'rgb-asset' ? `~${selected.quote?.feeSat ?? 0} sats (BTC)` : displaySpend(spend.fee, spend.asset)) : undefined, accountName: selected.accountName || selected.provider, id: Crypto.randomUUID(), sourceId: selected.route.sourceId, provider: selected.provider, total, recipient, createdAt: Date.now(), status: 'pending' };
     try {
       await beginPaymentAttempt(walletId, next); // No send unless the recovery record is durable.
     } catch {
-      setError('Could not start a new payment. Reopen Send to check your previous payment.');
-      setJournalReady(false); paying.current = false; setBusy(false); return;
+      if (sameWallet()) {
+        setError('Could not start a new payment. Reopen Send to check your previous payment.');
+        setJournalReady(false);
+      }
+      paying.current = false; if (mounted.current) setBusy(false); return;
     }
-    sentId.current = next.id;
-    setAttempt(next);
+    if (sameWallet()) { sentId.current = next.id; setAttempt(next); }
     // A payment to a picked contact goes into that contact's history too.
     const toContact = contactName && input.trim() ? { contactKey: contactKeyFor(input), contactName } : null;
     const logForContact = (status: PaymentAttempt['status'], reference?: string) => {
@@ -441,23 +461,30 @@ export default function SendScreen({ navigation, route }: Props) {
     };
     logForContact('pending');
     try {
+      // The wallet or selected quote can change while the journal is being written.
+      if (invoiceExpiresAt !== undefined && invoiceExpiresAt <= Date.now()) {
+        throw new PaymentNotSentError('The Lightning invoice has expired. Ask for a fresh invoice.', 'replace-invoice');
+      }
+      if (!isCurrent() || quote.expiresAt * 1000 <= Date.now()) {
+        throw new PaymentNotSentError('The reviewed payment changed or expired. Get a fresh price before paying.', 'retry-price');
+      }
       const result = await executePaymentOffer(preview, selected, next.id);
       const updated = { ...next, ...result };
-      setAttempt(updated);
-      resultCue(updated.status);
+      if (sameWallet()) { setAttempt(updated); resultCue(updated.status); }
       logForContact(updated.status, updated.reference);
       try { await updatePaymentAttempt(walletId, updated); }
-      catch { setError('The payment result could not be saved. Keep this receipt; reopening will check the payment again.'); }
+      catch { if (sameWallet()) setError('The payment result could not be saved. Keep this receipt; reopening will check the payment again.'); }
     } catch (e) {
-      const updated: PaymentAttempt = { ...next, status: e instanceof PaymentNotSentError ? 'failed' : 'unknown', detail: e instanceof PaymentNotSentError ? `${e.message} Nothing was sent.` : 'Payment status needs checking. Don’t pay this twice.' };
-      setAttempt(updated);
-      resultCue(updated.status);
+      const notSent = e instanceof PaymentNotSentError;
+      const detail = notSent ? `${e.message}${/Nothing was sent\.$/.test(e.message) ? '' : ' Nothing was sent.'}` : 'Payment status needs checking. Don’t pay this twice.';
+      const updated: PaymentAttempt = { ...next, status: notSent ? 'failed' : 'unknown', detail, ...(notSent && e.recovery ? { recovery: e.recovery } : {}) };
+      if (sameWallet()) { setAttempt(updated); resultCue(updated.status); setError(detail); }
       logForContact(updated.status, updated.reference);
-      setError(e instanceof PaymentNotSentError ? `${e.message} Nothing was sent.` : 'Payment status needs checking. Don’t pay this twice.');
       try { await updatePaymentAttempt(walletId, updated); } catch { /* The durable pending record forces a status check on reopen. */ }
     } finally {
-      paying.current = false; setBusy(false);
-      void dispatch(loadBtcBalance());
+      paying.current = false;
+      if (mounted.current) setBusy(false);
+      if (sameWallet()) void dispatch(loadBtcBalance());
     }
   }
 
@@ -554,7 +581,7 @@ export default function SendScreen({ navigation, route }: Props) {
   };
   const iconButton = { width: 40, height: 40, borderRadius: t.borderRadius.md, alignItems: 'center' as const, justifyContent: 'center' as const, backgroundColor: t.colors.background.secondary };
 
-  const resetToInput = () => { revision.current++; setBusy(false); setPreview(null); setOffers([]); };
+  const resetToInput = () => { revision.current++; setBusy(false); setPreview(null); setOffers([]); setReviewedPrice(null); };
 
   // ---- presentation ---------------------------------------------------------
   const text = { color: t.colors.text.primary, fontSize: t.typography.fontSize.base };
@@ -575,7 +602,7 @@ export default function SendScreen({ navigation, route }: Props) {
     ? [...new Set(shownOffers.flatMap(o => o.unavailable ? [o.unavailable] : []))]
     : [];
   const blockedRecovery = blockedReasons.map(sendRecovery);
-  const recovery = sendRecovery(error) ?? (blockedRecovery.includes('settings') ? 'settings'
+  const recovery = invoiceExpired ? 'replace-invoice' : sendRecovery(error || decodeError || '') ?? (blockedRecovery.includes('settings') ? 'settings'
     : blockedRecovery.length > 0 && blockedRecovery.every(action => action === 'replace-invoice') ? 'replace-invoice' : null);
   const best = bestOffer(shownOffers);
   const accountHeading = (o: PaymentOffer) => {
@@ -599,13 +626,13 @@ export default function SendScreen({ navigation, route }: Props) {
   const selectedAccount = selected ? offerAccount(selected) : null;
   const feeOption = feeOptions?.find(o => o.speed === feeSpeed);
   const chooseSpeed = (next: RgbFeeSpeed) => {
-    if (next === feeSpeed || busy) return;
+    if (next === feeSpeed || busy || paying.current) return;
     feedback.select();
     setFeeSpeed(next);
     setRgbL1FeeSpeed(next);
-    setPreviousTotal('');
-    void getOffers(true, true);
+    void getOffers(true);
   };
+  const selectOffer = (id: string) => { if (!paying.current) setSelectedId(id); };
 
   const headerTitle = attempt ? (attempt.status === 'completed' ? 'Sent' : 'Payment') : 'Send';
   const onBack = () => {
@@ -616,11 +643,14 @@ export default function SendScreen({ navigation, route }: Props) {
 
   const replaceInvoice = () => {
     resetToInput();
+    setAttempt(null);
     setInput('');
     setContactName(undefined);
+    setError('');
   };
   const renderSendBlocker = () => {
-    const messages = error ? [error] : blockedReasons;
+    const messages = invoiceExpired ? ['The Lightning invoice has expired. Ask for a fresh invoice.']
+      : error ? [error] : recovery === 'replace-invoice' && decodeError ? [decodeError] : blockedReasons;
     if (messages.length === 0) return null;
     return (
       <View accessibilityRole="alert" style={[card, { gap: t.spacing[2], marginBottom: t.spacing[3] }]}>
@@ -683,7 +713,7 @@ export default function SendScreen({ navigation, route }: Props) {
         </View>
         <Ionicons name="checkmark-circle" size={20} color={t.colors.primary[500]} />
       </Animated.View>
-    ) : input.trim() ? (
+    ) : input.trim() && recovery !== 'replace-invoice' ? (
       <View accessibilityRole="alert" style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing[2], marginTop: t.spacing[3], padding: t.spacing[3], borderRadius: t.borderRadius.lg, backgroundColor: t.colors.warning[500] + '1A' }}>
         <Ionicons name="alert-circle-outline" size={18} color={t.colors.warning[500]} />
         <Text style={{ ...muted, color: t.colors.warning[500], flex: 1 }}>{decodeError}</Text>
@@ -863,7 +893,7 @@ export default function SendScreen({ navigation, route }: Props) {
           const blocked = !c.best;
           return (
             <Animated.View key={c.account} entering={FadeInDown.delay(i * motion.stagger).duration(motion.duration.base)}>
-              <PressableScale scaleTo={0.98} disabled={blocked}                 onPress={() => { if (c.best && !active) { feedback.select(); setSelectedId(c.best.id); setPreviousTotal(''); } }}
+              <PressableScale scaleTo={0.98} disabled={blocked}                 onPress={() => { if (c.best && !active) { feedback.select(); selectOffer(c.best.id); } }}
                 accessibilityRole="radio" accessibilityState={{ checked: active, disabled: blocked }}
                 accessibilityLabel={`Pay from ${PAY_ACCOUNT_NAME[c.account]}${balancesSat[c.account] !== undefined ? `, balance ${formatSats(balancesSat[c.account]!)}` : ''}. ${blocked ? c.reason : s ? `Total ${displaySpend(s.total, s.asset)}` : ''}`}
                 style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing[3], padding: t.spacing[3], borderRadius: t.borderRadius.lg, borderWidth: 1.5,
@@ -922,7 +952,6 @@ export default function SendScreen({ navigation, route }: Props) {
           </Text>
         </View>}
         {hasPayableOffer && !!selected?.unavailable && <Text accessibilityRole="alert" style={{ ...muted, color: t.colors.warning[500], textAlign: 'center' }}>{selected.unavailable}</Text>}
-        {!!previousTotal && previousTotal !== total && !busy && <Text accessibilityLiveRegion="polite" style={{ ...muted, textAlign: 'center' }}>Price updated · now {total}</Text>}
         {!busy && !moreQuotes && preview.plan.status === 'ready' && !shownOffers.some(o => o.quote) && !blockedReasons.length &&
           <Text style={{ ...muted, textAlign: 'center' }}>No price is available for this request yet. Refresh to check again.</Text>}
         {selected && !selected.executable && <Text style={{ ...muted, textAlign: 'center' }}>This account can quote but cannot pay yet.</Text>}
@@ -950,21 +979,26 @@ export default function SendScreen({ navigation, route }: Props) {
         onPress={() => void checkStatus()} />}
       {unresolvedAttempt(a) && !busy && <Button title="Remove from Activity" variant="ghost" onPress={removeFromActivity} />}
       {done && receiptExpanded && <Button title="Share receipt" variant="ghost" onPress={() => shareReceipt(a)} />}
-      {failed ? <Button title={a.sourceId === 'rgb-asset' ? 'Review transfer' : 'Check for a new price'}
-        onPress={() => { setAttempt(null); if (preview) void getOffers(true); }} />
+      {failed ? <Button
+        title={a.recovery === 'replace-invoice' ? 'Replace invoice'
+          : a.recovery === 'retry-price' && preview ? 'Refresh price'
+          : a.sourceId === 'rgb-asset' ? 'Review transfer' : 'Check for a new price'}
+        onPress={a.recovery === 'replace-invoice' ? replaceInvoice
+          : () => { setAttempt(null); if (preview) void getOffers(true); }} />
         : <Button title="Done" onPress={() => navigation.goBack()} />}
 
     </View>;
   };
 
   const payLabel = total ? `${target?.kind === 'rgb' ? 'Send' : 'Pay'} ${total}` : 'Pay';
+  const confirmationKey = quote && selected ? JSON.stringify([walletId, offerRevision, selected.id, quote]) : undefined;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.colors.background.primary }} edges={['left', 'right', 'bottom']}>
       <ScreenHeader title={headerTitle} onBack={onBack} />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         {crossChain && !attempt && !preview ? (
-          <CrossChainSendPanel key={crossChain.normalized} address={crossChain.normalized} family={crossChain.family} walletId={walletId} bitcoinUnit={bitcoinUnit}
+          <CrossChainSendPanel key={JSON.stringify([walletId, crossChain.normalized])} address={crossChain.normalized} family={crossChain.family} walletId={walletId} bitcoinUnit={bitcoinUnit}
             header={renderField()} onOpenAddress={a => { setInput(a); setContactName(undefined); }} onDone={() => navigation.goBack()} />
         ) : <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: t.spacing[5] }}>
           {KALEIDOPAY_DEMO && <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing[2], padding: t.spacing[3], borderRadius: t.borderRadius.lg, backgroundColor: t.colors.warning[500] + '22', marginBottom: t.spacing[4] }}>
@@ -978,16 +1012,19 @@ export default function SendScreen({ navigation, route }: Props) {
           {attempt ? renderResult(attempt) : preview ? renderReview() : renderInput()}
         </ScrollView>}
         {!crossChain && !attempt && <View style={{ padding: t.spacing[5], gap: t.spacing[3], backgroundColor: t.colors.background.primary }}>
-          {!preview
+          {recovery === 'replace-invoice' ? null : !preview
             ? <Button title={busy ? (target?.kind === 'rgb' ? 'Checking transfer…' : 'Getting quotes…') : (target?.kind === 'rgb' ? 'Review transfer' : 'Continue')} disabled={!target || busy || !journalReady || rgbReading || (target?.kind === 'rgb' && !rgbAsset)} onPress={review} />
-            : recovery === 'replace-invoice' ? null
             : !quote || quote.expiresAt * 1000 <= now || selected?.unavailable || zeroRgbFeeBalance
               ? <Button title={busy ? (target?.kind === 'rgb' ? 'Checking transfer…' : 'Updating price…') : (target?.kind === 'rgb' ? 'Refresh transfer' : 'Refresh price')} disabled={busy} onPress={() => void getOffers(true)} />
-              : <SlideToConfirm label={payLabel} loading={busy} disabled={!selected?.executable || !walletId || !journalReady} onConfirm={() => void pay()} />}
+              : priceChanged && reviewedPrice && currentPrice ? <>
+                <Text accessibilityLiveRegion="polite" style={text}>Price updated from {reviewedPrice.label} to {currentPrice.label}.</Text>
+                <Button title="Review updated price" disabled={busy} onPress={() => setReviewedPrice(currentPrice)} />
+              </> : <HoldToConfirm label={payLabel} loading={busy} disabled={!selected?.executable || !walletId || !journalReady}
+                confirmationKey={confirmationKey} onConfirm={pay} />}
           {preview && !walletId && <Text style={{ ...muted, textAlign: 'center' }}>Set up a wallet to pay.</Text>}
         </View>}
       </KeyboardAvoidingView>
-      <ProviderSheet visible={showProviders} options={options} selectedId={selectedId} onSelect={id => { setSelectedId(id); setPreviousTotal(''); }}
+      <ProviderSheet visible={showProviders} options={options} selectedId={selectedId} onSelect={selectOffer}
         onClose={() => setShowProviders(false)} now={now} title="Change account" intro="Choose an account for this payment. Available balances and totals include the quoted fees." />
       <AmountEditorModal visible={showAmountEditor}
         onClose={() => { continueAfterAmount.current = false; setAmountEditorFor('btc'); setShowAmountEditor(false); }}

@@ -54,6 +54,8 @@ test('rejects missing/zero output, fractional base units and nonfinite fee', asy
   expect((await fetchSwapOffers([pair('one')], 'BTC', 'TOK', 0.1, 'sats'))[0].unavailable).toMatch(/amount/);
   simulateSwap.mockResolvedValue({ amountOut: '20' });
   expect((await fetchSwapOffers([pair('one')], 'BTC', 'TOK', 1000, 'sats'))[0].unavailable).toMatch(/fee/);
+  simulateSwap.mockResolvedValue({ amountOut: '20', feePaidAssetIn: '' });
+  expect((await fetchSwapOffers([pair('one')], 'BTC', 'TOK', 1000, 'sats'))[0].unavailable).toMatch(/fee/);
 });
 test('does not rank different tokens sharing a ticker or expired quotes', async () => {
   (flashnetClientManager.getClient as jest.Mock).mockReturnValue({ simulateSwap: async () => ({ amountOut: '20', feePaidAssetIn: '2' }) });
@@ -74,6 +76,42 @@ test('bounds slow provider waits', async () => {
   const request = fetchSwapOffers([pair('slow')], 'BTC', 'TOK', 1000, 'sats');
   await jest.advanceTimersByTimeAsync(15000);
   expect((await request)[0].unavailable).toMatch(/did not respond/);
+});
+
+test('publishes a live quote as soon as it arrives and keeps the result order stable', async () => {
+  jest.useFakeTimers();
+  const simulateSwap = jest.fn(({ poolId }) => poolId === 'slow' ? new Promise(() => {}) :
+    Promise.resolve({ amountOut: '20', feePaidAssetIn: '2' }));
+  (flashnetClientManager.getClient as jest.Mock).mockReturnValue({ simulateSwap });
+  const onOffer = jest.fn();
+  const finished = jest.fn();
+  const request = fetchSwapOffers([pair('slow'), pair('fast')], 'BTC', 'TOK', 1000, 'sats', { onOffer });
+  void request.then(finished);
+
+  await jest.advanceTimersByTimeAsync(0);
+  expect(onOffer).toHaveBeenCalledTimes(1);
+  expect(onOffer).toHaveBeenCalledWith(expect.objectContaining({ pair: expect.objectContaining({ poolId: 'fast' }), quote: expect.objectContaining({ to_amount: 20 }) }));
+  expect(finished).not.toHaveBeenCalled();
+
+  await jest.advanceTimersByTimeAsync(15000);
+  expect((await request).map(offer => offer.pair.poolId)).toEqual(['slow', 'fast']);
+  expect(onOffer).toHaveBeenCalledTimes(2);
+});
+
+test('stops waiting and suppresses late quotes when the request is replaced', async () => {
+  type Simulation = { amountOut: string; feePaidAssetIn: string };
+  let finish!: (result: Simulation) => void;
+  const pending = new Promise<Simulation>(resolve => { finish = resolve; });
+  (flashnetClientManager.getClient as jest.Mock).mockReturnValue({ simulateSwap: () => pending });
+  const onOffer = jest.fn();
+  const controller = new AbortController();
+  const request = fetchSwapOffers([pair('one')], 'BTC', 'TOK', 1000, 'sats', { onOffer, signal: controller.signal });
+
+  controller.abort();
+  await expect(request).resolves.toEqual([]);
+  finish({ amountOut: '20', feePaidAssetIn: '2' });
+  await pending;
+  expect(onOffer).not.toHaveBeenCalled();
 });
 
 test('rejects a provider replacement after a quote was reviewed', async () => {

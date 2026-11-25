@@ -1,5 +1,5 @@
 // screens/SwapScreen.tsx
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useMemo } from 'react';
 import { usePolicy } from '../hooks/usePolicy';
 import {
   TextInput,
@@ -40,7 +40,8 @@ import { kaleidoClientManager, flashnetClientManager } from '../services/protoco
 import { syncAssets } from '../store/slices/assetsSlice';
 import { getAssetDisplayBalance, resolvePrecision } from '../utils/assetAmount';
 import { useFiatRates } from '../hooks/useFiatRates';
-import { formatSatoshisToUSD } from '../utils/bitcoinUnits';
+import { useForegroundClock } from '../hooks/useForegroundClock';
+import { formatUsd } from '../utils/portfolio';
 import ToastService from '../services/ToastService';
 import { inventoryBtc, inventoryTokens } from '../utils/asset-inventory';
 import { useAssetInventory } from '../hooks/useAssetInventory';
@@ -51,8 +52,8 @@ import {
   capSwapBalance, normalizeMakerPairs, buildFlashnetPairs, validateSwapString, swapRateLabel, maxSwapSendRaw,
   QUOTE_DEBOUNCE_MS, QUOTE_REFRESH_MS, DEFAULT_FLASHNET_SLIPPAGE_BPS, MSATS_PER_SAT, RLN_HTLC_MIN_MSAT,
 } from '../utils/swap-model';
-import { minimumSwapOutput, quoteHasExpired } from '../utils/swap-review';
-import { describeSwapFailure, isConnectionFailure, SWAP_FAILED_COPY, SWAP_UNCONFIRMED_COPY, type SwapFailureCopy } from '../utils/swap-errors';
+import { minimumSwapOutput, quoteHasExpired, swapOutputUsdValue } from '../utils/swap-review';
+import { describeSwapFailure, flashnetSwapNeedsVerification, SWAP_FAILED_COPY, SWAP_UNCONFIRMED_COPY, type SwapFailureCopy } from '../utils/swap-errors';
 import { SwapRouteSummary } from '../components/payments/SwapRouteSummary';
 import { ProviderSheet } from '../components/payments/ProviderSheet';
 import {
@@ -68,7 +69,9 @@ import { swapStatusVisual } from '../utils/paymentStatus';
 import { Card, Button, Input, MainHeader, AssetIcon, AssetSelector, PressableScale, Sheet, AmountText, Callout } from '../components';
 import { NetworkIcon, networkIconForLabel } from '../components/NetworkIcon';
 import { CopyButton } from '../components/CopyButton';
-import { SlideToConfirm } from '../components/SlideToConfirm';
+import { HoldToConfirm } from '../components/HoldToConfirm';
+import { startWalletPerformance } from '../utils/walletPerformance';
+import { adapterChain } from '../services/kaleidoPay/connect';
 import { ExplainButton } from '../components/mind/ExplainSheet';
 import { useFeature } from '../hooks/useFeature';
 
@@ -89,7 +92,7 @@ interface Asset {
 export default function SwapScreen({ navigation, route }: Props) {
   const dispatch = useAppDispatch();
   const makerSwapsOn = useFeature('makerSwaps');
-  const usdRate = useFiatRates().usd;
+  const usdRate = useFiatRates(['usd']).usd;
   const { height: screenHeight } = useWindowDimensions();
   const swapState = useAppSelector((state: RootState) => state.swap);
   const walletState = useAppSelector((state: RootState) => state.wallet);
@@ -131,27 +134,40 @@ export default function SwapScreen({ navigation, route }: Props) {
   const [availableAssets, setAvailableAssets] = useState<Asset[]>([]);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [reviewQuote, setReviewQuote] = useState<SwapQuote | null>(null);
+  const [reviewRefreshing, setReviewRefreshing] = useState(false);
   const [previousReviewQuote, setPreviousReviewQuote] = useState<SwapQuote | null>(null);
   const [providerOffers, setProviderOffers] = useState<SwapOffer[]>([]);
   const [showProviders, setShowProviders] = useState(false);
   const selectedProvider = React.useRef<string | undefined>(undefined);
   const quotePairs = React.useRef(new WeakMap<SwapQuote, SwapPair>());
   const executingRef = React.useRef(false);
-  const quoteRequestRef = React.useRef(0);
+  const quoteRequest = React.useRef<AbortController | null>(null);
   const lastAutoRefreshRef = React.useRef(0);
   const [pollingInterval, setPollingInterval] = useState<ReturnType<typeof setInterval> | null>(null);
   const [tradingPairs, setTradingPairs] = useState<SwapPair[]>([]);
   const [venueFilter, setVenueFilter] = useState<SwapVenueFilter>('all');
-  // Lite hides venues, the maker and account names: the best price is picked for you.
+  // Lite hides the venue filter and maker configuration.
   const policy = usePolicy();
   const [swapProgress, setSwapProgress] = useState<SwapProgress>('idle');
   const [pairsLoading, setPairsLoading] = useState(false);
   // A venue whose prices failed to load, so an empty list says why.
   const [pairsFailed, setPairsFailed] = useState(false);
   const [makerApiUnavailable, setMakerApiUnavailable] = useState(false);
-  const [quoteSecsLeft, setQuoteSecsLeft] = useState<number | null>(null);
   // The RGB node's channels: what a maker swap can carry (channels unknown = no guard).
   const [liquidity, setLiquidity] = useState<ChannelLiquidity>({ htlcMinMsat: RLN_HTLC_MIN_MSAT });
+  const liquidityRef = React.useRef(liquidity);
+  const walletId = walletState?.activeWallet?.id;
+  const quoteContext = useMemo(() => ({
+    walletId, makerSwapsOn, bitcoinUnit, venueFilter, tradingPairs,
+    from: swapState.fromAsset, to: swapState.toAsset, amount: Number(swapState.fromAmount),
+  }), [walletId, makerSwapsOn, bitcoinUnit, venueFilter, tradingPairs, swapState.fromAsset, swapState.toAsset, swapState.fromAmount]);
+  const activeQuoteContext = React.useRef(quoteContext);
+  const quoteContexts = React.useRef(new WeakMap<SwapQuote, typeof quoteContext>());
+  const currentQuote = swapState.currentQuote && quoteContexts.current.get(swapState.currentQuote) === quoteContext
+    ? swapState.currentQuote : null;
+  const hasLiveQuote = !!currentQuote && !quoteHasExpired(currentQuote.expiry_timestamp);
+  const getQuoteRef = React.useRef<() => void>(() => {});
+  const reviewCurrent = !!reviewQuote && quoteContexts.current.get(reviewQuote) === quoteContext;
   // Set once a swap settles so the confirm modal shows a success screen instead
   // of silently closing (the Flashnet path had no confirmation at all).
   const [swapSuccess, setSwapSuccess] = useState<
@@ -181,7 +197,9 @@ export default function SwapScreen({ navigation, route }: Props) {
   };
 
   const refreshLiquidity = async () => {
-    try { setLiquidity(await loadChannelLiquidity()); } catch { setLiquidity({ htlcMinMsat: RLN_HTLC_MIN_MSAT }); }
+    const next = await loadChannelLiquidity().catch(() => ({ htlcMinMsat: RLN_HTLC_MIN_MSAT }));
+    liquidityRef.current = next;
+    setLiquidity(next);
   };
 
   // Build a history entry from a settled quote so swaps (both venues) show up in
@@ -254,52 +272,32 @@ export default function SwapScreen({ navigation, route }: Props) {
     };
   }, [pollingInterval]);
 
-  useEffect(() => { selectedProvider.current = undefined; }, [swapState.fromAsset, swapState.toAsset, venueFilter]);
+  useLayoutEffect(() => { selectedProvider.current = undefined; }, [walletId, swapState.fromAsset, swapState.toAsset, venueFilter]);
 
-  // Invalidate quotes immediately when the input changes, including in-flight responses.
-  useEffect(() => {
-    quoteRequestRef.current += 1;
-    dispatch(setCurrentQuote(null));
+  // Invalidate old results before presenting the edited input and stop waiting on its providers.
+  useLayoutEffect(() => {
+    activeQuoteContext.current = quoteContext;
     setProviderOffers([]);
+    setReviewRefreshing(false);
+    dispatch(setCurrentQuote(null));
     dispatch(setQuoteLoading(false));
+    dispatch(clearError());
     const timer = setTimeout(() => {
-      if (swapState.fromAmount && parseFloat(swapState.fromAmount) > 0 && swapState.fromAsset && swapState.toAsset) {
-        getQuote();
-      } else {
-        // Reset quote if amount is cleared
-        if (swapState.currentQuote) {
-          dispatch(setCurrentQuote(null));
-        }
-      }
-    }, 500); // 500ms debounce
+      if (quoteContext.tradingPairs.length && quoteContext.from && quoteContext.to && quoteContext.amount > 0) getQuoteRef.current();
+    }, QUOTE_DEBOUNCE_MS);
+    return () => { clearTimeout(timer); quoteRequest.current?.abort(); };
+  }, [quoteContext, dispatch]);
 
-    return () => { clearTimeout(timer); quoteRequestRef.current += 1; };
-  }, [swapState.fromAmount, swapState.fromAsset, swapState.toAsset, venueFilter, bitcoinUnit, tradingPairs]);
-
-  // Always-fresh handle to getQuote for use inside intervals (avoids stale closures).
-  const getQuoteRef = React.useRef<() => void>(() => {});
-
-  // Live quote expiry countdown + auto-refresh (mirrors the extension's behaviour:
-  // quotes are short-lived, so we tick a countdown and refresh as it ages out).
+  // Keep the reviewed terms fixed. Only the form behind the review auto-refreshes.
+  const clockQuote = showConfirmModal && reviewCurrent ? reviewQuote : currentQuote;
+  const quoteNow = useForegroundClock(!!clockQuote && !swapState.isExecuting);
+  const quoteSecsLeft = clockQuote ? Math.max(0, Math.ceil((clockQuote.expiry_timestamp - quoteNow) / 1000)) : null;
   useEffect(() => {
-    const q = showConfirmModal ? reviewQuote : swapState.currentQuote;
-    if (!q || swapState.isExecuting) {
-      setQuoteSecsLeft(null);
-      return;
-    }
-    const tick = () => {
-      const left = Math.max(0, Math.round((q.expiry_timestamp - Date.now()) / 1000));
-      setQuoteSecsLeft(left);
-      const aged = Date.now() - q.expiry_timestamp >= -QUOTE_REFRESH_MS;
-      if (!showConfirmModal && !swapState.isQuoteLoading && (left <= 0 || aged) && Date.now() - lastAutoRefreshRef.current >= QUOTE_REFRESH_MS) {
-        lastAutoRefreshRef.current = Date.now();
-        getQuoteRef.current?.();
-      }
-    };
-    tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-  }, [swapState.currentQuote, swapState.isExecuting, showConfirmModal, reviewQuote, swapState.isQuoteLoading]);
+    if (!currentQuote || (showConfirmModal && reviewCurrent) || swapState.isExecuting || swapState.isQuoteLoading) return;
+    if (quoteNow < currentQuote.expiry_timestamp - QUOTE_REFRESH_MS || quoteNow - lastAutoRefreshRef.current < QUOTE_REFRESH_MS) return;
+    lastAutoRefreshRef.current = quoteNow;
+    getQuoteRef.current();
+  }, [quoteNow, currentQuote, swapState.isExecuting, showConfirmModal, reviewCurrent, swapState.isQuoteLoading]);
 
   const loadTradingPairs = async () => {
     setPairsLoading(true);
@@ -445,43 +443,96 @@ export default function SwapScreen({ navigation, route }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tradingPairs, venueFilter]);
 
-  const getQuote = async () => {
-    const requestId = ++quoteRequestRef.current;
-    if (!Number.isFinite(Number(swapState.fromAmount)) || Number(swapState.fromAmount) <= 0) return;
+  const getQuote = async (onReady?: (quote?: SwapQuote) => void) => {
+    const { from, to, amount } = quoteContext;
+    if (!Number.isFinite(amount) || amount <= 0 || activeQuoteContext.current !== quoteContext || executingRef.current) {
+      onReady?.();
+      return;
+    }
+    quoteRequest.current?.abort();
+    const request = new AbortController();
+    quoteRequest.current = request;
+    const active = () => !request.signal.aborted && activeQuoteContext.current === quoteContext;
+    const received = new Map<string, SwapOffer>();
+    const markUsableQuote = startWalletPerformance('swap-quote');
+    let ready = onReady;
+    let latest: SwapQuote | undefined;
+    const publish = (offer: SwapOffer) => {
+      if (!offer.quote || latest === offer.quote || quoteHasExpired(offer.quote.expiry_timestamp)) return;
+      selectedProvider.current = offer.id;
+      if (!quoteChannelShortfall(offer.quote, liquidityRef.current)) markUsableQuote();
+      latest = offer.quote;
+      dispatch(clearError());
+      dispatch(setCurrentQuote(offer.quote));
+      ready?.(offer.quote);
+      ready = undefined;
+    };
     dispatch(setQuoteLoading(true)); dispatch(clearError());
+    setProviderOffers([]);
     try {
-      const offers = await fetchSwapOffers(filteredPairs, swapState.fromAsset, swapState.toAsset, Number(swapState.fromAmount), bitcoinUnit);
-      if (requestId !== quoteRequestRef.current) return;
-      setProviderOffers(offers);
-      offers.forEach(o => { if (o.quote) quotePairs.current.set(o.quote, o.pair); });
+      const offers = await fetchSwapOffers(filteredPairs, from, to, amount, bitcoinUnit, {
+        signal: request.signal,
+        onOffer: offer => {
+          if (!active()) return;
+          received.set(offer.id, offer);
+          setProviderOffers([...received.values()]);
+          if (!offer.quote) return;
+          quotePairs.current.set(offer.quote, offer.pair);
+          quoteContexts.current.set(offer.quote, quoteContext);
+          if (selectedProvider.current === offer.id || (!selectedProvider.current && !quoteChannelShortfall(offer.quote, liquidityRef.current))) {
+            publish(offer);
+          }
+        },
+      });
+      if (!active()) return;
       const selected = selectedProvider.current
         ? offers.find(o => o.id === selectedProvider.current)
-        : bestSwapOffer(offers) ?? offers.find(o => o.quote);
-      if (selected) selectedProvider.current = selected.id;
-      dispatch(setCurrentQuote(selected?.quote ?? null));
-      if (!selected?.quote) dispatch(setError(selected?.unavailable ?? 'No live quote from the selected provider. Compare providers or refresh.'));
-      return selected?.quote;
-    } finally { if (requestId === quoteRequestRef.current) dispatch(setQuoteLoading(false)); }
+        : bestSwapOffer(offers) ?? offers.find(o => o.quote && !quoteHasExpired(o.quote.expiry_timestamp));
+      if (selected) publish(selected);
+      if ((!latest || quoteHasExpired(latest.expiry_timestamp)) && (!currentQuote || quoteHasExpired(currentQuote.expiry_timestamp))) {
+        dispatch(setCurrentQuote(null));
+        dispatch(setError(selected?.unavailable ?? 'No live quote from the selected provider. Compare providers or refresh.'));
+      }
+    } catch {
+      if (active()) dispatch(setError('Could not get quotes. Refresh to try again.'));
+    } finally {
+      if (active()) {
+        quoteRequest.current = null;
+        dispatch(setQuoteLoading(false));
+        ready?.();
+      }
+    }
   };
 
   // Keep the interval's handle pointing at the latest getQuote.
   getQuoteRef.current = getQuote;
 
-  const refreshReviewQuote = async () => {
-    const updated = await getQuote();
-    if (updated) {
-      setPreviousReviewQuote(reviewQuote);
-      setReviewQuote(updated);
+  const refreshReviewQuote = () => {
+    setReviewRefreshing(true);
+    void getQuote(updated => {
+      setReviewRefreshing(false);
+      if (updated) {
+        setPreviousReviewQuote(reviewQuote);
+        setReviewQuote(updated);
+      }
+    });
+  };
+
+  const closeReview = () => {
+    if (reviewRefreshing) {
+      quoteRequest.current?.abort();
+      setReviewRefreshing(false);
+      dispatch(setQuoteLoading(false));
     }
+    setShowConfirmModal(false);
   };
 
   const executeSwap = async () => {
-    if (!reviewQuote || executingRef.current || swapState.isExecuting) return;
+    if (!reviewQuote || !reviewCurrent || activeQuoteContext.current !== quoteContext || reviewRefreshing || executingRef.current || swapState.isExecuting) return;
     const quote = reviewQuote;
-    if (quoteHasExpired(quote.expiry_timestamp)) {
-      setQuoteSecsLeft(0);
-      return;
-    }
+    if (quoteHasExpired(quote.expiry_timestamp)) return;
+    const shortfall = quoteChannelShortfall(quote, liquidityRef.current);
+    if (shortfall) { dispatch(setError(shortfall)); return; }
     if (quote.to_amount <= 0 || quote.from_amount !== Number(swapState.fromAmount) ||
         quote.from_asset !== swapState.fromAsset || quote.to_asset !== swapState.toAsset) {
       dispatch(setError('The payment amount changed. Request a new quote.'));
@@ -489,6 +540,8 @@ export default function SwapScreen({ navigation, route }: Props) {
       return;
     }
     executingRef.current = true;
+    quoteRequest.current?.abort();
+    dispatch(setQuoteLoading(false));
     // Once the provider has the swap, a failure belongs in Activity.
     let started = false;
     let swapString = '';
@@ -522,23 +575,26 @@ export default function SwapScreen({ navigation, route }: Props) {
           ? btcDisplayToSats(quote.to_amount)
           : quote.to_amount * Math.pow(10, toPrecision));
 
+        // Submit the same integer minimum shown in the review.
+        const minAmountOut = minimumSwapOutput(rawToAmount, DEFAULT_FLASHNET_SLIPPAGE_BPS);
         flashnetSubmitted = true;
         const result = await client.executeSwap({
           poolId: poolId || '',
           assetInAddress: fromAssetId,
           assetOutAddress: toAssetId,
           amountIn: String(rawAmount),
-          // Submit the same integer minimum shown in the review.
-          minAmountOut: String(minimumSwapOutput(rawToAmount, DEFAULT_FLASHNET_SLIPPAGE_BPS)),
+          minAmountOut: String(minAmountOut),
           maxSlippageBps: DEFAULT_FLASHNET_SLIPPAGE_BPS,
         });
-        if (result?.accepted === false) {
-          // The current SDK throws here. Treat explicit declines the same if
-          // a client reports its rejection by returning the provider response.
+        if (result?.accepted !== true) {
+          const refunded = result?.accepted === false && result.refundTransferId &&
+            result.refundedAssetAddress?.toLowerCase() === fromAssetId.toLowerCase() &&
+            result.refundedAmount === String(rawAmount);
+          if (!refunded) throw new Error('Flashnet did not confirm the swap or the return of its funding transfer.');
           feedback.error();
           setSwapProgress('idle');
-          recordSwapHistory(quote, 'failed', undefined, undefined, result.error || 'Flashnet declined the swap.');
-          setSwapFailure({ title: 'Swap rejected', message: 'Flashnet declined the swap. Check your balance before trying again.' });
+          recordSwapHistory(quote, 'failed', undefined, undefined, result?.error || 'Flashnet declined the swap.');
+          setSwapFailure({ title: 'Swap rejected', message: 'Flashnet returned the funds. Check your balance before trying again.' });
           dispatch(setExecuting(false));
           refreshAfterSwap();
           return;
@@ -546,7 +602,7 @@ export default function SwapScreen({ navigation, route }: Props) {
         const toBtc = isBtcTicker(quote.to_asset);
         const rawOutput = result?.amountOut;
         const precision = toBtc ? 0 : toPrecision;
-        const received = result?.accepted === true && typeof rawOutput === 'string' && /^\d{1,20}$/.test(rawOutput) &&
+        const received = typeof rawOutput === 'string' && /^\d{1,20}$/.test(rawOutput) &&
           Number(rawOutput) > 0 && Number.isInteger(precision) && precision >= 0 && precision <= 18 &&
           (!toBtc || Number.isSafeInteger(Number(rawOutput)))
           ? { raw: rawOutput, precision } : undefined;
@@ -669,8 +725,8 @@ export default function SwapScreen({ navigation, route }: Props) {
         return;
       }
       const copy = describeSwapFailure(error);
-      // A Flashnet request that timed out may still have gone through.
-      if (flashnetSubmitted && isConnectionFailure(error)) {
+      // A failure after Flashnet starts may leave a settled swap or funds to recover.
+      if (flashnetSubmitted && flashnetSwapNeedsVerification(error)) {
         setSwapProgress('idle');
         recordSwapHistory(quote, 'pending', undefined, swapString, error instanceof Error ? error.message : copy.title);
         setSwapFailure({ ...SWAP_UNCONFIRMED_COPY, unconfirmed: true });
@@ -925,13 +981,19 @@ export default function SwapScreen({ navigation, route }: Props) {
     </View>;
   };
 
-  const liquidityShortfall = swapState.currentQuote ? quoteChannelShortfall(swapState.currentQuote, liquidity, quoteLegLabel) : null;
+  const liquidityShortfall = currentQuote ? quoteChannelShortfall(currentQuote, liquidity, quoteLegLabel) : null;
+  const quoteProtocol = currentQuote?.venue === 'flashnet' ? 'SPARK' : 'RGB_LN';
+  const outputUsd = currentQuote && swapOutputUsdValue(currentQuote, bitcoinUnit, usdRate,
+    adapterChain(quoteProtocol, protocolManager.getAdapterIfAvailable(quoteProtocol)));
+  const awaitingQuote = swapState.isQuoteLoading && !hasLiveQuote;
+  const providerShortfall = (offer: SwapOffer) => offer.quote ? quoteChannelShortfall(offer.quote, liquidity, quoteLegLabel) : null;
+  const recommendedProvider = bestSwapOffer(providerOffers.filter(offer => !providerShortfall(offer)))?.id;
 
   const renderSwapInterface = () => (
     <View style={styles.swapContainer}>
       {makerApiUnavailable && <Callout tone="warning" title="RGB swaps unavailable with this maker" message="This maker cannot provide RGB Lightning swaps in this version of Rate. Choose another maker in Settings, or use Send and Receive for supported payments." />}
       {renderPairsNotice()}
-      {/* Venue filter tabs (Advanced only: Lite picks the best price for you) */}
+      {/* Venue filter tabs for Advanced mode. */}
       {policy.showRouteSelector && renderVenueFilter()}
 
       {/* KaleidoSwap maker provider — shows which maker is serving pairs so an
@@ -1024,22 +1086,18 @@ export default function SwapScreen({ navigation, route }: Props) {
         </View>
 
         <View style={styles.swapInputRow}>
-          {swapState.isQuoteLoading ? (
+          {awaitingQuote ? (
             <ActivityIndicator color={theme.colors.text.secondary} style={{ alignSelf: 'flex-start', marginLeft: 4, height: 48 }} />
           ) : (
             <View>
               <Text style={[
                 styles.amountText,
-                !swapState.currentQuote?.to_amount && styles.amountTextPlaceholder
+                !currentQuote && styles.amountTextPlaceholder
               ]}>
-                {swapState.currentQuote?.to_amount ? formatDisplayAmount(swapState.currentQuote.to_amount, swapState.toAsset) : '0'}
+                {currentQuote ? formatDisplayAmount(currentQuote.to_amount, currentQuote.to_asset) : '—'}
                 <Text style={styles.amountUnit}> {unitLabelFor(swapState.toAsset)}</Text>
               </Text>
-              {swapState.currentQuote?.to_amount != null && !!usdRate && (
-                <Text style={styles.fiatHint}>
-                  ≈ ${isBtcTicker(swapState.toAsset) ? formatSatoshisToUSD(btcDisplayToSats(swapState.currentQuote.to_amount), usdRate) : (swapState.currentQuote.to_amount).toFixed(2)}
-                </Text>
-              )}
+              {typeof outputUsd === 'number' && <Text style={styles.fiatHint}>≈ {formatUsd(outputUsd)}</Text>}
             </View>
           )}
 
@@ -1047,16 +1105,19 @@ export default function SwapScreen({ navigation, route }: Props) {
         </View>
       </View>
 
-      {swapState.currentQuote && <SwapRouteSummary
-        provider={swapState.currentQuote.venue === 'flashnet' ? 'Flashnet' : 'KaleidoSwap'}
+      {hasLiveQuote && currentQuote && <SwapRouteSummary
+        provider={currentQuote.venue === 'flashnet' ? 'Flashnet' : 'KaleidoSwap'}
         route={`${networkLabelFor(swapState.fromAsset)} → ${networkLabelFor(swapState.toAsset)}`}
-        fee={formatQuoteFee(swapState.currentQuote)}
-        rate={swapRateLabel(swapState.currentQuote, bitcoinUnit)}
+        fee={formatQuoteFee(currentQuote)}
+        rate={swapRateLabel(currentQuote, bitcoinUnit)}
         secondsLeft={quoteSecsLeft}
         offerCount={providerOffers.length}
         onCompare={() => setShowProviders(true)}
       />}
-      {!swapState.currentQuote && providerOffers.length > 1 && <Button title="Compare providers" variant="secondary" onPress={() => setShowProviders(true)} />}
+      {!hasLiveQuote && providerOffers.some(offer => offer.quote && !quoteHasExpired(offer.quote.expiry_timestamp)) &&
+        <Button title="Compare providers" variant="secondary" onPress={() => setShowProviders(true)} />}
+      {hasLiveQuote && swapState.isQuoteLoading && <Text style={styles.makerInfoLabel}>Checking more providers…</Text>}
+      {!!currentQuote && !hasLiveQuote && !awaitingQuote && <Text style={styles.makerInfoLabel}>Quote expired. Refresh to review.</Text>}
 
       {!!liquidityShortfall && (
         <Callout tone="warning" title="Not enough channel liquidity" message={liquidityShortfall.charAt(0).toUpperCase() + liquidityShortfall.slice(1)} style={{ marginTop: theme.spacing[3] }} />
@@ -1064,16 +1125,16 @@ export default function SwapScreen({ navigation, route }: Props) {
 
       {/* Main Action Button */}
       <Button
-        title={swapState.isQuoteLoading ? 'Comparing quotes…' : (swapState.currentQuote ? 'Review swap' : Number(swapState.fromAmount) > 0 ? 'Refresh quotes' : 'Enter amount')}
+        title={awaitingQuote ? 'Comparing quotes…' : (hasLiveQuote ? 'Review swap' : Number(swapState.fromAmount) > 0 ? 'Refresh quotes' : 'Enter amount')}
         onPress={() => {
-          if (!swapState.currentQuote) { void getQuote(); return; }
+          if (!currentQuote || quoteHasExpired(currentQuote.expiry_timestamp)) { void getQuote(); return; }
           if (liquidityShortfall) return;
-          setReviewQuote(swapState.currentQuote);
+          setReviewQuote(currentQuote);
           setPreviousReviewQuote(null);
           setShowConfirmModal(true);
         }}
-        disabled={swapState.isQuoteLoading || !!liquidityShortfall || !Number.isFinite(Number(swapState.fromAmount)) || Number(swapState.fromAmount) <= 0}
-        loading={swapState.isQuoteLoading}
+        disabled={awaitingQuote || (hasLiveQuote && !!liquidityShortfall) || !Number.isFinite(Number(swapState.fromAmount)) || Number(swapState.fromAmount) <= 0}
+        loading={awaitingQuote}
         variant="primary"
         fullWidth
         style={styles.getQuoteButton}
@@ -1082,8 +1143,8 @@ export default function SwapScreen({ navigation, route }: Props) {
     </View>
   );
 
-  const networkLabelFor = (ticker: string) => {
-    const selected = swapState.currentQuote && quotePairs.current.get(swapState.currentQuote);
+  const networkLabelFor = (ticker: string, quote = currentQuote) => {
+    const selected = quote && quotePairs.current.get(quote);
     return ({ Spark: 'Spark', LN: 'Lightning', 'RGB-LN': 'RGB Lightning' } as const)[getAssetNetwork(selected ? [selected] : filteredPairs, ticker)];
   };
 
@@ -1218,17 +1279,18 @@ export default function SwapScreen({ navigation, route }: Props) {
   };
 
   // Retry with a fresh quote: the failed one is spent or stale.
-  const retrySwap = async () => {
+  const retrySwap = () => {
     setSwapFailure(null);
     setSwapProgress('idle');
     dispatch(setCurrentExecution(null));
-    const fresh = await getQuote();
-    if (fresh) {
-      setReviewQuote(fresh);
-      setPreviousReviewQuote(null);
-    } else {
-      setShowConfirmModal(false);
-    }
+    setReviewRefreshing(true);
+    void getQuote(fresh => {
+      setReviewRefreshing(false);
+      if (fresh) {
+        setReviewQuote(fresh);
+        setPreviousReviewQuote(null);
+      } else setShowConfirmModal(false);
+    });
   };
 
   const renderConfirmBody = () => {
@@ -1307,6 +1369,9 @@ export default function SwapScreen({ navigation, route }: Props) {
     const minRaw = isFlashnet && validOutput ? minimumSwapOutput(rawOut, DEFAULT_FLASHNET_SLIPPAGE_BPS) : rawOut;
     const minDisplay = !isFlashnet ? reviewQuote.to_amount : isBtcTicker(toTicker) ? satsToBtcDisplay(minRaw) : minRaw / 10 ** toPrecision;
     const expired = quoteHasExpired(reviewQuote.expiry_timestamp);
+    const reviewShortfall = quoteChannelShortfall(reviewQuote, liquidity, quoteLegLabel);
+    const reviewIdentity = JSON.stringify([reviewQuote.rfq_id, reviewQuote.expiry_timestamp, reviewQuote.from_asset_id,
+      reviewQuote.from_amount_raw, reviewQuote.to_asset_id, reviewQuote.to_amount_raw, reviewQuote.fee_amount]);
 
     return (
       <View>
@@ -1319,6 +1384,7 @@ export default function SwapScreen({ navigation, route }: Props) {
             <View style={{ flex: 1 }}>
               <Text style={styles.reviewLegLabel}>You pay</Text>
               <AmountText style={styles.reviewLegAmount}>{formatDisplayAmount(reviewQuote.from_amount, fromTicker)} {unitLabelFor(fromTicker)}</AmountText>
+              <Text style={styles.reviewLegLabel}>{networkLabelFor(fromTicker, reviewQuote)}</Text>
             </View>
           </View>
           <View style={styles.reviewArrow}><Ionicons name="arrow-down" size={16} color={theme.colors.text.secondary} /></View>
@@ -1327,6 +1393,7 @@ export default function SwapScreen({ navigation, route }: Props) {
             <View style={{ flex: 1 }}>
               <Text style={styles.reviewLegLabel}>You receive</Text>
               <AmountText style={[styles.reviewLegAmount, { color: theme.colors.primary[500] }]}>{formatDisplayAmount(reviewQuote.to_amount, toTicker)} {unitLabelFor(toTicker)}</AmountText>
+              <Text style={styles.reviewLegLabel}>{networkLabelFor(toTicker, reviewQuote)}</Text>
             </View>
           </View>
         </View>
@@ -1371,47 +1438,42 @@ export default function SwapScreen({ navigation, route }: Props) {
         </ScrollView>
         )}
 
-        {!swapState.isExecuting && (
-          <View style={styles.confirmActions}>
-            <Button
-              title="Cancel"
-              variant="secondary"
-              onPress={() => setShowConfirmModal(false)}
-              style={styles.confirmActionButton}
-            />
-            {expired ? (
+          <View style={[styles.confirmActions, { flexDirection: 'column' }]}>
+            {!!reviewShortfall && !swapState.isExecuting && <Callout tone="warning" title="Not enough channel liquidity" message={reviewShortfall} />}
+            {expired && !swapState.isExecuting ? (
               <Button
                 title="Refresh quote"
                 variant="primary"
                 onPress={refreshReviewQuote}
-                loading={swapState.isQuoteLoading}
-                disabled={swapState.isQuoteLoading || !validOutput}
-                style={styles.confirmActionButton}
+                loading={reviewRefreshing}
+                disabled={reviewRefreshing}
+                fullWidth
               />
             ) : (
-              <SlideToConfirm
-                label={`Swap ${formatDisplayAmount(swapState.currentQuote?.to_amount || 0, swapState.toAsset)} ${unitLabelFor(swapState.toAsset)}`}
-                loading={swapState.isQuoteLoading}
-                disabled={swapState.isQuoteLoading || !validOutput}
+              <HoldToConfirm
+                label={`Swap ${formatDisplayAmount(reviewQuote.to_amount, toTicker)} ${unitLabelFor(toTicker)}`}
+                confirmationKey={reviewIdentity}
+                loading={swapState.isExecuting || reviewRefreshing}
+                disabled={!reviewCurrent || !validOutput || !!reviewShortfall}
                 onConfirm={executeSwap}
               />
             )}
+            {!swapState.isExecuting && <Button title="Cancel" variant="secondary" onPress={closeReview} fullWidth />}
           </View>
-        )}
       </View>
     );
   };
 
   const renderConfirmModal = () => (
     <Sheet
-      visible={!!swapSuccess || !!swapFailure || (showConfirmModal && !!reviewQuote)}
+      visible={!!swapSuccess || !!swapFailure || (showConfirmModal && (reviewCurrent || swapState.isExecuting))}
       title={swapSuccess || swapFailure ? undefined : swapState.isExecuting ? 'Swapping…' : 'Review swap'}
       onClose={() => {
         // A running swap can't be walked away from mid-step; the sheet stays until it settles.
         if (swapState.isExecuting) return;
         if (swapSuccess) finishSwap();
         else if (swapFailure) closeFailure();
-        else setShowConfirmModal(false);
+        else closeReview();
       }}
     >
       {renderConfirmBody()}
@@ -1469,9 +1531,14 @@ export default function SwapScreen({ navigation, route }: Props) {
         options={providerOffers.map(o => ({ id: o.id, name: swapProviderName(o.pair), account: policy.showNetworks ? (isFlashnetPair(o.pair) ? 'Spark' : 'RGB Lightning node') : undefined,
           amountLabel: 'You receive', amount: o.quote ? `${formatDisplayAmount(o.quote.to_amount, o.quote.to_asset)} ${unitLabelFor(o.quote.to_asset)}` : 'Unavailable',
           detail: o.quote ? `Fee ${formatQuoteFee(o.quote)}` : '',
-          unavailable: o.unavailable, expiresAt: o.quote?.expiry_timestamp, recommended: bestSwapOffer(providerOffers)?.id === o.id }))}
-        onSelect={id => { const chosen = providerOffers.find(o => o.id === id); if (!chosen?.quote || quoteHasExpired(chosen.quote.expiry_timestamp)) return;
-          quoteRequestRef.current++; dispatch(setQuoteLoading(false)); selectedProvider.current = id; dispatch(clearError()); dispatch(setCurrentQuote(chosen.quote)); }} />
+          unavailable: o.unavailable ?? providerShortfall(o) ?? undefined, expiresAt: o.quote?.expiry_timestamp, recommended: recommendedProvider === o.id }))}
+        onSelect={id => {
+          const chosen = providerOffers.find(o => o.id === id);
+          if (!chosen?.quote || quoteContexts.current.get(chosen.quote) !== quoteContext || quoteHasExpired(chosen.quote.expiry_timestamp)) return;
+          selectedProvider.current = id;
+          dispatch(clearError());
+          dispatch(setCurrentQuote(chosen.quote));
+        }} />
     </View>
   );
 }

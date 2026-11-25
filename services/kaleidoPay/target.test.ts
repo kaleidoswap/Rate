@@ -9,6 +9,12 @@ import { planRoutes, previewTarget, previewInput, registerKaleidoPayAccount } fr
 const SPEC_INVOICE = 'lnbc1pvjluezsp5zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zygspp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqdpl2pkx2ctnv5sxxmmwwd5kgetjypeh2ursdae8g6twvus8g6rfwvs8qun0dfjkxaq9qrsgq357wnc5r2ueh7ck6q93dj32dlqnls087fxdwk8qakdyafkq3yap9us6v52vjjsrvywa6rt52cm9r9zqt8r2t7mlcwspyetp5h2tztugp9lfyql';
 const ADDRESS = 'bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq';
 
+test('a payable Lightning invoice carries its expiry into review', () => {
+  const invoiceExpiresAt = Date.now() + 60_000;
+  mockExpiry.mockReturnValueOnce(invoiceExpiresAt);
+  expect(decodeTarget(SPEC_INVOICE)).toMatchObject({ invoiceExpiresAt });
+});
+
 test('decodes every kind of request the wallet can pay', () => {
   expect(decodeTarget(SPEC_INVOICE)).toMatchObject({ kind: 'bolt11', invoice: SPEC_INVOICE, networks: ['mainnet'] });
   expect(decodeTarget(`lightning:${SPEC_INVOICE}`)).toMatchObject({ kind: 'bolt11' });

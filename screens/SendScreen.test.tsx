@@ -29,9 +29,10 @@ jest.mock('../services/kaleidoPay/connect', () => ({
 jest.mock('../services/kaleidoPay/attempts', () => ({ loadPaymentAttempt: jest.fn(async () => null), beginPaymentAttempt: jest.fn(), savePaymentAttempt: jest.fn(), updatePaymentAttempt: jest.fn(async () => true), dismissPaymentAttempt: jest.fn(async () => {}), unresolvedAttempt: (a: any) => !a?.dismissedAt && (a?.status === 'pending' || a?.status === 'unknown') }));
 jest.mock('../services/contactHistory', () => ({ contactKeyFor: (d: string) => d.trim().toLowerCase(), recordContactEvent: jest.fn(async () => {}), updateContactEventStatus: jest.fn(async () => {}), removeContactEvent: jest.fn(async () => {}) }));
 jest.mock('../services/kaleidoPay', () => ({
-  paymentAccountNetwork: jest.fn(() => undefined), PaymentNotSentError: class extends Error {}, KALEIDOPAY_DEMO: false, prepareKaleidoPay: async () => {}, railLabel: (r: string) => r,
+  paymentAccountNetwork: jest.fn(() => undefined), PaymentNotSentError: jest.requireActual('../services/kaleidoPay/errors').PaymentNotSentError, KALEIDOPAY_DEMO: false, prepareKaleidoPay: async () => {}, railLabel: (r: string) => r,
   decodeTarget: (text: string) => {
     if (text === 'alice@example.com' || text === 'mario@getalby.com') return { kind: 'lnurl', raw: text, lnurl: text };
+    if (text === 'lnexpired') throw new Error('This invoice has expired. Please request a new one.');
     if (text.startsWith('rgb:')) return { kind: 'rgb', raw: text, rgbInvoice: text };
     if (text.startsWith('spark1')) return { kind: 'spark', raw: text, sparkAddress: text };
     if (!text.startsWith('ln')) throw new Error('not payable');
@@ -65,7 +66,11 @@ async function reviewed(navigation = nav()) {
   await act(async () => { await new Promise(r => setTimeout(r, 100)); });
   return screen;
 }
-const pay = (screen: any, label: string) => fireEvent(screen.getByLabelText(label), 'accessibilityAction', { nativeEvent: { actionName: 'activate' } });
+const pay = (screen: any, label: string) => {
+  const control = screen.getByLabelText(label);
+  fireEvent(control, 'pressIn');
+  fireEvent(control, 'longPress');
+};
 beforeEach(() => { mockState = baseState(); (require('react-native') as any).KeyboardAvoidingView = 'KeyboardAvoidingView'; jest.clearAllMocks(); (require('../services/kaleidoPay').checkPaymentStatus as jest.Mock).mockReset(); });
 
 test('one flow: decode, compare ways to pay, and pay only the reviewed total', async () => {
@@ -74,7 +79,7 @@ test('one flow: decode, compare ways to pay, and pay only the reviewed total', a
   const screen = await reviewed();
   expect(previewInput).toHaveBeenCalledWith('lnbc1', 1000, 'test-uuid', { asset: undefined });
   expect(executePaymentOffer).not.toHaveBeenCalled();
-  expect(screen.getByText('Slide to pay 1010 sats')).toBeTruthy();
+  expect(screen.getByText('Hold to pay 1010 sats')).toBeTruthy();
   // Pay from: all accounts visible inline, the cheapest picked.
   expect(screen.getByLabelText(/^Pay from Spark\. Total 1010 sats/).props.accessibilityState.checked).toBe(true);
   expect(screen.getByLabelText(/^Pay from Bark/).props.accessibilityState.checked).toBe(false);
@@ -145,6 +150,81 @@ test('a confirmed expired invoice can be replaced from review', async () => {
   expect(beginPaymentAttempt).not.toHaveBeenCalled();
   expect(dismissPaymentAttempt).not.toHaveBeenCalled();
   expect(executePaymentOffer).not.toHaveBeenCalled();
+});
+
+test('an already expired invoice can be replaced as soon as it is pasted', async () => {
+  const screen = render(<SendScreen navigation={nav()} route={{ params: { prefilledAddress: 'lnexpired' } }} />);
+  await act(async () => {});
+  expect(screen.getByText('This invoice has expired. Please request a new one.')).toBeTruthy();
+  expect(screen.queryByText('Continue')).toBeNull();
+  await act(async () => { fireEvent.press(screen.getByText('Replace invoice')); });
+  expect(screen.getByLabelText('Payment request').props.value).toBe('');
+  expect(quotePaymentOffers).not.toHaveBeenCalled();
+});
+
+test('a higher auto-refreshed quote needs review before it can be confirmed', async () => {
+  jest.useFakeTimers();
+  try {
+    const expiry = Math.floor(Date.now() / 1000) + 1;
+    const updated = offer('Arkade', 1035);
+    (quotePaymentOffers as jest.Mock).mockResolvedValueOnce([offer('Arkade', 1010, expiry)]).mockResolvedValueOnce([updated]);
+    (executePaymentOffer as jest.Mock).mockResolvedValue({ status: 'pending' });
+    const screen = render(<SendScreen navigation={nav()} route={{ params: { prefilledAddress: 'lnbc1' } }} />);
+    await act(async () => {});
+    expect(screen.getByLabelText('Pay 1010 sats')).toBeTruthy();
+    await act(async () => { jest.advanceTimersByTime(1000); });
+    await act(async () => { jest.advanceTimersByTime(400); });
+    expect(screen.getByText('Price updated from 1010 sats to 1035 sats.')).toBeTruthy();
+    expect(screen.queryByLabelText('Pay 1035 sats')).toBeNull();
+    await act(async () => { fireEvent.press(screen.getByText('Review updated price')); });
+    expect(executePaymentOffer).not.toHaveBeenCalled();
+    await act(async () => { pay(screen, 'Pay 1035 sats'); });
+    expect(executePaymentOffer).toHaveBeenCalledWith(mockPreview, updated, expect.any(String));
+  } finally { jest.useRealTimers(); }
+});
+
+test.each([
+  ['retry-price', 'The provider price expired.', 'Refresh price'],
+  ['replace-invoice', 'The Lightning invoice expired.', 'Replace invoice'],
+] as const)('a known pre-funding %s failure shows its action', async (recovery, message, action) => {
+  const { PaymentNotSentError } = require('../services/kaleidoPay');
+  const { updatePaymentAttempt } = require('../services/kaleidoPay/attempts');
+  (quotePaymentOffers as jest.Mock).mockResolvedValue([offer('Arkade', 1010)]);
+  (executePaymentOffer as jest.Mock).mockRejectedValueOnce(new PaymentNotSentError(message, recovery));
+  const screen = await reviewed();
+  await act(async () => { pay(screen, 'Pay 1010 sats'); });
+  expect(screen.getByText(action)).toBeTruthy();
+  expect(screen.queryByText('Verify payment')).toBeNull();
+  expect(updatePaymentAttempt).toHaveBeenCalledWith(1, expect.objectContaining({ recovery, status: 'failed' }));
+});
+
+test('an uncertain payment offers status verification without a payment retry', async () => {
+  (quotePaymentOffers as jest.Mock).mockResolvedValue([offer('Arkade', 1010)]);
+  (executePaymentOffer as jest.Mock).mockRejectedValueOnce(new Error('connection lost'));
+  const screen = await reviewed();
+  await act(async () => { pay(screen, 'Pay 1010 sats'); });
+  expect(screen.getByText('Verify payment')).toBeTruthy();
+  expect(screen.queryByText('Refresh price')).toBeNull();
+  expect(screen.queryByText('Check for a new price')).toBeNull();
+});
+
+test('a confirmation is abandoned if the active wallet changes during the journal write', async () => {
+  const { beginPaymentAttempt, updatePaymentAttempt } = require('../services/kaleidoPay/attempts');
+  let finishWrite!: () => void;
+  beginPaymentAttempt.mockImplementationOnce(() => new Promise<void>(resolve => { finishWrite = resolve; }));
+  (quotePaymentOffers as jest.Mock).mockResolvedValue([offer('Spark', 1010)]);
+  const route = { params: { prefilledAddress: 'lnbc1' } };
+  const navigation = nav();
+  const screen = render(<SendScreen navigation={navigation} route={route} />);
+  await act(async () => {});
+  await act(async () => { pay(screen, 'Pay 1010 sats'); });
+  expect(beginPaymentAttempt).toHaveBeenCalledWith(1, expect.objectContaining({ status: 'pending' }));
+  mockState = { ...mockState, wallet: { activeWallet: { id: 2 } } };
+  screen.rerender(<SendScreen navigation={navigation} route={route} />);
+  await act(async () => { finishWrite(); });
+  expect(executePaymentOffer).not.toHaveBeenCalled();
+  expect(updatePaymentAttempt).toHaveBeenCalledWith(1, expect.objectContaining({ status: 'failed', recovery: 'retry-price' }));
+  expect(screen.queryByText('Payment failed')).toBeNull();
 });
 
 test('a completed payment can be closed and refreshes balances', async () => {
@@ -308,7 +388,7 @@ test('Lite leaves Bark out unless it holds funds', async () => {
   mockState = { ...baseState(), settings: { bitcoinUnit: 'sats', disclosureLevel: 'lite' } };
   let screen = await reviewed();
   expect(screen.queryByLabelText(/^Pay from Bark/)).toBeNull();
-  expect(screen.getByText('Slide to pay 1010 sats')).toBeTruthy();
+  expect(screen.getByText('Hold to pay 1010 sats')).toBeTruthy();
   screen.unmount();
   mockState = { ...mockState, wallet: { activeWallet: { id: 1 }, btcBalance: { byProtocol: { BARK: { confirmed: 5000, unconfirmed: 2000, total: 7000 } } } } };
   screen = await reviewed();

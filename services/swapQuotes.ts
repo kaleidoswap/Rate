@@ -11,6 +11,12 @@ export function assertSwapQuoteProvider(quote: SwapQuote): void {
 export interface SwapOffer { id: string; pair: SwapPair; quote?: SwapQuote; unavailable?: string }
 export const swapProviderKey = (pair: SwapPair) => JSON.stringify([pair.venue ?? 'kaleidoswap', pair.poolId ?? pair.id ?? '', pair.base.protocol_ids, pair.quote.protocol_ids, pair.routes]);
 export const swapProviderName = (pair: SwapPair) => isFlashnetPair(pair) ? 'Flashnet' : 'KaleidoSwap';
+
+function feeInSmallestUnits(value: unknown): number {
+  const amount = typeof value === 'number' || (typeof value === 'string' && /^\d+$/.test(value)) ? Number(value) : NaN;
+  if (!Number.isSafeInteger(amount) || amount < 0) throw new Error('Provider returned an invalid fee.');
+  return amount;
+}
 /** Only compare identical assets on identical rails. A matching ticker alone is insufficient. */
 export function bestSwapOffer(offers: SwapOffer[]): SwapOffer | undefined {
   const valid = offers.filter(o => o.quote && o.quote.expiry_timestamp > Date.now());
@@ -35,8 +41,7 @@ export async function fetchSwapQuote(pair: SwapPair, fromTicker: string, toTicke
     if (!poolId) throw new Error('Pool unavailable.');
     const sim: any = await (client as ReturnType<typeof flashnetClientManager.getClient>).simulateSwap({ poolId, assetInAddress: fromId, assetOutAddress: toId, amountIn: String(rawInput), maxSlippageBps: DEFAULT_FLASHNET_SLIPPAGE_BPS } as any);
     const rawOutput = Number(sim?.amountOut ?? sim?.amount_out);
-    const rawFee = Number(sim?.feePaidAssetIn ?? sim?.fee_paid_asset_in);
-    if (!Number.isSafeInteger(rawFee) || rawFee < 0) throw new Error('Provider returned an invalid fee.');
+    const rawFee = feeInSmallestUnits(sim?.feePaidAssetIn ?? sim?.fee_paid_asset_in);
     quote = { rfq_id: `flashnet-${poolId}-${Date.now()}`, from_asset: fromTicker, to_asset: toTicker, from_amount: fromAmount,
       to_amount: isBtcTicker(toTicker) ? fromSats(rawOutput) : rawOutput / 10 ** to.precision,
       fee_amount: isBtcTicker(fromTicker) ? fromSats(rawFee) : rawFee / 10 ** from.precision,
@@ -50,9 +55,9 @@ export async function fetchSwapQuote(pair: SwapPair, fromTicker: string, toTicke
     });
     const rawOutput = Number(response.to_asset?.amount);
     if (response.from_asset?.asset_id !== fromId || response.to_asset?.asset_id !== toId || Number(response.from_asset?.amount) !== rawInput || response.from_asset?.layer !== fromLayer || response.to_asset?.layer !== toLayer || !response.rfq_id) throw new Error('Provider returned different swap terms.');
-    const fee = Number(response.fee?.final_fee);
+    const fee = feeInSmallestUnits(response.fee?.final_fee);
     const feePrecision = response.fee?.fee_asset_precision ?? to.precision;
-    if (!Number.isSafeInteger(fee) || fee < 0 || !Number.isInteger(feePrecision) || feePrecision < 0 || feePrecision > 18) throw new Error('Provider returned an invalid fee.');
+    if (!Number.isInteger(feePrecision) || feePrecision < 0 || feePrecision > 18) throw new Error('Provider returned an invalid fee.');
     quote = { rfq_id: response.rfq_id, from_asset: fromTicker, to_asset: toTicker, from_amount: fromAmount,
       to_amount: isBtcTicker(toTicker) ? fromSats(rawOutput / 1000) : rawOutput / 10 ** to.precision,
       fee_amount: isBtcTicker(toTicker) ? fromSats(fee / 10 ** feePrecision * 1e8) : fee / 10 ** feePrecision,
@@ -64,17 +69,32 @@ export async function fetchSwapQuote(pair: SwapPair, fromTicker: string, toTicke
   quoteClients.set(quote, client);
   return quote;
 }
-export async function fetchSwapOffers(pairs: SwapPair[], from: string, to: string, amount: number, unit: string): Promise<SwapOffer[]> {
+export async function fetchSwapOffers(pairs: SwapPair[], from: string, to: string, amount: number, unit: string, options?: {
+  onOffer?: (offer: SwapOffer) => void;
+  signal?: AbortSignal;
+}): Promise<SwapOffer[]> {
+  const { onOffer, signal } = options ?? {};
+  if (signal?.aborted) return [];
   const matches = pairs.filter(p => p.is_active !== false && ((p.base.ticker === from && p.quote.ticker === to) || (p.base.ticker === to && p.quote.ticker === from)));
-  return Promise.all([...new Map(matches.map(p => [swapProviderKey(p), p])).values()].map(async pair => {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const offer: SwapOffer = { id: swapProviderKey(pair), pair: JSON.parse(JSON.stringify(pair)) };
-    try {
-      offer.quote = await Promise.race([fetchSwapQuote(offer.pair, from, to, amount, unit), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Provider did not respond.')), 15000); })]);
-    } catch (e) { offer.unavailable = e instanceof Error ? e.message : 'Quote unavailable'; }
-    finally { if (timer) clearTimeout(timer); }
-    return offer;
-  }));
+  let abort = () => {};
+  const cancelled = new Promise<undefined>(resolve => { abort = () => resolve(undefined); });
+  signal?.addEventListener('abort', abort);
+  try {
+    const offers = await Promise.all([...new Map(matches.map(p => [swapProviderKey(p), p])).values()].map(async pair => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const offer: SwapOffer = { id: swapProviderKey(pair), pair: JSON.parse(JSON.stringify(pair)) };
+      const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Provider did not respond.')), 15000); });
+      try {
+        offer.quote = await Promise.race([fetchSwapQuote(offer.pair, from, to, amount, unit), timeout, cancelled]);
+      } catch (e) { offer.unavailable = e instanceof Error ? e.message : 'Quote unavailable'; }
+      finally { if (timer) clearTimeout(timer); }
+      if (!signal?.aborted) onOffer?.(offer);
+      return offer;
+    }));
+    return signal?.aborted ? [] : offers;
+  } finally {
+    signal?.removeEventListener('abort', abort);
+  }
 }
 /** The RGB node's channels and HTLC minimum. `channels` is undefined when no node is connected or they can't be read. */
 export interface ChannelLiquidity { channels?: unknown[]; htlcMinMsat: number }
