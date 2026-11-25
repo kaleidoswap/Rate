@@ -5,9 +5,11 @@
 // NWC payments, check this so nothing can be approved behind the lock screen.
 // Starts locked: nothing is approvable until the gate reports it is open.
 let unlocked = false;
+const stateListeners = new Set<() => void>();
 const lockListeners = new Set<() => void>();
 
 export function setAppUnlocked(value: boolean): void {
+  if (value === unlocked) return;
   const locking = unlocked && !value;
   unlocked = value;
   if (locking) {
@@ -15,6 +17,12 @@ export function setAppUnlocked(value: boolean): void {
       try { fn(); } catch { /* a listener must not keep the app unlocked */ }
     }
   }
+  for (const fn of stateListeners) fn();
+}
+
+export function subscribeAppLockState(fn: () => void): () => void {
+  stateListeners.add(fn);
+  return () => { stateListeners.delete(fn); };
 }
 
 /** Run `fn` each time the app locks. Returns the unsubscribe function. */

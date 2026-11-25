@@ -449,6 +449,16 @@ test asset using an invoice from Rate. Refresh RGB activity and verify that
 the transfer settles and the asset appears in Assets after restarting the app.
 Regular RGB transfers can still run with the chain configuration omitted.
 
+### Connect an RGB dApp from the phone
+
+Set `EXPO_PUBLIC_WALLETCONNECT_PROJECT_ID` to your Reown project's public ID before building Rate. The release workflow reads the GitHub Actions variable `WALLETCONNECT_PROJECT_ID`. Rebuild the native app to enable checked mint receipts and transaction previews for creating colorable outputs.
+
+On a fresh beta install, open **Settings → Advanced → RGB → This phone**. Select **Signet** for Utexo Mint or **Mutinynet** for Mosaik, then tap **Connect**. Open **Scan**, scan the dApp's WalletConnect QR, review the domain and requested permissions, and approve the session. Rate asks again before signing a message, creating an invoice, or sending an asset. Use **Connected apps** in Settings to disconnect a site.
+
+Utexo Mint's RGB connector requests `getAddress` and `blindReceive` on public Signet. Configure the bridge RPC described above so the phone can verify a prepared mint before the EVM deposit. Mint's portal login is separate. A WebRGB dApp can request `sendAsset` for a phone-approved transfer. Automated bridge redemption would also require `burnAsset` and `getConsignment`, which Rate does not advertise.
+
+For Mosaik on Mutinynet, **Prepare wallet** shows the Bitcoin outputs and mining fee on the phone before signing. Taking a Mosaik P2P order requires the extension's swap interface.
+
 ### AI library baseline
 
 The app pins `@kaleidorg/mind` to `0.11.0` and uses the in-process wallet bindings,

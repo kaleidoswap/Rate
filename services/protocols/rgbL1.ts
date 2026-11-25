@@ -22,6 +22,8 @@
  */
 import { sha256 } from '@noble/hashes/sha2.js'
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js'
+import { rgbL1WalletKey } from './rgbL1WalletKey'
+export { rgbL1WalletKey } from './rgbL1WalletKey'
 import DatabaseService from '../DatabaseService'
 import { libNetwork } from './rgbLibRn'
 
@@ -138,11 +140,6 @@ export async function saveRgbL1Endpoints(mnemonic: string, network: RgbL1Network
     ? JSON.stringify({ indexerUrl: validateRgbEndpoint('indexer', endpoints.indexerUrl), transportEndpoint: validateRgbEndpoint('proxy', endpoints.transportEndpoint) })
     : ''
   await DatabaseService.getInstance().setSetting(endpointsKey(mnemonic, network), value)
-}
-
-/** Non-secret per-seed key, so one phone with several wallets keeps separate choices. */
-export function rgbL1WalletKey(mnemonic: string): string {
-  return bytesToHex(sha256(utf8ToBytes(`kaleidoswap/rgb-l1/v1:${mnemonic.trim()}`))).slice(0, 32)
 }
 
 const settingKey = (mnemonic: string) => `rgb-l1-network-v1-${rgbL1WalletKey(mnemonic)}`

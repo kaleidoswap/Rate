@@ -76,6 +76,8 @@ import LSPScreen from './screens/LSPScreen';
 import LightningAddressScreen from './screens/LightningAddressScreen';
 import MindSettingsScreen from './screens/MindSettingsScreen';
 import AgentWalletScreen from './screens/AgentWalletScreen';
+import WebRgbConnectionsScreen from './screens/WebRgbConnectionsScreen';
+import { WebRgbApprover } from './components/WebRgbApprover';
 import NWCConnectScreen from './screens/NWCConnectScreen';
 import RgbNodeScreen from './screens/RgbNodeScreen';
 
@@ -108,6 +110,7 @@ type RootStackParamList = {
   MindSettings: undefined;
   AgentWallet: undefined;
   LightningAddress: undefined;
+  WebRgbConnections: { pairing?: boolean } | undefined;
   NWCConnect: { scanned?: string } | undefined;
   RgbNode: undefined;
   Chat: { pubkey: string; name?: string; npub?: string; avatarUrl?: string };
@@ -279,6 +282,7 @@ function AppNavigator() {
         <Stack.Screen name="NostrSettings" component={NostrSettingsScreen} />
         {features.prismo && <Stack.Screen name="MindSettings" component={MindSettingsScreen} />}
         {features.prismo && <Stack.Screen name="AgentWallet" component={AgentWalletScreen} />}
+        <Stack.Screen name="WebRgbConnections" component={WebRgbConnectionsScreen} />
         {(features.nwc || features.rgbNode || hasNwc) && <Stack.Screen name="NWCConnect" component={NWCConnectScreen} />}
         {(features.rgbNode || hasNwc) && <Stack.Screen name="RgbNode" component={RgbNodeScreen} />}
         <Stack.Screen name="OnboardingProfile" component={OnboardingProfileScreen} />
@@ -388,6 +392,7 @@ export default function App() {
                     <AppNavigator />
                     <ToastContainer />
                     <NwcPaymentApprover />
+                    <WebRgbApprover />
                     <AppLockGate />
                   </ThemeProvider>
                 </KaleidoThemeProvider>

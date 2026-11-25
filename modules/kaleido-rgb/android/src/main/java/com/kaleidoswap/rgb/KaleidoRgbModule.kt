@@ -193,6 +193,33 @@ class KaleidoRgbModule : Module() {
       val size = if (a.has("size")) a.uInt("size") else null
       s.wallet.createUtxos(s.requireOnline(), a.bool("upTo", true), num, size, a.uLong("feeRate"), a.bool("skipSync", false)).toInt()
     }
+    walletOp("checkedMint") { s, a ->
+      val mint = s.wallet.getReceivedMint(a.string("recipientId")) ?: return@walletOp null
+      val path = a.stringOrNull("consignmentPath") ?: throw InvalidArgument("Missing mint consignment")
+      val proof = com.utexo.inspectConsignment(path, com.utexo.BundleFilter.Terminals)
+      val matches = proof.isTransfer && proof.witnesses.any { witness ->
+        witness.operations.any { operation ->
+          operation.assetId == proof.assetId && operation.transitions.any { it.opid == mint.opid && it.type == com.utexo.TypeOfTransition.MINT }
+        }
+      }
+      if (!matches) throw InvalidArgument("Mint does not match the received consignment")
+      mapOf("assetId" to proof.assetId, "opid" to mint.opid, "lockId" to mint.lockId,
+        "amount" to mint.amount.toString(), "beforeBlock" to mint.beforeBlock.toString(),
+        "evmChainId" to mint.evmChainId.toString(), "bridgeContract" to mint.bridgeContract)
+    }
+    walletOp("previewCreateUtxos") { s, a ->
+      val psbt = s.wallet.createUtxosBegin(s.requireOnline(), false, a.uByte("num"), a.uInt("size"), a.uLong("feeRate"), false, true)
+      val tx = s.wallet.inspectPsbt(psbt)
+      val outputs = tx.outputs.map { output ->
+        require(output.isMine && output.address != null) { "Unexpected destination for a colorable output" }
+        mapOf("address" to output.address, "amountSat" to output.amountSat.toDouble())
+      }
+      mapOf("psbt" to psbt, "feeSat" to tx.feeSat.toDouble(), "outputs" to outputs)
+    }
+    walletOp("finishCreateUtxos") { s, a ->
+      val signed = s.wallet.signPsbt(a.string("psbt"))
+      s.wallet.createUtxosEnd(s.requireOnline(), signed).toInt()
+    }
     walletOp("failTransfers") { s, a ->
       s.wallet.failTransfers(s.requireOnline(), a.intOrNull("batchTransferIdx"), a.bool("noAssetOnly", false), a.bool("skipSync", false))
     }

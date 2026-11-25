@@ -176,7 +176,7 @@ export interface Unspent {
 }
 
 export interface RefreshFilter { status: RefreshTransferStatus; incoming: boolean }
-/** Keyed by transfer idx. */
+/** Keyed by the batchTransferIdx on each Transfer. */
 export type RefreshResult = Record<string, { updatedStatus: TransferStatus | null; failure: { code: string; message: string } | null }>
 
 export type SyncOptions =
@@ -207,4 +207,15 @@ export interface WalletOptions {
   supportedSchemas?: AssetSchema[]
   maxAllocationsPerUtxo?: number
   vanillaKeychain?: number
+}
+
+/** Receipt terms from a native-validated BFA mint, including the inspected consignment's asset. */
+export interface CheckedMint {
+  assetId: string
+  opid: string
+  lockId: string
+  amount: string
+  beforeBlock: string
+  evmChainId: string
+  bridgeContract: string
 }

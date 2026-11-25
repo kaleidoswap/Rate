@@ -12,6 +12,8 @@
  * the app's private files; the adapter's `dataDir` names a folder inside them
  * for this wallet (see `rgbLibSubdir`), else rgb-lib's original folder.
  */
+import { signWebRgbMessage } from '../webrgb/message'
+import { rgbL1WalletKey } from './rgbL1WalletKey'
 import type * as RgbLib from '../../modules/kaleido-rgb'
 import { RGB_COLLECTIBLE_RECEIVE_AMOUNT_ERROR, RGB_PROXY_V1_RECEIVE_DURATION_ERROR } from '../../utils/rgb-receive'
 
@@ -109,9 +111,11 @@ export class RgbLibRnAccount {
     /** Called after anything that changes what a backup holds (send, receive, settle). */
     private readonly onChange: () => void = () => undefined,
     /** App network name ('mainnet', 'mutinynet', …). */
-    private readonly network: string = '',
+    readonly network: string = '',
     /** Diagnostics (./rgbDiagnostics.ts): background failures nobody awaits. */
     private readonly onEvent: (stage: string, detail?: string) => void = () => undefined,
+    readonly ownerKey?: string,
+    readonly signMessage?: (message: string) => string,
   ) {
     this.supportsBfa = lib.supportsBfa?.() === true
   }
@@ -228,7 +232,7 @@ export class RgbLibRnAccount {
     witness?: boolean
     durationSeconds?: number; duration_seconds?: number
     minConfirmations?: number; min_confirmations?: number
-  } = {}) {
+  } = {}, beforeCommit?: () => void) {
     const assetId = params.assetId ?? params.asset_id ?? null
     const duration = params.durationSeconds ?? params.duration_seconds ?? null
     if (this.supportsBfa && duration !== null &&
@@ -249,7 +253,10 @@ export class RgbLibRnAccount {
       assetId, assignment, duration,
       transportEndpoints, params.minConfirmations ?? params.min_confirmations ?? 1,
     ] as const
-    const data = await this.serial(() => this.supportsBfa ? receive(...receiveArgs, 'REQUIRED') : receive(...receiveArgs))
+    const data = await this.serial(() => {
+      beforeCommit?.()
+      return this.supportsBfa ? receive(...receiveArgs, 'REQUIRED') : receive(...receiveArgs)
+    })
     this.onChange()
     return { ...data, recipient_id: data.recipientId, expiration_timestamp: data.expirationTimestamp }
   }
@@ -285,7 +292,7 @@ export class RgbLibRnAccount {
     feeRate?: number
     minConfirmations?: number
     witnessData?: { amountSat: number; blinding?: number }
-  }): Promise<RgbLib.OperationResult> {
+  }, beforeCommit?: () => void): Promise<RgbLib.OperationResult> {
     const invoice = await this.lib.decodeInvoice(params.recipient)
     if (invoice.expirationTimestamp != null && invoice.expirationTimestamp <= Math.floor(Date.now() / 1000)) {
       throw invalidInvoice('This RGB invoice has expired. Ask the recipient for a new invoice.')
@@ -318,6 +325,7 @@ export class RgbLibRnAccount {
       if (invoice.expirationTimestamp != null && invoice.expirationTimestamp <= Math.floor(Date.now() / 1000)) {
         throw invalidInvoice('This RGB invoice has expired. Ask the recipient for a new invoice.')
       }
+      beforeCommit?.()
       const recipients = { [params.token]: [recipient] }
       const feeRate = params.feeRate ?? DEFAULT_FEE_RATE
       const minConfirmations = params.minConfirmations ?? 1
@@ -332,6 +340,11 @@ export class RgbLibRnAccount {
     this.lastRefresh = 0 // the next read picks the transfer up
     this.onChange()
     return result
+  }
+
+  /** Reads invoice terms even when the invoice is no longer payable. */
+  inspectInvoice(invoice: string): Promise<RgbLib.InvoiceData> {
+    return this.lib.decodeInvoice(invoice)
   }
 
   /** An RGB invoice decoded on the device, in the RGB node's shape (what Send reads). */
@@ -475,6 +488,77 @@ export class RgbLibRnAccount {
 
   listUnspents(): Promise<RgbLib.Unspent[]> {
     return this.serial(() => this.wallet.listUnspents(false, true))
+  }
+
+  async refreshForWebRgb(assetId: string | undefined, guard: () => void): Promise<boolean> {
+    return this.serial(async () => {
+      guard()
+      const result = Object.values(await this.wallet.refresh(assetId ?? null, [], false))
+      const moved = result.some(entry => entry.updatedStatus != null)
+      if (moved) this.onChange()
+      if (result.some(entry => entry.failure)) throw new Error('Could not refresh one or more transfers.')
+      return moved
+    })
+  }
+
+  supportsReceivedMint(): boolean {
+    return this.schemas().includes('BFA') && this.lib.supportsReceivedMint?.() === true
+  }
+
+  async getReceivedMintForInvoice(invoice: string, guard: () => void) {
+    const reject = (reason: string): never => { throw Object.assign(new Error(reason), { code: 'INVALID_PARAMS' }) }
+    return this.serial(async () => {
+      guard()
+      const decoded = await this.lib.decodeInvoice(invoice)
+      if (decoded.network !== libNetwork(this.network)) reject('Wrong invoice network.')
+      const ownedReceive = async () => {
+        const records = (await this.wallet.listTransfers(null)).filter(t =>
+          (t.kind === 'RECEIVE_WITNESS' || t.kind === 'RECEIVE_BLIND') &&
+          t.recipientId === decoded.recipientId)
+        // bfa.8 keys checked terms and the consignment file by recipient. Two
+        // invoices sharing that recipient cannot be distinguished by this build.
+        if (records.length !== 1 || records[0].invoiceString !== invoice) reject('Unknown or ambiguous receive invoice.')
+        const transfer = records[0]
+        if (transfer.status === 'FAILED' || (decoded.expirationTimestamp !== null &&
+            decoded.expirationTimestamp <= Date.now() / 1000)) reject('This receive has failed or expired.')
+        return transfer
+      }
+      const before = await ownedReceive()
+      guard()
+      const statuses: RgbLib.RefreshTransferStatus[] = ['WAITING_COUNTERPARTY', 'WAITING_SAFE_HEIGHT', 'WAITING_BROADCAST', 'WAITING_CONFIRMATIONS']
+      const result = await this.wallet.refresh(decoded.assetId, statuses.map(status => ({ status, incoming: true })), false)
+      if (Object.values(result).some(r => r.updatedStatus != null)) this.onChange()
+      if (result[before.batchTransferIdx]?.failure) reject('The wallet could not verify the incoming consignment.')
+      const transfer = await ownedReceive()
+      if (transfer.batchTransferIdx !== before.batchTransferIdx) reject('The receive changed during refresh.')
+      guard()
+      const terms = await this.wallet.checkedMint(decoded.recipientId, transfer.consignmentPath)
+      if (!terms) return null
+      if (decoded.assetId && terms.assetId !== decoded.assetId) reject('The checked mint is for another asset.')
+      if (decoded.assignment.type === 'FUNGIBLE' && decoded.assignment.amount > 0 &&
+          terms.amount !== String(decoded.assignment.amount)) reject('The checked mint has a different amount.')
+      return { ...terms, invoice, recipientId: decoded.recipientId, network: this.network,
+        ...(transfer.txid ? { txid: transfer.txid } : {}) }
+    })
+  }
+
+  supportsUtxoReview(): boolean {
+    return this.lib.supportsUtxoReview?.() === true
+  }
+
+  /** Prepare, inspect, then sign the same wallet-generated transaction, serialized with other spends. */
+  async createReviewedUtxos(num: number, size: number, feeRate: number,
+    review: (tx: Pick<RgbLib.RgbUtxoPreview, 'feeSat' | 'outputs'>) => Promise<void>, guard: () => void): Promise<number> {
+    const created = await this.serial(async () => {
+      guard()
+      const preview = await this.wallet.previewCreateUtxos(num, size, feeRate)
+      await review({ feeSat: preview.feeSat, outputs: preview.outputs })
+      guard()
+      return this.wallet.finishCreateUtxos(preview.psbt)
+    })
+    this.lastRefresh = 0
+    this.onChange()
+    return created
   }
 
   /** Colorable UTXOs for receiving assets; broadcasts a transaction. */
@@ -645,7 +729,8 @@ export function createRgbLibRnModule(load: () => RgbModule, hooks: RgbLibRnHooks
       }
       const migrated = (wallet as { migratedLegacyBdkCache?: string | null }).migratedLegacyBdkCache
       emit('online', `${this.options.network} in ${Date.now() - started} ms${migrated ? `; old BDK cache moved aside as ${migrated}` : ''}`)
-      const account = new RgbLibRnAccount(lib, wallet, this.options.transportEndpoint, hooks.onChange, this.options.network, emit)
+      const account = new RgbLibRnAccount(lib, wallet, this.options.transportEndpoint, hooks.onChange, this.options.network, emit, rgbL1WalletKey(this.mnemonic),
+        message => signWebRgbMessage(message, this.mnemonic))
       const dispose = account.dispose.bind(account)
       let closed = false
       account.dispose = () => dispose().finally(() => { if (!closed) { closed = true; markClosed(key) } })

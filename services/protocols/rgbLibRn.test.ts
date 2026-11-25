@@ -639,3 +639,72 @@ test('an open that never finishes fails with ERR_RGB_OPEN_TIMEOUT instead of spi
   await new Promise((r) => setTimeout(r, 0));
   expect(wallet.close).toHaveBeenCalled();
 });
+
+test('a WebRGB request revoked in the native queue cannot allocate or send', async () => {
+  const { lib, wallet } = fakeLib();
+  const account = await new (createRgbLibRnModule(() => lib as any).WalletManagerRgb)('seed', options).getAccount();
+  let release!: () => void;
+  const syncing = new Promise<void>(resolve => { release = resolve; });
+  wallet.sync.mockImplementationOnce(async () => { await syncing; return undefined; });
+  const pendingSync = account.syncWallet();
+  let allowed = true;
+  const guard = () => { if (!allowed) throw new Error('Request expired'); };
+  const receive = account.receiveAsset({ amount: 4, witness: true }, guard);
+  const create = account.createReviewedUtxos(2, 1000, 2, async () => {}, guard);
+  const send = account.transfer({ token: 'rgb:usdt', recipient: 'rgb:invoice', amount: 25 }, guard);
+  const finished = Promise.allSettled([receive, create, send]);
+  allowed = false;
+  release();
+  await pendingSync;
+  const results = await finished;
+  expect(results.map(r => r.status)).toEqual(['rejected', 'rejected', 'rejected']);
+  expect(wallet.witnessReceive).not.toHaveBeenCalled();
+  expect(wallet.createUtxos).not.toHaveBeenCalled();
+  expect(wallet.send).not.toHaveBeenCalled();
+});
+
+test('the reviewed UTXO transaction signs exactly the inspected PSBT, and rejection leaves it unsigned', async () => {
+  const { lib, wallet } = fakeLib();
+  const outputs = [{ amountSat: 10000, address: 'test-output' }];
+  const prepared = { outputs, feeSat: 321, psbt: 'exact-native-psbt' };
+  const finishCreateUtxos = jest.fn(async () => 1);
+  Object.assign(wallet, { previewCreateUtxos: jest.fn(async () => prepared), finishCreateUtxos });
+  const account = await new (createRgbLibRnModule(() => lib as any).WalletManagerRgb)('seed', options).getAccount();
+  const guard = jest.fn();
+  const review = jest.fn(async () => {});
+  expect(await account.createReviewedUtxos(2, 10000, 2, review, guard)).toBe(1);
+  expect(review).toHaveBeenCalledWith({ outputs, feeSat: 321 });
+  expect(finishCreateUtxos).toHaveBeenCalledWith(prepared.psbt);
+  review.mockRejectedValueOnce(new Error('declined'));
+  await expect(account.createReviewedUtxos(2, 10000, 2, review, guard)).rejects.toThrow('declined');
+  expect(finishCreateUtxos).toHaveBeenCalledTimes(1);
+});
+
+test('pre-deposit proof binds the exact invoice to the matching incoming consignment before a txid exists', async () => {
+  const { lib, wallet } = fakeLib();
+  const row = { invoiceString: 'rgb:full/invoice', kind: 'RECEIVE_WITNESS', status: 'WAITING_COUNTERPARTY',
+    idx: 45, batchTransferIdx: 7, recipientId: 'their-rid', consignmentPath: '/private/proof', txid: null };
+  const listTransfers = jest.fn().mockResolvedValue([row]);
+  const checkedMint = jest.fn().mockResolvedValue({ assetId: 'rgb:bfa', amount: '100', opid: 'opid' });
+  Object.assign(wallet, { listTransfers, checkedMint });
+  Object.assign(lib, { supportsReceivedMint: () => true });
+  lib.supportsBfa.mockReturnValue(true);
+  const account = await new (createRgbLibRnModule(() => lib as any).WalletManagerRgb)('seed', options).getAccount();
+  expect(account.supportsReceivedMint()).toBe(true);
+  const guard = jest.fn();
+  const proof = await account.getReceivedMintForInvoice(row.invoiceString, guard);
+  expect(proof).toMatchObject({ network: options.network, invoice: row.invoiceString, assetId: 'rgb:bfa' });
+  expect(proof).not.toHaveProperty('txid');
+  expect(checkedMint).toHaveBeenCalledWith('their-rid', row.consignmentPath);
+  expect(wallet.refresh).toHaveBeenCalledWith(undefined, expect.arrayContaining([{ status: 'WAITING_COUNTERPARTY', incoming: true }]), false);
+  await expect(account.getReceivedMintForInvoice('rgb:same-recipient/different-invoice', guard)).rejects.toThrow('Unknown');
+  wallet.refresh.mockResolvedValueOnce({ 7: { failure: { code: 'PROXY_ERROR' }, updatedStatus: null } });
+  await expect(account.getReceivedMintForInvoice(row.invoiceString, guard)).rejects.toThrow('could not verify');
+  expect(checkedMint).toHaveBeenCalledTimes(1);
+  checkedMint.mockResolvedValueOnce(null);
+  expect(await account.getReceivedMintForInvoice(row.invoiceString, guard)).toBeNull();
+  listTransfers.mockResolvedValue([row, { ...row, invoiceString: 'rgb:another-invoice-for-the-same-recipient' }]);
+  await expect(account.getReceivedMintForInvoice(row.invoiceString, guard)).rejects.toThrow('ambiguous');
+  listTransfers.mockResolvedValue([{ ...row, status: 'FAILED' }]);
+  await expect(account.getReceivedMintForInvoice(row.invoiceString, guard)).rejects.toThrow('failed');
+});

@@ -9,7 +9,7 @@ import { BRIDGE_ERROR_CODES, RgbLibError, toRgbLibError } from './errors'
 import { legacyBdkCacheAction } from './legacy'
 import { getNativeModule, type KaleidoRgbNative } from './native'
 import type {
-  AssetCfa, AssetIfa, AssetNia, AssetSchema, AssetUda, Assets, Assignment, Balance, BitcoinNetwork, BtcBalance,
+  AssetCfa, AssetIfa, AssetNia, AssetSchema, AssetUda, Assets, Assignment, Balance, BitcoinNetwork, BtcBalance, CheckedMint,
   Encryption, InvoiceData, Keys, Metadata, OnlineOptions, OperationResult, ReceiveData, Recipient, RefreshFilter, RefreshResult, SyncOptions,
   Transaction, Transfer, Unspent, WalletOptions, WitnessVersion,
 } from './types'
@@ -69,6 +69,21 @@ export function nativeRgbLibVersion(): string | null {
 /** Exact version match keeps a JS update from requesting BFA on older binaries. */
 export function supportsBfa(): boolean {
   return nativeRgbLibVersion() === RGB_LIB_VERSION
+}
+
+export function supportsReceivedMint(): boolean {
+  return supportsBfa() && typeof getNativeModule()?.checkedMint === 'function'
+}
+
+export function supportsUtxoReview(): boolean {
+  const native = getNativeModule()
+  return typeof native?.previewCreateUtxos === 'function' && typeof native?.finishCreateUtxos === 'function'
+}
+
+export interface RgbUtxoPreview {
+  psbt: string
+  feeSat: number
+  outputs: { amountSat: number; address: string }[]
 }
 
 /** Wallets in folders of their own (`subdir`): always, with this module. */
@@ -251,6 +266,19 @@ export class Wallet {
 
   createUtxos(upTo: boolean, num: number | null, size: number | null, feeRate: number, skipSync = false): Promise<number> {
     return this.op('createUtxos', { upTo, num, size, feeRate, skipSync })
+  }
+
+  /** The path comes only from this wallet's transfer record for the exact owned invoice. */
+  checkedMint(recipientId: string, consignmentPath: string | null): Promise<CheckedMint | null> {
+    return this.op('checkedMint', { recipientId, consignmentPath })
+  }
+
+  previewCreateUtxos(num: number, size: number, feeRate: number): Promise<RgbUtxoPreview> {
+    return this.op('previewCreateUtxos', { num, size, feeRate })
+  }
+
+  finishCreateUtxos(psbt: string): Promise<number> {
+    return this.op('finishCreateUtxos', { psbt })
   }
 
   /** Fails pending transfers (one batch, or all eligible with null). True when any failed. */

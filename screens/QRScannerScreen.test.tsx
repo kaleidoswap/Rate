@@ -4,6 +4,8 @@ import { Clipboard, Animated, AppState } from 'react-native';
 import { useCameraPermissions, scanFromURLAsync } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import QRScannerScreen from './QRScannerScreen';
+import { pairWalletConnect } from '../services/webrgb/walletConnect';
+jest.mock('../services/webrgb/walletConnect', () => ({ pairWalletConnect: jest.fn() }));
 let mockFocused = true;
 jest.mock('@react-navigation/native', () => ({ useIsFocused: () => mockFocused, useFocusEffect: (cb: any) => require('react').useEffect(() => mockFocused ? cb() : undefined, [cb, mockFocused]) }));
 jest.mock('react-redux', () => ({ useSelector: (cb: any) => cb({ settings: { bitcoinUnit: 'sats' } }) }));
@@ -154,4 +156,28 @@ test('releases camera on blur and background, and returns with torch off', () =>
   mockFocused = true;
   screen.rerender(<QRScannerScreen navigation={navigation} />);
   expect(screen.UNSAFE_getByType('CameraView' as any)).toBeTruthy();
+});
+
+test('scanning a WalletConnect invitation pairs once and keeps its secret out of navigation state', async () => {
+  (useCameraPermissions as jest.Mock).mockReturnValue([{ granted: true }, jest.fn()]);
+  (pairWalletConnect as jest.Mock).mockResolvedValue(undefined);
+  const navigation = { navigate: jest.fn(), replace: jest.fn(), goBack: jest.fn() };
+  const screen = render(<QRScannerScreen navigation={navigation} />);
+  const scanned = screen.UNSAFE_getByType('CameraView' as any).props.onBarcodeScanned;
+  const uri = `wc:${'a'.repeat(64)}@2?relay-protocol=irn&symKey=${'b'.repeat(64)}`;
+  await act(async () => { await Promise.all([scanned({ data: uri }), scanned({ data: uri })]); });
+  expect(pairWalletConnect).toHaveBeenCalledTimes(1);
+  expect(pairWalletConnect).toHaveBeenCalledWith(uri);
+  expect(navigation.replace).toHaveBeenCalledWith('WebRgbConnections', { pairing: true });
+});
+
+test('a WalletConnect invitation is never forwarded as a contact', async () => {
+  const navigation = { navigate: jest.fn(), replace: jest.fn(), goBack: jest.fn() };
+  const screen = render(<QRScannerScreen navigation={navigation} route={{ params: { mode: 'contact' } }} />);
+  (Clipboard.getString as jest.Mock).mockResolvedValue('wc:topic@2?relay-protocol=irn&symKey=private');
+  await act(async () => { fireEvent.press(screen.getByText('Paste')); });
+  expect(screen.getByText(/Open Scan from the wallet to connect/)).toBeTruthy();
+  expect(pairWalletConnect).not.toHaveBeenCalled();
+  expect(navigation.navigate).not.toHaveBeenCalled();
+  expect(navigation.replace).not.toHaveBeenCalled();
 });

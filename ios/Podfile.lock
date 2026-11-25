@@ -1608,6 +1608,29 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
+  - react-native-compat (2.25.0):
+    - hermes-engine
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - Yoga
+    - YttriumWrapper (= 0.10.59)
   - react-native-get-random-values (1.11.0):
     - React-Core
   - react-native-netinfo (11.5.2):
@@ -2365,6 +2388,7 @@ PODS:
   - uniffi-bindgen-react-native (0.31.0-5):
     - React-Core
   - Yoga (0.0.0)
+  - YttriumWrapper (0.10.59)
   - ZXingObjC/Core (3.6.9)
   - ZXingObjC/OneD (3.6.9):
     - ZXingObjC/Core
@@ -2446,6 +2470,7 @@ DEPENDENCIES:
   - React-Mapbuffer (from `../node_modules/react-native/ReactCommon`)
   - React-microtasksnativemodule (from `../node_modules/react-native/ReactCommon/react/nativemodule/microtasks`)
   - react-native-bare-kit (from `../node_modules/react-native-bare-kit`)
+  - "react-native-compat (from `../node_modules/@walletconnect/react-native-compat`)"
   - react-native-get-random-values (from `../node_modules/react-native-get-random-values`)
   - "react-native-netinfo (from `../node_modules/@react-native-community/netinfo`)"
   - react-native-safe-area-context (from `../node_modules/react-native-safe-area-context`)
@@ -2496,6 +2521,7 @@ DEPENDENCIES:
 
 SPEC REPOS:
   trunk:
+    - YttriumWrapper
     - ZXingObjC
 
 EXTERNAL SOURCES:
@@ -2646,6 +2672,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/react-native/ReactCommon/react/nativemodule/microtasks"
   react-native-bare-kit:
     :path: "../node_modules/react-native-bare-kit"
+  react-native-compat:
+    :path: "../node_modules/@walletconnect/react-native-compat"
   react-native-get-random-values:
     :path: "../node_modules/react-native-get-random-values"
   react-native-netinfo:
@@ -2815,6 +2843,7 @@ SPEC CHECKSUMS:
   React-Mapbuffer: 90837747b018e7061eca67d45bc7e5dab93c4a06
   React-microtasksnativemodule: f86ccf2ec5f619f6df1dd06ae770c326e3eca0b8
   react-native-bare-kit: f0e0543f44af3c8e9b5476170246655713cebd96
+  react-native-compat: bfb38488a56639643570cebc01f3290d78484743
   react-native-get-random-values: d16467cf726c618e9c7a8c3c39c31faa2244bbba
   react-native-netinfo: f852c868bf5175e46165c7e4db48a204a95c3800
   react-native-safe-area-context: 37e680fc4cace3c0030ee46e8987d24f5d3bdab2
@@ -2862,6 +2891,7 @@ SPEC CHECKSUMS:
   UMAppLoader: 145337733539f9af9b3dd97eeaa7f3bd97cacb23
   uniffi-bindgen-react-native: 8517bbda6f998d066ef5de326b8774b5300bf1f6
   Yoga: 786fa7d9d2ff6060b4e688062243fa69c323d140
+  YttriumWrapper: 64983f0edbf609b800ac3074010224fc5341aaeb
   ZXingObjC: 8898711ab495761b2dbbdec76d90164a6d7e14c5
 
 PODFILE CHECKSUM: 1b911dc8f56729a1f20848545a0643fc0f4ce3ef
